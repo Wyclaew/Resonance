@@ -1,5 +1,6 @@
 mod audio;
 mod commands;
+mod spotify;
 mod ytdlp;
 
 use tauri::Manager;
@@ -129,8 +130,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::search_youtube,
             commands::import_playlist,
+            commands::import_spotify,
             commands::play_track,
             commands::download_audio,
+            commands::prefetch_audio,
             commands::delete_audio,
             commands::is_cached,
             commands::audio_status,

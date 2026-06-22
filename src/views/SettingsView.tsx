@@ -8,6 +8,7 @@ import {
   Database,
   Brain,
   Info,
+  ChevronDown,
 } from "lucide-react";
 import ViewHeader from "../components/ViewHeader";
 import Toggle from "../components/Toggle";
@@ -140,6 +141,92 @@ function AlgorithmSettings() {
   );
 }
 
+const BROWSERS = [
+  { v: "", label: "Kapalı" },
+  { v: "safari", label: "Safari" },
+  { v: "chrome", label: "Chrome" },
+  { v: "brave", label: "Brave" },
+  { v: "edge", label: "Edge" },
+  { v: "firefox", label: "Firefox" },
+  { v: "opera", label: "Opera" },
+  { v: "opera-gx", label: "Opera GX" },
+  { v: "vivaldi", label: "Vivaldi" },
+];
+
+function IntegrationsSettings() {
+  const cookiesBrowser = useSettingsStore((s) => s.cookiesBrowser);
+  const spotifyClientId = useSettingsStore((s) => s.spotifyClientId);
+  const spotifyClientSecret = useSettingsStore((s) => s.spotifyClientSecret);
+  const update = useSettingsStore((s) => s.update);
+
+  return (
+    <div className="max-w-2xl">
+      <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">
+        YouTube
+      </div>
+      <p className="mb-4 text-sm leading-relaxed text-muted">
+        YouTube, giriş yapılmadan bir çalma listesinin en fazla ~100 şarkısını
+        verir ve özel listelere izin vermez. Tarayıcını seçersen uygulama, o
+        tarayıcıdaki YouTube oturumunu (çerezleri) kullanır: <b className="text-text">tüm
+        şarkılar (100+)</b>, özel listelerin ve daha az bot engeli. Çerezler
+        cihazında kalır, hiçbir yere gönderilmez.
+      </p>
+      <SettingRow
+        label="Hesap için tarayıcı"
+        description="Hangi tarayıcıdaki YouTube oturumun kullanılsın? O tarayıcıda YouTube'a giriş yapmış olmalısın."
+      >
+        <div className="relative">
+          <select
+            value={cookiesBrowser}
+            onChange={(e) => update("cookiesBrowser", e.target.value)}
+            className="w-44 cursor-pointer appearance-none rounded-md border border-border bg-surface py-1.5 pl-3 pr-9 text-sm text-text outline-none transition-colors hover:border-border-strong focus:border-border-strong"
+          >
+            {BROWSERS.map((b) => (
+              <option key={b.v} value={b.v}>
+                {b.label}
+              </option>
+            ))}
+          </select>
+          <ChevronDown
+            size={15}
+            className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted"
+          />
+        </div>
+      </SettingRow>
+
+      <div className="mt-6 mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">
+        Spotify
+      </div>
+      <p className="mb-4 text-sm leading-relaxed text-muted">
+        Spotify'ın sesi alınamaz; bir Spotify listesini içe aktarınca şarkı
+        adları okunur ve <b className="text-text">YouTube'da eşleştirilip</b>{" "}
+        oradan çalınır. Bunun için tek seferlik <b className="text-text">ücretsiz</b>{" "}
+        bir Spotify API anahtarı gerekir:{" "}
+        <span className="text-accent">developer.spotify.com</span> → Dashboard →
+        Create app → Client ID ve Client Secret'ı buraya yapıştır (Redirect URI
+        zorunlu değil). Anahtarlar cihazında kalır.
+      </p>
+      <SettingRow label="Client ID" description="Spotify Developer Dashboard'dan">
+        <input
+          value={spotifyClientId}
+          onChange={(e) => update("spotifyClientId", e.target.value.trim())}
+          placeholder="örn. 4a1b…"
+          className="w-56 rounded-md border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:border-border-strong"
+        />
+      </SettingRow>
+      <SettingRow label="Client Secret" description="Gizli tut; kimseyle paylaşma.">
+        <input
+          type="password"
+          value={spotifyClientSecret}
+          onChange={(e) => update("spotifyClientSecret", e.target.value.trim())}
+          placeholder="••••••••"
+          className="w-56 rounded-md border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:border-border-strong"
+        />
+      </SettingRow>
+    </div>
+  );
+}
+
 export default function SettingsView() {
   const [active, setActive] = useState<CatId>("algorithm");
   const current = categories.find((c) => c.id === active)!;
@@ -172,6 +259,8 @@ export default function SettingsView() {
           <h2 className="mb-4 text-lg font-semibold">{current.label}</h2>
           {active === "algorithm" ? (
             <AlgorithmSettings />
+          ) : active === "integrations" ? (
+            <IntegrationsSettings />
           ) : (
             <p className="text-sm text-muted">
               Bu bölüm yakında detaylandırılacak (M6).

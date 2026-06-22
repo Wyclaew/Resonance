@@ -30,16 +30,41 @@ fn augmented_path() -> String {
     }
 }
 
-fn yt_dlp() -> Command {
+// cookies: kullanıcının Ayarlar'da seçtiği tarayıcı (ör. "safari", "chrome").
+// Verilirse --cookies-from-browser eklenir → YouTube girişiyle tam playlist
+// (>100 öğe) ve özel listelere erişim + bot engellerini azaltma.
+fn yt_dlp(cookies: Option<&str>) -> Command {
     let mut c = Command::new("yt-dlp");
     c.env("PATH", augmented_path());
+    if let Some(b) = cookies {
+        if !b.is_empty() {
+            // Opera GX ayrı bir profil dizininde durur; yt-dlp "opera" tipiyle
+            // birlikte o yolu vererek bulmasını sağlıyoruz.
+            let arg = if b == "opera-gx" {
+                match std::env::var_os("HOME") {
+                    Some(home) => format!(
+                        "opera:{}/Library/Application Support/com.operasoftware.OperaGX",
+                        home.to_string_lossy()
+                    ),
+                    None => "opera".to_string(),
+                }
+            } else {
+                b.to_string()
+            };
+            c.args(["--cookies-from-browser", &arg]);
+        }
+    }
     c
 }
 
 /// YouTube'da arama yapar ve düz (flat) sonuç listesi döndürür.
-pub fn search(query: &str, limit: u32) -> anyhow::Result<Vec<SearchResult>> {
+pub fn search(
+    query: &str,
+    limit: u32,
+    cookies: Option<&str>,
+) -> anyhow::Result<Vec<SearchResult>> {
     let spec = format!("ytsearch{}:{}", limit.max(1).min(50), query);
-    let out = yt_dlp()
+    let out = yt_dlp(cookies)
         .args([
             "--flat-playlist",
             "--dump-json",
@@ -108,11 +133,12 @@ fn entry_to_result(v: &serde_json::Value) -> Option<SearchResult> {
 pub struct PlaylistMeta {
     pub title: String,
     pub tracks: Vec<SearchResult>,
+    pub total: u64, // listenin gerçek şarkı sayısı (yt-dlp playlist_count)
 }
 
 /// Bir YouTube / YouTube Music çalma listesi URL'inden başlık + şarkıları çıkarır.
-pub fn playlist_meta(url: &str) -> anyhow::Result<PlaylistMeta> {
-    let out = yt_dlp()
+pub fn playlist_meta(url: &str, cookies: Option<&str>) -> anyhow::Result<PlaylistMeta> {
+    let out = yt_dlp(cookies)
         .args([
             "--flat-playlist",
             "--dump-single-json",
@@ -147,51 +173,127 @@ pub fn playlist_meta(url: &str) -> anyhow::Result<PlaylistMeta> {
     if tracks.is_empty() {
         anyhow::bail!("Bu bağlantıda şarkı bulunamadı (geçerli bir çalma listesi mi?)");
     }
-    Ok(PlaylistMeta { title, tracks })
+    let total = v
+        .get("playlist_count")
+        .and_then(|x| x.as_u64())
+        .unwrap_or(tracks.len() as u64);
+    Ok(PlaylistMeta {
+        title,
+        tracks,
+        total,
+    })
+}
+
+fn ffmpeg() -> Command {
+    let mut c = Command::new("ffmpeg");
+    c.env("PATH", augmented_path());
+    c
+}
+
+// İndirilen geçici kaynak dosyasını (<id>.src.<ext>) bulur.
+fn find_src(cache_dir: &Path, video_id: &str) -> Option<PathBuf> {
+    let prefix = format!("{video_id}.src.");
+    for e in std::fs::read_dir(cache_dir).ok()?.flatten() {
+        if e.file_name().to_string_lossy().starts_with(&prefix) {
+            return Some(e.path());
+        }
+    }
+    None
 }
 
 /// Videonun sesini cache'e indirir (varsa indirmeden döner). Yol döndürür.
-pub fn ensure_audio(cache_dir: &Path, video_id: &str) -> anyhow::Result<PathBuf> {
+///
+/// Hız için: bestaudio (m4a) indirilir ve ffmpeg ile YENİDEN KODLAMADAN
+/// (-c:a copy) ADTS .aac'ye remux edilir (~0.1sn). Bu, mp3 dönüşümünün
+/// (~2sn) maliyetini kaldırır ve rodio'nun m4a/MP4 başlatma paniğini önler
+/// (panik MP4 konteynerinde; ADTS akışında yok). m4a değilse (opus/webm)
+/// aac'ye transcode'a düşülür.
+pub fn ensure_audio(
+    cache_dir: &Path,
+    video_id: &str,
+    cookies: Option<&str>,
+) -> anyhow::Result<PathBuf> {
     std::fs::create_dir_all(cache_dir)?;
     if let Some(p) = find_cached(cache_dir, video_id) {
         return Ok(p);
     }
 
     let url = format!("https://www.youtube.com/watch?v={video_id}");
-    let out_tmpl = cache_dir.join(format!("{video_id}.%(ext)s"));
+    let dl_tmpl = cache_dir.join(format!("{video_id}.src.%(ext)s"));
 
-    // mp3'e dönüştürüyoruz: rodio/symphonia mp3'ü güvenilir çözer (m4a/MP4
-    // başlatmada panikliyor) ve bu, opus dahil tüm YouTube formatlarını
-    // tek tip hale getirir. Tek seferlik dönüşüm; sonuç cache'lenir.
-    let status = yt_dlp()
+    let status = yt_dlp(cookies)
         .args([
             "-f",
-            "bestaudio/best",
-            "-x",
-            "--audio-format",
-            "mp3",
-            "--audio-quality",
-            "0", // LAME V0 (~245 kbps VBR)
+            "bestaudio[ext=m4a]/bestaudio",
+            "-N",
+            "4", // paralel parça indirme — daha hızlı
             "--no-playlist",
             "--no-warnings",
+            "--no-part",
             "-o",
-            out_tmpl.to_str().unwrap(),
+            dl_tmpl.to_str().unwrap(),
             "--",
             &url,
         ])
         .status()?;
-
     if !status.success() {
         anyhow::bail!("yt-dlp ses indirme başarısız ({video_id})");
     }
 
-    find_cached(cache_dir, video_id)
-        .ok_or_else(|| anyhow::anyhow!("indirilen ses dosyası bulunamadı ({video_id})"))
+    let src = find_src(cache_dir, video_id)
+        .ok_or_else(|| anyhow::anyhow!("indirilen kaynak bulunamadı ({video_id})"))?;
+    let target = cache_dir.join(format!("{video_id}.aac"));
+
+    // 1) Hızlı yol: AAC akışını kopyalayarak ADTS'ye remux et.
+    let copied = ffmpeg()
+        .args([
+            "-y",
+            "-v",
+            "error",
+            "-i",
+            src.to_str().unwrap(),
+            "-c:a",
+            "copy",
+            "-f",
+            "adts",
+            target.to_str().unwrap(),
+        ])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+
+    // 2) Kaynak AAC değilse (opus/webm) aac'ye transcode et.
+    if !copied || !target.exists() {
+        let _ = std::fs::remove_file(&target);
+        ffmpeg()
+            .args([
+                "-y",
+                "-v",
+                "error",
+                "-i",
+                src.to_str().unwrap(),
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                "-f",
+                "adts",
+                target.to_str().unwrap(),
+            ])
+            .status()?;
+    }
+
+    let _ = std::fs::remove_file(&src);
+    if target.exists() {
+        Ok(target)
+    } else {
+        anyhow::bail!("ses dönüştürme başarısız ({video_id})");
+    }
 }
 
 fn find_cached(cache_dir: &Path, video_id: &str) -> Option<PathBuf> {
-    // mp3 önce: standart indirme biçimimiz bu.
-    let exts = ["mp3", "m4a", "aac", "flac", "ogg", "wav", "webm"];
+    // aac önce: yeni standart biçimimiz (mp3 eski indirmeler için).
+    let exts = ["aac", "mp3", "m4a", "opus", "ogg", "flac", "wav", "webm"];
     for ext in exts {
         let p = cache_dir.join(format!("{video_id}.{ext}"));
         if p.exists() {

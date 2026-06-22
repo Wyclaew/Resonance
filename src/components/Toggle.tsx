@@ -4,7 +4,7 @@ interface ToggleProps {
   disabled?: boolean;
 }
 
-// Sade aç/kapa anahtarı.
+// Sade, net aç/kapa anahtarı (beyaz topuzlu).
 export default function Toggle({ checked, onChange, disabled }: ToggleProps) {
   return (
     <button
@@ -12,13 +12,13 @@ export default function Toggle({ checked, onChange, disabled }: ToggleProps) {
       aria-checked={checked}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative h-6 w-10 shrink-0 rounded-full transition-colors disabled:opacity-40 ${
+      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-40 ${
         checked ? "bg-accent" : "bg-surface-3"
       }`}
     >
       <span
-        className={`absolute top-0.5 h-5 w-5 rounded-full bg-bg transition-transform ${
-          checked ? "translate-x-[1.125rem]" : "translate-x-0.5"
+        className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform ${
+          checked ? "translate-x-[1.125rem]" : "translate-x-1"
         }`}
       />
     </button>

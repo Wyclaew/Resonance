@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { Download, Link2, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import ViewHeader from "../components/ViewHeader";
 import type { Track } from "../types";
 import { usePlaylistStore } from "../store/usePlaylistStore";
 import { useAppStore } from "../store/useAppStore";
+import { useSettingsStore } from "../store/useSettingsStore";
 import { importTracks } from "../lib/playlists";
 import { isShareCode, decodePlaylist } from "../lib/share";
 import { isTauri } from "../lib/db";
@@ -36,16 +38,26 @@ export default function ImportView() {
   const [status, setStatus] = useState<Status>("idle");
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ name: string; count: number; id: string } | null>(null);
+  const [phase, setPhase] = useState<"matching" | "adding">("adding");
+  const [result, setResult] = useState<{
+    name: string;
+    count: number;
+    id: string;
+    total: number;
+  } | null>(null);
 
   const create = usePlaylistStore((s) => s.create);
   const refreshPlaylists = usePlaylistStore((s) => s.refresh);
   const navigate = useAppStore((s) => s.navigate);
+  const cookiesBrowser = useSettingsStore((s) => s.cookiesBrowser);
+  const spotifyClientId = useSettingsStore((s) => s.spotifyClientId);
+  const spotifyClientSecret = useSettingsStore((s) => s.spotifyClientSecret);
 
   const detected = detectSource(url);
   const busy = status === "loading" || status === "importing";
 
-  async function runImport(name: string, tracks: Track[]) {
+  async function runImport(name: string, tracks: Track[], total?: number) {
+    setPhase("adding");
     setStatus("importing");
     setProgress({ done: 0, total: tracks.length });
     const p = await create(name);
@@ -54,9 +66,9 @@ export default function ImportView() {
       setStatus("idle");
       return;
     }
-    await importTracks(p.id, tracks, (done, total) => setProgress({ done, total }));
+    await importTracks(p.id, tracks, (done, t) => setProgress({ done, total: t }));
     await refreshPlaylists();
-    setResult({ name, count: tracks.length, id: p.id });
+    setResult({ name, count: tracks.length, id: p.id, total: total ?? tracks.length });
     setStatus("done");
   }
 
@@ -75,19 +87,49 @@ export default function ImportView() {
       return;
     }
     if (detected === "spotify") {
-      setError(
-        "Spotify içe aktarma sonraki sürümde gel: Ayarlar → Entegrasyonlar'dan ücretsiz API anahtarı girilecek."
+      if (!spotifyClientId || !spotifyClientSecret) {
+        setError(
+          "Spotify için önce Ayarlar → Entegrasyonlar'dan ücretsiz Client ID ve Secret gir."
+        );
+        return;
+      }
+      setStatus("loading");
+      setPhase("matching");
+      const unlisten = await listen<{ done: number; total: number }>(
+        "spotify-progress",
+        (e) => {
+          setStatus("importing");
+          setPhase("matching");
+          setProgress({ done: e.payload.done, total: e.payload.total });
+        }
       );
+      try {
+        const res = await invoke<{ name: string; tracks: Track[]; total: number }>(
+          "import_spotify",
+          {
+            url: text,
+            clientId: spotifyClientId,
+            clientSecret: spotifyClientSecret,
+            cookiesBrowser,
+          }
+        );
+        unlisten();
+        await runImport(res.name, res.tracks, res.total);
+      } catch (e) {
+        unlisten();
+        setError(String(e));
+        setStatus("idle");
+      }
       return;
     }
     if (detected === "youtube" || detected === "ytmusic") {
       setStatus("loading");
       try {
-        const meta = await invoke<{ title: string; tracks: Track[] }>(
+        const meta = await invoke<{ title: string; tracks: Track[]; total: number }>(
           "import_playlist",
-          { url: text }
+          { url: text, cookiesBrowser }
         );
-        await runImport(meta.title, meta.tracks);
+        await runImport(meta.title, meta.tracks, meta.total);
       } catch (e) {
         setError(String(e));
         setStatus("idle");
@@ -150,7 +192,11 @@ export default function ImportView() {
         {status === "importing" && (
           <div className="mt-4">
             <div className="mb-1.5 flex items-center justify-between text-xs text-muted">
-              <span>Şarkılar ekleniyor…</span>
+              <span>
+                {phase === "matching"
+                  ? "YouTube'da eşleştiriliyor…"
+                  : "Şarkılar ekleniyor…"}
+              </span>
               <span className="tnum">
                 {progress.done} / {progress.total}
               </span>
@@ -177,6 +223,17 @@ export default function ImportView() {
             >
               Listeyi aç
             </button>
+          </div>
+        )}
+        {status === "done" && result && result.total > result.count && (
+          <div className="mt-2 flex items-start gap-2 rounded-lg border border-accent/30 bg-accent/10 px-4 py-3 text-sm text-accent">
+            <AlertCircle size={16} className="mt-0.5 shrink-0" />
+            <span>
+              Bu listede {result.total} şarkı var ama {result.count} tanesi
+              alınabildi. YouTube giriş yapılmadan en fazla ~100 şarkı veriyor
+              (ya da liste özel). Tümünü almak için Ayarlar → Entegrasyonlar'dan
+              YouTube tarayıcını seç, sonra tekrar dene.
+            </span>
           </div>
         )}
         {error && (

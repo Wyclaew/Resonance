@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Track } from "../types";
 import { isTauri } from "../lib/db";
 import * as lib from "../lib/library";
+import { useSettingsStore } from "./useSettingsStore";
 
 // İndirilenler kütüphanesi. downloadedIds hızlı arama için (ikon göstergesi),
 // downloads listesi "İndirilenler" görünümü için.
@@ -53,6 +54,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     try {
       const file = await invoke<DownloadResult>("download_audio", {
         sourceId: track.sourceId,
+        cookiesBrowser: useSettingsStore.getState().cookiesBrowser,
       });
       await lib.addDownload(track, file);
       set((s) => {

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Track } from "../types";
 import { getDb, isTauri } from "./db";
 import { decayWeight } from "./karma";
+import { useSettingsStore } from "../store/useSettingsStore";
 
 // Resonance öneri motoru (M4).
 // "Hangi gün/saat hangi şarkıya oy verdin" sinyalinden sanatçı yakınlığı
@@ -167,6 +168,7 @@ export async function getRecommendations(
         const results = await invoke<Track[]>("search_youtube", {
           query: `${seed} songs`,
           limit: 8,
+          cookiesBrowser: useSettingsStore.getState().cookiesBrowser,
         });
         let added = 0;
         for (const r of results) {

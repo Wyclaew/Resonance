@@ -30,7 +30,7 @@ Gereksinimler: Node, Rust, `yt-dlp`, `ffmpeg`.
 | M2 | Kütüphane & çalma listeleri | ✅ |
 | M3 | Karma (upvote/downvote + decay) | ✅ |
 | M4 | Öğrenen öneri algoritması | ✅ |
-| M5 | İçe aktarma (Spotify / YouTube Music) | |
+| M5 | İçe aktarma (Spotify / YouTube Music) | ✅ |
 | M6 | Detaylı ayarlar | |
 | M7 | Ekstralar (sözler, mini player, hotkey, EQ) | |
 | M8 | Paketleme & CI (dmg + exe) | |

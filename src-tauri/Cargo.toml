@@ -30,6 +30,12 @@ tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 # sorunlarını aşar ve CPU'yu Rust'ta tutar.
 rodio = { version = "0.20", features = ["symphonia-all"] }
 anyhow = "1"
+# Spotify Web API (metadata) için HTTP — rustls (OpenSSL sistem bağımlılığı yok).
+reqwest = { version = "0.12", default-features = false, features = [
+    "blocking",
+    "json",
+    "rustls-tls",
+] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2"

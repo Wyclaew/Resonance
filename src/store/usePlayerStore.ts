@@ -71,10 +71,23 @@ function loadAndPlay(item: QueueItem) {
       durationMs: item.durationMs,
       trackId: item.id,
     },
+    cookiesBrowser: useSettingsStore.getState().cookiesBrowser,
   }).catch((e) => {
     console.error("[resonance] play_track hatası:", e);
     usePlayerStore.setState({ status: "idle", error: String(e) });
   });
+}
+
+// Sıradaki parçayı arka planda indir/hazırla → "sonraki"ye geçiş anlık olur.
+function prefetchNext() {
+  if (!isTauri()) return;
+  const { queue, queueIndex } = usePlayerStore.getState();
+  const nextItem = queue[queueIndex + 1];
+  if (!nextItem) return;
+  invoke("prefetch_audio", {
+    sourceId: nextItem.sourceId,
+    cookiesBrowser: useSettingsStore.getState().cookiesBrowser,
+  }).catch(() => {});
 }
 
 // Çıkan parçayı geçmişe yaz + erken geçilen öneriye yumuşak ceza.
@@ -126,6 +139,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       error: null,
     });
     loadAndPlay(current);
+    prefetchNext();
   },
 
   startRadio: async (tracks, playlistId) => {
@@ -147,6 +161,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       error: null,
     });
     loadAndPlay(first);
+    prefetchNext();
 
     // Önerileri arka planda getir ve kuyruğa serpiştir (oynatmayı bekletmeden).
     if (!s.recEnabled || (!s.recYouTube && !s.recLibrary)) return;
@@ -248,6 +263,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       durationMs: item.durationMs,
     });
     loadAndPlay(item);
+    prefetchNext();
   },
 
   prev: () => {
@@ -268,6 +284,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       durationMs: item.durationMs,
     });
     loadAndPlay(item);
+    prefetchNext();
   },
 
   seek: (ms) => {

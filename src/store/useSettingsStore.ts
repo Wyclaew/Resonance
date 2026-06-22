@@ -10,6 +10,9 @@ export interface Settings {
   recLibrary: boolean; // öneri kaynağı: kendi playlistlerin/indirdiklerin
   recEveryN: number; // kaç şarkıda bir öneri eklensin
   karmaHalfLifeDays: number; // karma decay yarı ömrü
+  cookiesBrowser: string; // YouTube girişi için tarayıcı ("" = kapalı)
+  spotifyClientId: string; // Spotify API client_id
+  spotifyClientSecret: string; // Spotify API client_secret
 }
 
 const DEFAULTS: Settings = {
@@ -18,6 +21,9 @@ const DEFAULTS: Settings = {
   recLibrary: true,
   recEveryN: 3,
   karmaHalfLifeDays: DEFAULT_HALF_LIFE_DAYS,
+  cookiesBrowser: "",
+  spotifyClientId: "",
+  spotifyClientSecret: "",
 };
 
 // Ayar alanı ↔ DB anahtarı eşlemesi.
@@ -27,6 +33,9 @@ const KEYS: Record<keyof Settings, string> = {
   recLibrary: "rec.source.library",
   recEveryN: "rec.everyN",
   karmaHalfLifeDays: "karma.halfLifeDays",
+  cookiesBrowser: "yt.cookiesBrowser",
+  spotifyClientId: "spotify.clientId",
+  spotifyClientSecret: "spotify.clientSecret",
 };
 
 interface SettingsState extends Settings {
@@ -52,8 +61,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         if (v === undefined) return;
         if (typeof DEFAULTS[k] === "boolean") {
           (next as any)[k] = v === "1" || v === "true";
-        } else {
+        } else if (typeof DEFAULTS[k] === "number") {
           (next as any)[k] = Number(v);
+        } else {
+          (next as any)[k] = v;
         }
       });
       set({ ...next, ready: true });
