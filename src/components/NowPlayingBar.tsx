@@ -10,9 +10,11 @@ import {
   VolumeX,
   Volume1,
   Music2,
+  Sparkles,
 } from "lucide-react";
 import { usePlayerStore } from "../store/usePlayerStore";
 import { formatMs } from "../lib/format";
+import AddToPlaylistButton from "./AddToPlaylistButton";
 
 function VolumeIcon({ volume, muted }: { volume: number; muted: boolean }) {
   if (muted || volume === 0) return <VolumeX size={17} />;
@@ -59,6 +61,18 @@ export default function NowPlayingBar() {
           )}
         </div>
         <div className="min-w-0">
+          {current?.isRecommendation && (
+            <div
+              className="mb-0.5 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-accent"
+              title={current.recReason}
+            >
+              <Sparkles size={11} />
+              <span className="truncate">
+                Resonance önerisi
+                {current.recReason ? ` · ${current.recReason}` : ""}
+              </span>
+            </div>
+          )}
           <div className="truncate text-sm font-medium">
             {current?.title ?? "Çalmıyor"}
           </div>
@@ -66,6 +80,9 @@ export default function NowPlayingBar() {
             {current?.artist ?? "Bir şarkı ara ve oynat"}
           </div>
         </div>
+        {current?.isRecommendation && (
+          <AddToPlaylistButton track={current} always openUp />
+        )}
       </div>
 
       {/* Orta: kontroller + ilerleme */}

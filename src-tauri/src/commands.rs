@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::audio::{AudioCmd, AudioHandle};
-use crate::ytdlp::{self, SearchResult};
+use crate::ytdlp::{self, PlaylistMeta, SearchResult};
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,6 +29,15 @@ pub async fn search_youtube(
 ) -> Result<Vec<SearchResult>, String> {
     let limit = limit.unwrap_or(20);
     tauri::async_runtime::spawn_blocking(move || ytdlp::search(&query, limit))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+/// YouTube / YouTube Music çalma listesi URL'inden başlık + şarkıları çıkarır.
+#[tauri::command]
+pub async fn import_playlist(url: String) -> Result<PlaylistMeta, String> {
+    tauri::async_runtime::spawn_blocking(move || ytdlp::playlist_meta(&url))
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())

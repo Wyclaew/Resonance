@@ -1,5 +1,6 @@
 import type { Track } from "../types";
 import { getDb } from "./db";
+import { ensureTrack } from "./playlists";
 
 // İndirilenler & kütüphane için SQLite yardımcıları.
 // "downloaded=1" kullanıcının açıkça indirdiği kalıcı parçalar.
@@ -13,22 +14,9 @@ interface FileInfo {
 export async function addDownload(track: Track, file: FileInfo): Promise<void> {
   const db = await getDb();
   const now = Date.now();
-  await db.execute(
-    `INSERT OR REPLACE INTO tracks
-       (id, source, source_id, title, artist, album, duration_ms, thumbnail, added_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-    [
-      track.id,
-      track.source,
-      track.sourceId,
-      track.title,
-      track.artist,
-      track.album ?? null,
-      track.durationMs,
-      track.thumbnail ?? null,
-      track.addedAt ?? now,
-    ]
-  );
+  // ensureTrack: ON CONFLICT DO UPDATE (silmez → cascade tetiklenmez).
+  await ensureTrack(track);
+  // cache PK track_id; buradan kimse cascade almıyor, REPLACE güvenli.
   await db.execute(
     `INSERT OR REPLACE INTO cache
        (track_id, file_path, bytes, format, last_played, downloaded)

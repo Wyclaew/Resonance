@@ -66,38 +66,88 @@ pub fn search(query: &str, limit: u32) -> anyhow::Result<Vec<SearchResult>> {
             Ok(v) => v,
             Err(_) => continue,
         };
-        let id = v
-            .get("id")
-            .and_then(|x| x.as_str())
-            .unwrap_or_default()
-            .to_string();
-        if id.is_empty() {
-            continue;
+        if let Some(r) = entry_to_result(&v) {
+            results.push(r);
         }
-        let title = v
-            .get("title")
-            .and_then(|x| x.as_str())
-            .unwrap_or("Bilinmeyen")
-            .to_string();
-        let artist = v
-            .get("uploader")
-            .or_else(|| v.get("channel"))
-            .and_then(|x| x.as_str())
-            .unwrap_or("")
-            .to_string();
-        let dur = v.get("duration").and_then(|x| x.as_f64()).unwrap_or(0.0);
-
-        results.push(SearchResult {
-            id: format!("youtube:{id}"),
-            source: "youtube".into(),
-            source_id: id.clone(),
-            title,
-            artist: clean_artist(&artist),
-            duration_ms: (dur * 1000.0) as u64,
-            thumbnail: Some(best_thumb(&v, &id)),
-        });
     }
     Ok(results)
+}
+
+// Tek bir flat-playlist/arama girdisini SearchResult'a çevirir.
+fn entry_to_result(v: &serde_json::Value) -> Option<SearchResult> {
+    let id = v.get("id").and_then(|x| x.as_str()).unwrap_or_default();
+    if id.is_empty() {
+        return None;
+    }
+    let title = v
+        .get("title")
+        .and_then(|x| x.as_str())
+        .unwrap_or("Bilinmeyen")
+        .to_string();
+    let artist = v
+        .get("uploader")
+        .or_else(|| v.get("channel"))
+        .or_else(|| v.get("artist"))
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    let dur = v.get("duration").and_then(|x| x.as_f64()).unwrap_or(0.0);
+    Some(SearchResult {
+        id: format!("youtube:{id}"),
+        source: "youtube".into(),
+        source_id: id.to_string(),
+        title,
+        artist: clean_artist(&artist),
+        duration_ms: (dur * 1000.0) as u64,
+        thumbnail: Some(best_thumb(v, id)),
+    })
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistMeta {
+    pub title: String,
+    pub tracks: Vec<SearchResult>,
+}
+
+/// Bir YouTube / YouTube Music çalma listesi URL'inden başlık + şarkıları çıkarır.
+pub fn playlist_meta(url: &str) -> anyhow::Result<PlaylistMeta> {
+    let out = yt_dlp()
+        .args([
+            "--flat-playlist",
+            "--dump-single-json",
+            "--no-warnings",
+            "--ignore-errors",
+            url,
+        ])
+        .output()?;
+
+    if out.stdout.is_empty() {
+        anyhow::bail!(
+            "Çalma listesi okunamadı: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout)?;
+    let title = v
+        .get("title")
+        .and_then(|x| x.as_str())
+        .unwrap_or("İçe aktarılan liste")
+        .to_string();
+
+    let mut tracks = Vec::new();
+    if let Some(entries) = v.get("entries").and_then(|e| e.as_array()) {
+        for e in entries {
+            if let Some(r) = entry_to_result(e) {
+                tracks.push(r);
+            }
+        }
+    }
+    if tracks.is_empty() {
+        anyhow::bail!("Bu bağlantıda şarkı bulunamadı (geçerli bir çalma listesi mi?)");
+    }
+    Ok(PlaylistMeta { title, tracks })
 }
 
 /// Videonun sesini cache'e indirir (varsa indirmeden döner). Yol döndürür.

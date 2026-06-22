@@ -6,6 +6,18 @@ export const DEFAULT_HALF_LIFE_DAYS = 30;
 
 const DAY_MS = 86_400_000;
 
+// Şarkı başına saatte 1 oy: aynı (playlist, şarkı) için iki oy arası bekleme.
+export const VOTE_COOLDOWN_MS = 60 * 60 * 1000;
+
+// Cooldown bitene kalan süre (ms). 0 ise oy verilebilir.
+export function cooldownRemaining(
+  lastVoteAt: number | undefined,
+  now = Date.now()
+): number {
+  if (!lastVoteAt) return 0;
+  return Math.max(0, lastVoteAt + VOTE_COOLDOWN_MS - now);
+}
+
 export interface VoteEvent {
   value: number;
   createdAt: number;

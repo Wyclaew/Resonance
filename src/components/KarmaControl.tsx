@@ -1,47 +1,69 @@
+import { useEffect, useState } from "react";
 import { ArrowBigUp, ArrowBigDown } from "lucide-react";
-import { displayKarma } from "../lib/karma";
-import type { Vote } from "../types";
+import { displayKarma, cooldownRemaining } from "../lib/karma";
 
 interface Props {
-  vote: Vote;
   karma: number;
+  lastVoteAt?: number;
   onVote: (dir: 1 | -1) => void;
 }
 
-// Çalma listesi içinde şarkı başına Reddit tarzı karma oylaması.
-export default function KarmaControl({ vote, karma, onVote }: Props) {
+// Biriken karma oylaması: her up +1, down -1. Şarkı başına saatte 1 (cooldown).
+export default function KarmaControl({ karma, lastVoteAt, onVote }: Props) {
+  const [now, setNow] = useState(Date.now());
+  const remaining = cooldownRemaining(lastVoteAt, now);
+  const onCooldown = remaining > 0;
+
+  // Cooldown sürerken geri sayımı tazele.
+  useEffect(() => {
+    if (!onCooldown) return;
+    const id = setInterval(() => setNow(Date.now()), 20_000);
+    return () => clearInterval(id);
+  }, [onCooldown]);
+
   const display = displayKarma(karma);
   const color =
     display > 0 ? "text-up" : display < 0 ? "text-down" : "text-muted";
+  const mins = Math.ceil(remaining / 60_000);
+  const tip = onCooldown
+    ? `Şarkı başına saatte 1 oy — ${mins} dk sonra tekrar`
+    : "Bu listede bu şarkıyı oyla";
+
+  function vote(dir: 1 | -1, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!onCooldown) onVote(dir);
+  }
 
   return (
-    <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="flex items-center gap-0.5"
+      title={tip}
+      onClick={(e) => e.stopPropagation()}
+    >
       <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onVote(1);
-        }}
-        title="Upvote"
-        className={`grid h-7 w-6 place-items-center rounded transition-colors hover:bg-surface-3 ${
-          vote === 1 ? "text-up" : "text-faint hover:text-up"
+        onClick={(e) => vote(1, e)}
+        disabled={onCooldown}
+        className={`grid h-7 w-6 place-items-center rounded transition-colors ${
+          onCooldown
+            ? "cursor-default text-faint/40"
+            : "text-faint hover:bg-surface-3 hover:text-up"
         }`}
       >
-        <ArrowBigUp size={17} fill={vote === 1 ? "currentColor" : "none"} />
+        <ArrowBigUp size={17} />
       </button>
-      <span className={`tnum w-6 text-center text-xs font-medium ${color}`}>
+      <span className={`tnum w-7 text-center text-xs font-medium ${color}`}>
         {display}
       </span>
       <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onVote(-1);
-        }}
-        title="Downvote"
-        className={`grid h-7 w-6 place-items-center rounded transition-colors hover:bg-surface-3 ${
-          vote === -1 ? "text-down" : "text-faint hover:text-down"
+        onClick={(e) => vote(-1, e)}
+        disabled={onCooldown}
+        className={`grid h-7 w-6 place-items-center rounded transition-colors ${
+          onCooldown
+            ? "cursor-default text-faint/40"
+            : "text-faint hover:bg-surface-3 hover:text-down"
         }`}
       >
-        <ArrowBigDown size={17} fill={vote === -1 ? "currentColor" : "none"} />
+        <ArrowBigDown size={17} />
       </button>
     </div>
   );

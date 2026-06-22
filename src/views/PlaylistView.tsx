@@ -7,11 +7,15 @@ import {
   Check,
   Flame,
   ListOrdered,
+  Radio,
+  Share2,
+  Copy,
 } from "lucide-react";
 import ViewHeader from "../components/ViewHeader";
 import TrackRow from "../components/TrackRow";
 import KarmaControl from "../components/KarmaControl";
 import type { Playlist, PlaylistTrack } from "../types";
+import { encodePlaylist } from "../lib/share";
 import { usePlayerStore } from "../store/usePlayerStore";
 import { usePlaylistStore } from "../store/usePlaylistStore";
 import { useAppStore } from "../store/useAppStore";
@@ -25,6 +29,8 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
   const [editing, setEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [sortMode, setSortMode] = useState<"manual" | "karma">("manual");
   const dragIndex = useRef<number | null>(null);
   const [dragging, setDragging] = useState<number | null>(null);
@@ -32,6 +38,7 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
   const current = usePlayerStore((s) => s.current);
   const status = usePlayerStore((s) => s.status);
   const playNow = usePlayerStore((s) => s.playNow);
+  const startRadio = usePlayerStore((s) => s.startRadio);
 
   const rename = usePlaylistStore((s) => s.rename);
   const removePlaylist = usePlaylistStore((s) => s.remove);
@@ -79,17 +86,16 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
 
   async function handleVote(track: PlaylistTrack, dir: 1 | -1) {
     if (!playlistId) return;
-    const newVote = track.myVote === dir ? 0 : dir;
-    const delta = newVote - track.myVote;
-    // Anlık (optimistik) güncelleme; taze oyun decay ağırlığı ≈ 1.
+    const res = await pl.voteTrack(playlistId, track.id, dir);
+    if (!res.ok) return; // cooldown — KarmaControl zaten engelliyor
+    // Biriken model: taze oyun decay ağırlığı ≈ 1, yani karma += yön.
     setTracks((ts) =>
       ts.map((t) =>
         t.id === track.id
-          ? { ...t, myVote: newVote, karma: t.karma + delta }
+          ? { ...t, karma: t.karma + dir, lastVoteAt: Date.now(), myVote: dir }
           : t
       )
     );
-    await pl.voteTrack(playlistId, track.id, dir);
   }
 
   // Görüntüleme sırası: elle (pozisyon) ya da karmaya göre.
@@ -173,6 +179,14 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
             <Play size={16} fill="currentColor" /> Oynat
           </button>
           <button
+            onClick={() => tracks.length && startRadio(tracks, playlistId)}
+            disabled={tracks.length === 0}
+            title="Resonance Radyosu — karma sıralı, araya öneriler"
+            className="mr-1 flex items-center gap-2 rounded-full border border-accent/50 px-3.5 py-2 text-sm font-medium text-accent transition-colors hover:bg-accent/10 disabled:opacity-30"
+          >
+            <Radio size={16} /> Radyo
+          </button>
+          <button
             onClick={() =>
               setSortMode((m) => (m === "manual" ? "karma" : "manual"))
             }
@@ -203,6 +217,17 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
             className="grid h-9 w-9 place-items-center rounded-md text-muted hover:bg-surface hover:text-text"
           >
             <Pencil size={16} />
+          </button>
+          <button
+            onClick={() => {
+              setCopied(false);
+              setShareOpen(true);
+            }}
+            disabled={tracks.length === 0}
+            title="Paylaş"
+            className="grid h-9 w-9 place-items-center rounded-md text-muted hover:bg-surface hover:text-text disabled:opacity-30"
+          >
+            <Share2 size={16} />
           </button>
           <button
             onClick={() => setConfirmDelete(true)}
@@ -242,8 +267,8 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
               onDragEnd={onDragEnd}
               trailing={
                 <KarmaControl
-                  vote={t.myVote}
                   karma={t.karma}
+                  lastVoteAt={t.lastVoteAt}
                   onVote={(dir) => handleVote(t, dir)}
                 />
               }
@@ -278,6 +303,54 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
                 className="flex items-center gap-1.5 rounded-md bg-down px-3 py-1.5 text-sm font-medium text-bg hover:opacity-90"
               >
                 <Check size={15} /> Sil
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Paylaşım kodu */}
+      {shareOpen && (
+        <div
+          className="absolute inset-0 z-50 grid place-items-center bg-black/50"
+          onClick={() => setShareOpen(false)}
+        >
+          <div
+            className="w-[28rem] max-w-[90%] rounded-lg border border-border bg-surface-2 p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-semibold">Çalma listesini paylaş</h3>
+            <p className="mt-1 text-sm text-muted">
+              Bu kodu kopyalayıp paylaş. Karşı taraf "İçe Aktar"a yapıştırıp
+              listenin kopyasını alır.
+            </p>
+            <textarea
+              readOnly
+              value={encodePlaylist(meta?.name ?? "Liste", tracks)}
+              onFocus={(e) => e.currentTarget.select()}
+              className="mt-3 h-28 w-full resize-none rounded-md border border-border bg-surface px-3 py-2 font-mono text-xs text-muted outline-none"
+            />
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                onClick={() => setShareOpen(false)}
+                className="rounded-md px-3 py-1.5 text-sm text-muted hover:bg-surface hover:text-text"
+              >
+                Kapat
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(
+                      encodePlaylist(meta?.name ?? "Liste", tracks)
+                    );
+                    setCopied(true);
+                  } catch {
+                    /* pano erişimi yoksa kullanıcı elle seçip kopyalar */
+                  }
+                }}
+                className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-bg hover:opacity-90"
+              >
+                <Copy size={15} /> {copied ? "Kopyalandı" : "Kopyala"}
               </button>
             </div>
           </div>

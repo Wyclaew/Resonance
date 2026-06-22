@@ -98,6 +98,14 @@ textarea {
   outline-offset: 1px;
 }
 
+/* Metin kutularında sarı odak çerçevesi olmasın (sarmalayıcı kenarı yeterli) */
+input:focus,
+input:focus-visible,
+textarea:focus,
+textarea:focus-visible {
+  outline: none;
+}
+
 /* İlerleme / ses kaydırıcıları — özel, ince, kehribar dolgulu */
 .resonance-range {
   -webkit-appearance: none;

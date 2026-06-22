@@ -4,7 +4,15 @@ import type { Track } from "../types";
 import { usePlaylistStore } from "../store/usePlaylistStore";
 
 // Şarkıyı bir çalma listesine ekleyen küçük açılır menü.
-export default function AddToPlaylistButton({ track }: { track: Track }) {
+export default function AddToPlaylistButton({
+  track,
+  always,
+  openUp,
+}: {
+  track: Track;
+  always?: boolean;
+  openUp?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const playlists = usePlaylistStore((s) => s.playlists);
@@ -39,7 +47,11 @@ export default function AddToPlaylistButton({ track }: { track: Track }) {
         }}
         title="Çalma listesine ekle"
         className={`grid h-7 w-7 place-items-center transition-colors hover:text-text ${
-          open ? "text-text" : "text-faint opacity-0 group-hover:opacity-100"
+          open
+            ? "text-text"
+            : always
+            ? "text-muted"
+            : "text-faint opacity-0 group-hover:opacity-100"
         }`}
       >
         <ListPlus size={16} />
@@ -47,7 +59,9 @@ export default function AddToPlaylistButton({ track }: { track: Track }) {
 
       {open && (
         <div
-          className="absolute right-0 top-full z-50 mt-1 w-56 rounded-md border border-border bg-surface-2 p-1 shadow-2xl"
+          className={`absolute right-0 z-50 w-56 rounded-md border border-border bg-surface-2 p-1 shadow-2xl ${
+            openUp ? "bottom-full mb-1" : "top-full mt-1"
+          }`}
           onClick={(e) => e.stopPropagation()}
         >
           <button

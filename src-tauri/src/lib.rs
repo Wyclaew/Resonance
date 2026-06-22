@@ -128,6 +128,7 @@ pub fn run() {
         )
         .invoke_handler(tauri::generate_handler![
             commands::search_youtube,
+            commands::import_playlist,
             commands::play_track,
             commands::download_audio,
             commands::delete_audio,

@@ -27,8 +27,9 @@ export interface Playlist {
 
 export interface PlaylistTrack extends Track {
   position: number;
-  karma: number; // net oy (upvote - downvote), decay uygulanmış
-  myVote: -1 | 0 | 1; // bu şarkıya verdiğim güncel oy
+  karma: number; // biriken decay'li oy skoru (her up +1, down -1)
+  myVote: -1 | 0 | 1; // en son verdiğim oyun yönü (UI ipucu)
+  lastVoteAt?: number; // bu şarkıya bu listede son oy zamanı (cooldown için)
 }
 
 export type Vote = -1 | 0 | 1;
@@ -38,6 +39,10 @@ export interface QueueItem extends Track {
   // kuyruk içindeki benzersiz örnek kimliği (aynı şarkı iki kez olabilir)
   uid: string;
   playlistId?: string;
+  // Resonance önerisi olarak araya eklendiyse:
+  isRecommendation?: boolean;
+  recSource?: "youtube" | "library";
+  recReason?: string;
 }
 
 export type RepeatMode = "off" | "all" | "one";

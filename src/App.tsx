@@ -13,6 +13,7 @@ import SettingsView from "./views/SettingsView";
 import { useAppStore } from "./store/useAppStore";
 import { useLibraryStore } from "./store/useLibraryStore";
 import { usePlaylistStore } from "./store/usePlaylistStore";
+import { useSettingsStore } from "./store/useSettingsStore";
 
 function CurrentView() {
   const view = useAppStore((s) => s.view);
@@ -47,6 +48,7 @@ export default function App() {
         console.info("[resonance] veritabanı hazır");
         useLibraryStore.getState().refresh();
         usePlaylistStore.getState().refresh();
+        useSettingsStore.getState().load();
       })
       .catch((e) => console.error("[resonance] veritabanı hatası:", e));
     initPlayer();

@@ -72,12 +72,18 @@ export async function deletePlaylist(id: string): Promise<void> {
 }
 
 // Bir parça metadata'sını tracks tablosuna yazar (FK için gerekli).
-async function ensureTrack(track: Track): Promise<void> {
+// ÖNEMLİ: INSERT OR REPLACE KULLANMA — satırı silip yeniden eklediği için
+// playlist_tracks/cache'teki ON DELETE CASCADE şarkıyı tüm listelerden uçurur.
+// ON CONFLICT DO UPDATE yerinde günceller (silme yok, cascade tetiklenmez).
+export async function ensureTrack(track: Track): Promise<void> {
   const db = await getDb();
   await db.execute(
-    `INSERT OR REPLACE INTO tracks
+    `INSERT INTO tracks
        (id, source, source_id, title, artist, album, duration_ms, thumbnail, added_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+     ON CONFLICT(id) DO UPDATE SET
+       title=excluded.title, artist=excluded.artist, album=excluded.album,
+       duration_ms=excluded.duration_ms, thumbnail=excluded.thumbnail`,
     [
       track.id,
       track.source,
@@ -117,6 +123,18 @@ export async function addTrackToPlaylist(
     [playlistId, track.id, position, Date.now()]
   );
   return true;
+}
+
+// Çok sayıda parçayı sırayla ekler, ilerlemeyi bildirir (içe aktarma için).
+export async function importTracks(
+  playlistId: string,
+  tracks: Track[],
+  onProgress?: (done: number, total: number) => void
+): Promise<void> {
+  for (let i = 0; i < tracks.length; i++) {
+    await addTrackToPlaylist(playlistId, tracks[i]);
+    onProgress?.(i + 1, tracks.length);
+  }
 }
 
 export async function removeTrackFromPlaylist(
@@ -173,10 +191,16 @@ export async function getPlaylistTracks(
     [playlistId]
   );
   const byTrack = new Map<string, VoteEvent[]>();
+  const lastAt = new Map<string, number>();
+  const lastDir = new Map<string, number>();
   for (const e of events) {
     const arr = byTrack.get(e.track_id) ?? [];
     arr.push({ value: e.value, createdAt: e.created_at });
     byTrack.set(e.track_id, arr);
+    if (e.created_at >= (lastAt.get(e.track_id) ?? 0)) {
+      lastAt.set(e.track_id, e.created_at);
+      lastDir.set(e.track_id, Math.sign(e.value));
+    }
   }
   const now = Date.now();
 
@@ -192,41 +216,45 @@ export async function getPlaylistTracks(
     addedAt: r.addedAt,
     position: r.position,
     karma: computeKarma(byTrack.get(r.id) ?? [], now),
-    myVote: (r.vote as Vote) ?? 0,
+    myVote: ((lastDir.get(r.id) ?? 0) as Vote),
+    lastVoteAt: lastAt.get(r.id),
   }));
 }
 
-// Bir parçaya oy ver (Reddit tarzı toggle). Güncel oyu günceller ve
-// votes olay günlüğüne delta'yı zaman bağlamıyla yazar (karma + M4 için).
+// Bir parçaya oy ver — BİRİKEN model (toggle yok): her up +1, down -1 ekler.
+// Şarkı başına saatte 1 (cooldown). Olay zaman bağlamıyla loglanır (karma + M4).
 export async function voteTrack(
   playlistId: string,
   trackId: string,
   direction: 1 | -1
-): Promise<{ vote: Vote }> {
+): Promise<{ ok: boolean; cooldownRemainingMs: number }> {
   const db = await getDb();
-  const cur = await db.select<{ vote: number }[]>(
-    `SELECT vote FROM playlist_tracks WHERE playlist_id = $1 AND track_id = $2`,
+
+  // Cooldown kontrolü: bu (playlist, şarkı) için son oy ne zamandı?
+  const lastRows = await db.select<{ last: number | null }[]>(
+    `SELECT MAX(created_at) AS last FROM votes WHERE playlist_id = $1 AND track_id = $2`,
     [playlistId, trackId]
   );
-  const current = cur[0]?.vote ?? 0;
-  const newVote = current === direction ? 0 : direction;
-  const delta = newVote - current;
-
-  await db.execute(
-    `UPDATE playlist_tracks SET vote = $1 WHERE playlist_id = $2 AND track_id = $3`,
-    [newVote, playlistId, trackId]
-  );
-
-  if (delta !== 0) {
-    const d = new Date();
-    await db.execute(
-      `INSERT INTO votes (track_id, playlist_id, value, created_at, hour, dow)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [trackId, playlistId, delta, d.getTime(), d.getHours(), d.getDay()]
-    );
+  const last = lastRows[0]?.last ?? 0;
+  const now = Date.now();
+  const remaining = Math.max(0, (last ?? 0) + 60 * 60 * 1000 - now);
+  if (remaining > 0) {
+    return { ok: false, cooldownRemainingMs: remaining };
   }
 
-  return { vote: newVote as Vote };
+  const d = new Date();
+  await db.execute(
+    `INSERT INTO votes (track_id, playlist_id, value, created_at, hour, dow)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [trackId, playlistId, direction, now, d.getHours(), d.getDay()]
+  );
+  // Son oy yönünü ipucu olarak sakla.
+  await db.execute(
+    `UPDATE playlist_tracks SET vote = $1 WHERE playlist_id = $2 AND track_id = $3`,
+    [direction, playlistId, trackId]
+  );
+
+  return { ok: true, cooldownRemainingMs: 60 * 60 * 1000 };
 }
 
 // Sürükle-bırak sonrası yeni sırayı kaydeder.
