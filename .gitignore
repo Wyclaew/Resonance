@@ -1,0 +1,24 @@
+# Bağımlılıklar
+node_modules/
+
+# Derleme çıktıları
+dist/
+dist-ssr/
+*.local
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Editör / sistem
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.log
+npm-debug.log*
+
+# Ortam / gizli anahtarlar (Spotify vb. asla commit'lenmez)
+.env
+.env.*
+!.env.example

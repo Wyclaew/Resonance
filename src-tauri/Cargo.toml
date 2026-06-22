@@ -1,0 +1,43 @@
+[package]
+name = "resonance"
+version = "0.1.0"
+description = "Hafif, karma tabanlı kişisel müzik oynatıcı"
+authors = ["Eren"]
+license = ""
+repository = ""
+edition = "2021"
+rust-version = "1.77.2"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "resonance_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2", features = [] }
+tauri-plugin-log = "2"
+tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+
+# Ses motoru: rodio (çıkış) + symphonia (m4a/aac/mp3/flac/ogg çözümleme).
+# Sesi yt-dlp ile cache'e indirip yerelden çalıyoruz; bu, webview codec
+# sorunlarını aşar ve CPU'yu Rust'ta tutar.
+rodio = { version = "0.20", features = ["symphonia-all"] }
+anyhow = "1"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "2"
+
+[profile.release]
+# Hafif sürüm: küçük ikili, iyi performans.
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

@@ -1,0 +1,163 @@
+import { Play, Pause, Music2, Loader2, Download, CircleCheck, X } from "lucide-react";
+import type { Track } from "../types";
+import { formatMs } from "../lib/format";
+import { useLibraryStore } from "../store/useLibraryStore";
+import AddToPlaylistButton from "./AddToPlaylistButton";
+
+interface TrackRowProps {
+  track: Track;
+  index?: number;
+  isCurrent?: boolean;
+  isPlaying?: boolean;
+  isLoading?: boolean;
+  onPlay: () => void;
+  // çalma listesinden çıkar (verilirse çıkar düğmesi gösterilir)
+  onRemove?: () => void;
+  // sürükle-bırak (çalma listesi sıralaması)
+  draggable?: boolean;
+  isDragging?: boolean;
+  onDragStart?: (e: React.DragEvent) => void;
+  onDragOver?: (e: React.DragEvent) => void;
+  onDrop?: (e: React.DragEvent) => void;
+  onDragEnd?: (e: React.DragEvent) => void;
+  // sağ tarafa ek içerik (ör. karma oyları — M3)
+  trailing?: React.ReactNode;
+}
+
+export default function TrackRow({
+  track,
+  index,
+  isCurrent,
+  isPlaying,
+  isLoading,
+  onPlay,
+  onRemove,
+  draggable,
+  isDragging,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  trailing,
+}: TrackRowProps) {
+  const downloaded = useLibraryStore((s) => s.downloadedIds.has(track.id));
+  const downloading = useLibraryStore((s) => s.downloadingIds.has(track.id));
+  const download = useLibraryStore((s) => s.download);
+  const remove = useLibraryStore((s) => s.remove);
+
+  function handleDownloadClick(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (downloading) return;
+    if (downloaded) remove(track);
+    else download(track);
+  }
+
+  return (
+    <div
+      onDoubleClick={onPlay}
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+      className={`group grid grid-cols-[2rem_2.5rem_1fr_auto] items-center gap-3 rounded-md px-2 py-1.5 ${
+        isCurrent ? "bg-surface-2" : "hover:bg-surface"
+      } ${isDragging ? "opacity-40" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
+    >
+      {/* İndeks / oynat düğmesi */}
+      <button
+        onClick={onPlay}
+        className="grid h-8 w-8 place-items-center text-muted"
+        title="Oynat"
+      >
+        {isLoading && isCurrent ? (
+          <Loader2 size={15} className="animate-spin text-accent" />
+        ) : isCurrent && isPlaying ? (
+          <Pause size={15} className="text-accent" fill="currentColor" />
+        ) : (
+          <>
+            <span className="tnum text-xs group-hover:hidden">
+              {index !== undefined ? index + 1 : ""}
+            </span>
+            <Play
+              size={14}
+              fill="currentColor"
+              className="hidden text-text group-hover:block"
+            />
+          </>
+        )}
+      </button>
+
+      {/* Kapak */}
+      <div className="grid h-10 w-10 place-items-center overflow-hidden rounded bg-surface-3 text-faint">
+        {track.thumbnail ? (
+          <img
+            src={track.thumbnail}
+            alt=""
+            loading="lazy"
+            draggable={false}
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <Music2 size={16} />
+        )}
+      </div>
+
+      {/* Başlık + sanatçı */}
+      <div className="min-w-0">
+        <div
+          className={`truncate text-sm ${isCurrent ? "text-accent" : "text-text"}`}
+        >
+          {track.title}
+        </div>
+        <div className="truncate text-xs text-muted">{track.artist}</div>
+      </div>
+
+      {/* Aksiyonlar + süre */}
+      <div className="flex items-center gap-2 pr-1">
+        {trailing}
+        <AddToPlaylistButton track={track} />
+        <button
+          onClick={handleDownloadClick}
+          title={
+            downloading
+              ? "İndiriliyor…"
+              : downloaded
+              ? "İndirildi — kaldırmak için tıkla"
+              : "İndir"
+          }
+          className={`grid h-7 w-7 place-items-center transition-colors ${
+            downloaded
+              ? "text-up"
+              : downloading
+              ? "text-accent"
+              : "text-faint opacity-0 hover:text-text group-hover:opacity-100"
+          }`}
+        >
+          {downloading ? (
+            <Loader2 size={15} className="animate-spin" />
+          ) : downloaded ? (
+            <CircleCheck size={16} />
+          ) : (
+            <Download size={15} />
+          )}
+        </button>
+        {onRemove && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove();
+            }}
+            title="Listeden çıkar"
+            className="grid h-7 w-7 place-items-center text-faint opacity-0 transition-colors hover:text-down group-hover:opacity-100"
+          >
+            <X size={15} />
+          </button>
+        )}
+        <span className="tnum w-10 text-right text-xs text-muted">
+          {formatMs(track.durationMs)}
+        </span>
+      </div>
+    </div>
+  );
+}
