@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import Sidebar from "./components/Sidebar";
 import NowPlayingBar from "./components/NowPlayingBar";
+import LyricsPanel from "./components/LyricsPanel";
 import { getDb, isTauri } from "./lib/db";
 import { initPlayer, usePlayerStore } from "./store/usePlayerStore";
 import HomeView from "./views/HomeView";
@@ -41,6 +42,7 @@ function CurrentView() {
 
 export default function App() {
   const accentColor = useSettingsStore((s) => s.accentColor);
+  const lyricsOpen = useAppStore((s) => s.lyricsOpen);
 
   // DB'yi açılışta başlat (migration'ları tetikler). Tauri dışında atlanır.
   useEffect(() => {
@@ -113,8 +115,9 @@ export default function App() {
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-bg text-text">
       <div className="flex min-h-0 flex-1">
         <Sidebar />
-        <main className="min-w-0 flex-1 overflow-hidden bg-bg">
+        <main className="relative min-w-0 flex-1 overflow-hidden bg-bg">
           <CurrentView />
+          {lyricsOpen && <LyricsPanel />}
         </main>
       </div>
       <NowPlayingBar />

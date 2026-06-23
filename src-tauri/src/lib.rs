@@ -131,6 +131,7 @@ pub fn run() {
             commands::search_youtube,
             commands::import_playlist,
             commands::import_spotify,
+            commands::get_lyrics,
             commands::play_track,
             commands::download_audio,
             commands::prefetch_audio,

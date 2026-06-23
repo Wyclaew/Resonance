@@ -1,0 +1,74 @@
+name: Release
+
+# Bir sürüm etiketi (ör. v0.1.0) push edilince çalışır.
+# macOS .dmg ve Windows .exe üretip taslak bir GitHub Release'e ekler.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            triple: aarch64-apple-darwin
+          - platform: windows-latest
+            triple: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Bağımlılıkları kur
+        run: npm install
+
+      # --- yt-dlp + ffmpeg sidecar ikilileri (kurulum gerekmesin diye uygulamaya gömülür) ---
+      - name: Sidecar indir (macOS)
+        if: matrix.platform == 'macos-latest'
+        run: |
+          mkdir -p src-tauri/binaries
+          curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos \
+            -o src-tauri/binaries/yt-dlp-${{ matrix.triple }}
+          curl -L https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-darwin-arm64 \
+            -o src-tauri/binaries/ffmpeg-${{ matrix.triple }}
+          chmod +x src-tauri/binaries/*
+
+      - name: Sidecar indir (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        run: |
+          mkdir -p src-tauri/binaries
+          curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe \
+            -o src-tauri/binaries/yt-dlp-${{ matrix.triple }}.exe
+          curl -L https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-win32-x64 \
+            -o src-tauri/binaries/ffmpeg-${{ matrix.triple }}.exe
+
+      - name: Derle & sürüm oluştur
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Resonance ${{ github.ref_name }}"
+          releaseBody: |
+            Otomatik sürüm. macOS `.dmg` ve Windows `.exe` ekte.
+
+            > macOS'ta imzasız olduğu için ilk açılışta sağ tık → Aç ya da
+            > `xattr -cr /Applications/Resonance.app` gerekebilir.
+          releaseDraft: true
+          prerelease: false

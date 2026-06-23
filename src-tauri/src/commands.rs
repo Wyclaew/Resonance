@@ -125,6 +125,97 @@ pub async fn import_spotify(
     .map_err(|e| e.to_string())
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Lyrics {
+    synced: Option<String>,
+    plain: Option<String>,
+}
+
+// YouTube başlık gürültüsünü temizle (Official Video, [..], feat. vb.) ki
+// lrclib eşleşmesi tutsun.
+fn clean_title(title: &str, artist: &str) -> String {
+    let mut t = title.to_string();
+    // parantez/köşeli parantez içini kaldır
+    while let (Some(a), Some(b)) = (t.find('('), t.find(')')) {
+        if a < b {
+            t.replace_range(a..=b, "");
+        } else {
+            break;
+        }
+    }
+    while let (Some(a), Some(b)) = (t.find('['), t.find(']')) {
+        if a < b {
+            t.replace_range(a..=b, "");
+        } else {
+            break;
+        }
+    }
+    let lower = t.to_lowercase();
+    for marker in [" feat.", " feat ", " ft.", " ft ", " featuring "] {
+        if let Some(i) = lower.find(marker) {
+            t.truncate(i);
+            break;
+        }
+    }
+    // "Sanatçı - Şarkı" → "Şarkı"
+    if let Some(i) = t.find(" - ") {
+        let (left, right) = t.split_at(i);
+        if left.trim().to_lowercase() == artist.trim().to_lowercase() || !artist.is_empty() {
+            t = right[3..].to_string();
+        }
+    }
+    t.trim().to_string()
+}
+
+/// lrclib.net'ten senkron (LRC) / düz şarkı sözü getirir. Anahtar gerekmez.
+#[tauri::command]
+pub async fn get_lyrics(
+    artist: String,
+    title: String,
+    _duration_ms: u64,
+) -> Result<Lyrics, String> {
+    tauri::async_runtime::spawn_blocking(move || -> anyhow::Result<Lyrics> {
+        let track = clean_title(&title, &artist);
+        let client = reqwest::blocking::Client::builder()
+            .user_agent("Resonance (personal music player)")
+            .build()?;
+        let resp = client
+            .get("https://lrclib.net/api/search")
+            .query(&[("track_name", track.as_str()), ("artist_name", artist.as_str())])
+            .send()?;
+        let arr: serde_json::Value = resp.json().unwrap_or(serde_json::Value::Null);
+
+        let mut synced = None;
+        let mut plain = None;
+        if let Some(items) = arr.as_array() {
+            for it in items {
+                if synced.is_none() {
+                    if let Some(s) = it.get("syncedLyrics").and_then(|x| x.as_str()) {
+                        if !s.trim().is_empty() {
+                            synced = Some(s.to_string());
+                        }
+                    }
+                }
+                if plain.is_none() {
+                    if let Some(p) = it.get("plainLyrics").and_then(|x| x.as_str()) {
+                        if !p.trim().is_empty() {
+                            plain = Some(p.to_string());
+                        }
+                    }
+                }
+                if synced.is_some() {
+                    break;
+                }
+            }
+        }
+        Ok(Lyrics { synced, plain })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn play_track(
     app: AppHandle,

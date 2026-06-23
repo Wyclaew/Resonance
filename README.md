@@ -32,5 +32,5 @@ Gereksinimler: Node, Rust, `yt-dlp`, `ffmpeg`.
 | M4 | Öğrenen öneri algoritması | ✅ |
 | M5 | İçe aktarma (Spotify / YouTube Music) | ✅ |
 | M6 | Detaylı ayarlar | ✅ |
-| M7 | Ekstralar (sözler, mini player, hotkey, EQ) | |
+| M7 | Ekstralar (senkron sözler ✅, sleep timer ✅, kısayollar ✅; mini player / global hotkey / EQ opsiyonel) | ◑ |
 | M8 | Paketleme & CI (dmg + exe) | |

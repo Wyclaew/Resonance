@@ -30,6 +30,10 @@ interface PlayerState {
   radioPlaylistId: string | null;
   skippedRecIds: Set<string>;
 
+  // Uyku zamanlayıcı
+  sleepTimerEndsAt: number | null;
+  setSleepTimer: (minutes: number | null) => void;
+
   error: string | null;
 
   playNow: (track: Track, queue?: Track[], playlistId?: string) => void;
@@ -77,6 +81,8 @@ function loadAndPlay(item: QueueItem) {
     usePlayerStore.setState({ status: "idle", error: String(e) });
   });
 }
+
+let sleepTimeout: ReturnType<typeof setTimeout> | undefined;
 
 // Ses düzeyini ayarlara debounce'lu kaydet (sürükleme sırasında DB'yi yormamak için).
 let volSaveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -130,6 +136,21 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   radioActive: false,
   radioPlaylistId: null,
   skippedRecIds: new Set(),
+
+  sleepTimerEndsAt: null,
+  setSleepTimer: (minutes) => {
+    clearTimeout(sleepTimeout);
+    if (minutes == null) {
+      set({ sleepTimerEndsAt: null });
+      return;
+    }
+    const ms = minutes * 60000;
+    set({ sleepTimerEndsAt: Date.now() + ms });
+    sleepTimeout = setTimeout(() => {
+      if (isTauri()) invoke("audio_pause").catch(() => {});
+      set({ status: "paused", sleepTimerEndsAt: null });
+    }, ms);
+  },
 
   error: null,
 

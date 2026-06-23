@@ -30,11 +30,31 @@ fn augmented_path() -> String {
     }
 }
 
+// Paketlenmiş sidecar (uygulamanın yanında) varsa onu, yoksa PATH'teki ismi
+// kullan. Böylece dağıtılan uygulamada kurulum gerekmez, geliştirmede sistemdeki
+// yt-dlp/ffmpeg kullanılır.
+fn resolve_bin(name: &str) -> std::ffi::OsString {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let fname = if cfg!(windows) {
+                format!("{name}.exe")
+            } else {
+                name.to_string()
+            };
+            let p = dir.join(fname);
+            if p.exists() {
+                return p.into_os_string();
+            }
+        }
+    }
+    std::ffi::OsString::from(name)
+}
+
 // cookies: kullanıcının Ayarlar'da seçtiği tarayıcı (ör. "safari", "chrome").
 // Verilirse --cookies-from-browser eklenir → YouTube girişiyle tam playlist
 // (>100 öğe) ve özel listelere erişim + bot engellerini azaltma.
 fn yt_dlp(cookies: Option<&str>) -> Command {
-    let mut c = Command::new("yt-dlp");
+    let mut c = Command::new(resolve_bin("yt-dlp"));
     c.env("PATH", augmented_path());
     if let Some(b) = cookies {
         if !b.is_empty() {
@@ -185,7 +205,7 @@ pub fn playlist_meta(url: &str, cookies: Option<&str>) -> anyhow::Result<Playlis
 }
 
 fn ffmpeg() -> Command {
-    let mut c = Command::new("ffmpeg");
+    let mut c = Command::new(resolve_bin("ffmpeg"));
     c.env("PATH", augmented_path());
     c
 }

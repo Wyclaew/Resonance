@@ -10,6 +10,9 @@ dist-ssr/
 src-tauri/target/
 src-tauri/gen/schemas/
 
+# Sidecar ikilileri (CI indirir, repoya konmaz — ~80MB)
+src-tauri/binaries/
+
 # Editör / sistem
 .DS_Store
 .vscode/*

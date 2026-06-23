@@ -11,10 +11,13 @@ import {
   Volume1,
   Music2,
   Sparkles,
+  ScrollText,
 } from "lucide-react";
 import { usePlayerStore } from "../store/usePlayerStore";
+import { useAppStore } from "../store/useAppStore";
 import { formatMs } from "../lib/format";
 import AddToPlaylistButton from "./AddToPlaylistButton";
+import SleepTimerButton from "./SleepTimerButton";
 
 function VolumeIcon({ volume, muted }: { volume: number; muted: boolean }) {
   if (muted || volume === 0) return <VolumeX size={17} />;
@@ -41,6 +44,9 @@ export default function NowPlayingBar() {
     toggleShuffle,
     cycleRepeat,
   } = usePlayerStore();
+
+  const lyricsOpen = useAppStore((s) => s.lyricsOpen);
+  const toggleLyrics = useAppStore((s) => s.toggleLyrics);
 
   const isPlaying = status === "playing";
   const pct = durationMs > 0 ? (positionMs / durationMs) * 100 : 0;
@@ -150,8 +156,16 @@ export default function NowPlayingBar() {
         </div>
       </div>
 
-      {/* Sağ: ses */}
-      <div className="flex flex-1 items-center justify-end gap-2">
+      {/* Sağ: sözler, uyku, ses */}
+      <div className="flex flex-1 items-center justify-end gap-3">
+        <button
+          onClick={toggleLyrics}
+          title="Sözler"
+          className={lyricsOpen ? "text-accent" : "text-muted hover:text-text"}
+        >
+          <ScrollText size={16} />
+        </button>
+        <SleepTimerButton />
         <button
           onClick={toggleMute}
           className="text-muted hover:text-text"
