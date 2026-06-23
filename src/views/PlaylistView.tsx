@@ -10,12 +10,16 @@ import {
   Radio,
   Share2,
   Copy,
+  DownloadCloud,
+  CircleCheck,
+  Loader2,
 } from "lucide-react";
 import ViewHeader from "../components/ViewHeader";
 import TrackRow from "../components/TrackRow";
 import KarmaControl from "../components/KarmaControl";
 import type { Playlist, PlaylistTrack } from "../types";
 import { encodePlaylist } from "../lib/share";
+import { useLibraryStore } from "../store/useLibraryStore";
 import { usePlayerStore } from "../store/usePlayerStore";
 import { usePlaylistStore } from "../store/usePlaylistStore";
 import { useAppStore } from "../store/useAppStore";
@@ -44,6 +48,20 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
   const removePlaylist = usePlaylistStore((s) => s.remove);
   const removeTrack = usePlaylistStore((s) => s.removeTrack);
   const navigate = useAppStore((s) => s.navigate);
+  const downloadMany = useLibraryStore((s) => s.downloadMany);
+  const downloadedIds = useLibraryStore((s) => s.downloadedIds);
+  const [batch, setBatch] = useState<{ done: number; total: number } | null>(null);
+
+  const downloadedCount = tracks.filter((t) => downloadedIds.has(t.id)).length;
+  const allDownloaded = tracks.length > 0 && downloadedCount === tracks.length;
+  const missingCount = tracks.length - downloadedCount;
+
+  async function downloadAll() {
+    if (batch) return;
+    setBatch({ done: 0, total: missingCount });
+    await downloadMany(tracks, (done, total) => setBatch({ done, total }));
+    setBatch(null);
+  }
 
   async function load() {
     if (!playlistId || !isTauri()) {
@@ -185,6 +203,35 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
             className="mr-1 flex items-center gap-2 rounded-full border border-accent/50 px-3.5 py-2 text-sm font-medium text-accent transition-colors hover:bg-accent/10 disabled:opacity-30"
           >
             <Radio size={16} /> Radyo
+          </button>
+          <button
+            onClick={downloadAll}
+            disabled={tracks.length === 0 || allDownloaded || !!batch}
+            title={
+              allDownloaded
+                ? "Tüm şarkılar indirildi"
+                : "Tümünü çevrimdışı için indir (indirilenleri atlar)"
+            }
+            className={`mr-1 flex items-center gap-2 rounded-full px-3.5 py-2 text-sm font-medium transition-colors disabled:opacity-40 ${
+              allDownloaded
+                ? "text-up"
+                : "text-muted hover:bg-surface hover:text-text"
+            }`}
+          >
+            {batch ? (
+              <>
+                <Loader2 size={16} className="animate-spin" />
+                {batch.done}/{batch.total}
+              </>
+            ) : allDownloaded ? (
+              <>
+                <CircleCheck size={16} /> İndirildi
+              </>
+            ) : (
+              <>
+                <DownloadCloud size={16} /> Tümünü indir
+              </>
+            )}
           </button>
           <button
             onClick={() =>

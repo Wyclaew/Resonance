@@ -13,6 +13,10 @@ export interface Settings {
   cookiesBrowser: string; // YouTube girişi için tarayıcı ("" = kapalı)
   spotifyClientId: string; // Spotify API client_id
   spotifyClientSecret: string; // Spotify API client_secret
+  accentColor: string; // vurgu rengi (CSS hex)
+  rememberVolume: boolean; // ses düzeyini hatırla
+  savedVolume: number; // hatırlanan ses düzeyi
+  prefetchEnabled: boolean; // sıradakini önceden indir
 }
 
 const DEFAULTS: Settings = {
@@ -24,6 +28,10 @@ const DEFAULTS: Settings = {
   cookiesBrowser: "",
   spotifyClientId: "",
   spotifyClientSecret: "",
+  accentColor: "#e0a33c",
+  rememberVolume: true,
+  savedVolume: 0.9,
+  prefetchEnabled: true,
 };
 
 // Ayar alanı ↔ DB anahtarı eşlemesi.
@@ -36,6 +44,10 @@ const KEYS: Record<keyof Settings, string> = {
   cookiesBrowser: "yt.cookiesBrowser",
   spotifyClientId: "spotify.clientId",
   spotifyClientSecret: "spotify.clientSecret",
+  accentColor: "appearance.accent",
+  rememberVolume: "playback.rememberVolume",
+  savedVolume: "playback.savedVolume",
+  prefetchEnabled: "playback.prefetch",
 };
 
 interface SettingsState extends Settings {

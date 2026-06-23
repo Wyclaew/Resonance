@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import Sidebar from "./components/Sidebar";
 import NowPlayingBar from "./components/NowPlayingBar";
 import { getDb, isTauri } from "./lib/db";
-import { initPlayer } from "./store/usePlayerStore";
+import { initPlayer, usePlayerStore } from "./store/usePlayerStore";
 import HomeView from "./views/HomeView";
 import SearchView from "./views/SearchView";
 import LibraryView from "./views/LibraryView";
@@ -40,6 +40,8 @@ function CurrentView() {
 }
 
 export default function App() {
+  const accentColor = useSettingsStore((s) => s.accentColor);
+
   // DB'yi açılışta başlat (migration'ları tetikler). Tauri dışında atlanır.
   useEffect(() => {
     if (!isTauri()) return;
@@ -48,10 +50,63 @@ export default function App() {
         console.info("[resonance] veritabanı hazır");
         useLibraryStore.getState().refresh();
         usePlaylistStore.getState().refresh();
-        useSettingsStore.getState().load();
+        useSettingsStore
+          .getState()
+          .load()
+          .then(() => {
+            const s = useSettingsStore.getState();
+            if (s.rememberVolume) usePlayerStore.getState().setVolume(s.savedVolume);
+          });
       })
       .catch((e) => console.error("[resonance] veritabanı hatası:", e));
     initPlayer();
+  }, []);
+
+  // Vurgu rengini uygula (Görünüm ayarı).
+  useEffect(() => {
+    document.documentElement.style.setProperty("--color-accent", accentColor);
+  }, [accentColor]);
+
+  // Klavye kısayolları (input/textarea dışında).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.isContentEditable)
+      )
+        return;
+      const p = usePlayerStore.getState();
+      switch (e.code) {
+        case "Space":
+          e.preventDefault();
+          p.toggle();
+          break;
+        case "ArrowRight":
+          if (e.shiftKey) p.next();
+          else p.seek(Math.min(p.durationMs, p.positionMs + 5000));
+          break;
+        case "ArrowLeft":
+          if (e.shiftKey) p.prev();
+          else p.seek(Math.max(0, p.positionMs - 5000));
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          p.setVolume(Math.min(1, p.volume + 0.05));
+          break;
+        case "ArrowDown":
+          e.preventDefault();
+          p.setVolume(Math.max(0, p.volume - 0.05));
+          break;
+        case "KeyM":
+          p.toggleMute();
+          break;
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   return (

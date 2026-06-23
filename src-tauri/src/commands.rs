@@ -220,6 +220,95 @@ pub fn delete_audio(app: AppHandle, source_id: String) -> bool {
     removed
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CacheFile {
+    source_id: String,
+    bytes: u64,
+}
+
+/// Önbellekteki ses dosyalarını (source_id + boyut) listeler.
+#[tauri::command]
+pub fn cache_files(app: AppHandle) -> Vec<CacheFile> {
+    let Ok(dir) = audio_cache_dir(&app) else {
+        return vec![];
+    };
+    let mut out = vec![];
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let Ok(meta) = e.metadata() else { continue };
+            if !meta.is_file() {
+                continue;
+            }
+            let name = e.file_name().to_string_lossy().to_string();
+            let sid = name.split('.').next().unwrap_or("").to_string();
+            if !sid.is_empty() {
+                out.push(CacheFile {
+                    source_id: sid,
+                    bytes: meta.len(),
+                });
+            }
+        }
+    }
+    out
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClearResult {
+    deleted_bytes: u64,
+    deleted_count: u64,
+}
+
+/// `keep` listesindeki (indirilen) source_id'ler hariç önbelleği siler.
+#[tauri::command]
+pub fn delete_cache_except(app: AppHandle, keep: Vec<String>) -> ClearResult {
+    let keep: std::collections::HashSet<String> = keep.into_iter().collect();
+    let Ok(dir) = audio_cache_dir(&app) else {
+        return ClearResult {
+            deleted_bytes: 0,
+            deleted_count: 0,
+        };
+    };
+    let (mut db, mut dc) = (0u64, 0u64);
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            let sid = name.split('.').next().unwrap_or("").to_string();
+            if sid.is_empty() || keep.contains(&sid) {
+                continue;
+            }
+            if let Ok(meta) = e.metadata() {
+                let len = meta.len();
+                if std::fs::remove_file(e.path()).is_ok() {
+                    db += len;
+                    dc += 1;
+                }
+            }
+        }
+    }
+    ClearResult {
+        deleted_bytes: db,
+        deleted_count: dc,
+    }
+}
+
+/// Tüm veriyi (frontend'in oluşturduğu JSON) İndirilenler klasörüne yedekler.
+#[tauri::command]
+pub fn export_data(app: AppHandle, json: String) -> Result<String, String> {
+    let dir = app
+        .path()
+        .download_dir()
+        .map_err(|e| e.to_string())?;
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let path = dir.join(format!("resonance-yedek-{secs}.json"));
+    std::fs::write(&path, json).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().to_string())
+}
+
 /// Bir şarkının indirilip cache'lenip lenmediğini söyler (hibrit mod göstergeleri için).
 #[tauri::command]
 pub fn is_cached(app: AppHandle, source_id: String) -> bool {

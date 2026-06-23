@@ -15,6 +15,10 @@ interface LibraryState {
 
   refresh: () => Promise<void>;
   download: (track: Track) => Promise<void>;
+  downloadMany: (
+    tracks: Track[],
+    onProgress?: (done: number, total: number) => void
+  ) => Promise<void>;
   remove: (track: Track) => Promise<void>;
   isDownloaded: (id: string) => boolean;
   isDownloading: (id: string) => boolean;
@@ -72,6 +76,32 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         return { downloadingIds: dTo };
       });
     }
+  },
+
+  // Toplu indirme: yalnızca indirilmemiş şarkıları, sınırlı eşzamanlılıkla indirir.
+  downloadMany: async (tracks, onProgress) => {
+    if (!isTauri()) return;
+    const todo = tracks.filter(
+      (t) => !get().downloadedIds.has(t.id) && !get().downloadingIds.has(t.id)
+    );
+    const total = todo.length;
+    let done = 0;
+    onProgress?.(0, total);
+    if (total === 0) return;
+
+    const CONCURRENCY = 3;
+    let idx = 0;
+    const worker = async () => {
+      while (idx < todo.length) {
+        const t = todo[idx++];
+        await get().download(t);
+        done++;
+        onProgress?.(done, total);
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, total) }, worker)
+    );
   },
 
   remove: async (track) => {

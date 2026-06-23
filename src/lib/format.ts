@@ -12,6 +12,14 @@ export function formatMs(ms: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+export function formatBytes(bytes: number): string {
+  if (!bytes) return "0 MB";
+  const mb = bytes / (1024 * 1024);
+  if (mb < 1) return `${(bytes / 1024).toFixed(0)} KB`;
+  if (mb < 1024) return `${mb.toFixed(1)} MB`;
+  return `${(mb / 1024).toFixed(2)} GB`;
+}
+
 // Karma sayısını kısa biçimde göster (1.2k gibi).
 export function formatKarma(n: number): string {
   const abs = Math.abs(n);

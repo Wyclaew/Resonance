@@ -78,9 +78,19 @@ function loadAndPlay(item: QueueItem) {
   });
 }
 
+// Ses düzeyini ayarlara debounce'lu kaydet (sürükleme sırasında DB'yi yormamak için).
+let volSaveTimer: ReturnType<typeof setTimeout> | undefined;
+function persistVolume(v: number) {
+  const s = useSettingsStore.getState();
+  if (!s.rememberVolume) return;
+  clearTimeout(volSaveTimer);
+  volSaveTimer = setTimeout(() => s.update("savedVolume", v), 600);
+}
+
 // Sıradaki parçayı arka planda indir/hazırla → "sonraki"ye geçiş anlık olur.
 function prefetchNext() {
   if (!isTauri()) return;
+  if (!useSettingsStore.getState().prefetchEnabled) return;
   const { queue, queueIndex } = usePlayerStore.getState();
   const nextItem = queue[queueIndex + 1];
   if (!nextItem) return;
@@ -296,6 +306,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const vol = Math.max(0, Math.min(1, v));
     set({ volume: vol, muted: false });
     if (isTauri()) invoke("audio_set_volume", { volume: vol }).catch(() => {});
+    persistVolume(vol);
   },
 
   toggleMute: () => {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Play,
   HardDrive,
@@ -9,12 +9,22 @@ import {
   Brain,
   Info,
   ChevronDown,
+  Cloud,
+  Trash2,
+  Download,
+  Check,
 } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import ViewHeader from "../components/ViewHeader";
 import Toggle from "../components/Toggle";
 import { useSettingsStore } from "../store/useSettingsStore";
+import { useLibraryStore } from "../store/useLibraryStore";
+import { getDeviceId } from "../lib/device";
+import { getDb, isTauri } from "../lib/db";
+import { formatBytes } from "../lib/format";
 
 const categories = [
+  { id: "account", label: "Hesap & Senkron", icon: Cloud },
   { id: "playback", label: "Oynatma", icon: Play },
   { id: "storage", label: "Depolama & Önbellek", icon: HardDrive },
   { id: "shortcuts", label: "Kısayollar", icon: Keyboard },
@@ -227,8 +237,315 @@ function IntegrationsSettings() {
   );
 }
 
+function AccountSettings() {
+  const deviceId = getDeviceId();
+  return (
+    <div className="max-w-2xl">
+      <div className="rounded-lg border border-accent/30 bg-accent/5 p-5">
+        <div className="flex items-center gap-2 text-accent">
+          <Cloud size={18} />
+          <span className="text-sm font-semibold">Bulut senkronu — yakında</span>
+        </div>
+        <p className="mt-2 text-sm leading-relaxed text-muted">
+          Yakında bir hesapla giriş yapıp çalma listelerin, oyların/karman ve
+          ayarların <b className="text-text">masaüstü, telefon ve web</b> arasında
+          otomatik senkronlanacak. Ses her cihazda yerel kalır; buluta yalnızca
+          metadata gider. Şu an her şey <b className="text-text">tamamen yerel ve
+          gizli</b> — senkron açıldığında bile isteğe bağlı (opt-in) olacak.
+        </p>
+        <button
+          disabled
+          className="mt-4 cursor-default rounded-md bg-surface-2 px-4 py-2 text-sm font-medium text-faint"
+        >
+          Giriş yap (yakında)
+        </button>
+      </div>
+
+      <div className="mt-5 border-b border-border py-4">
+        <div className="text-sm font-medium">Bu cihaz</div>
+        <div className="mt-1 font-mono text-xs text-faint">{deviceId}</div>
+        <div className="mt-1 text-xs text-muted">
+          Senkron açıldığında bu cihazı tanımak için kullanılacak kimlik.
+        </div>
+      </div>
+
+      <p className="mt-4 text-xs leading-relaxed text-faint">
+        Planın tamamı depoda <span className="text-muted">docs/SYNC.md</span>{" "}
+        dosyasında: Supabase tabanlı hesap + delta senkron, web'de YouTube IFrame
+        Player (yt-dlp tarayıcıda çalışmadığı için), mobil için Tauri/Android.
+      </p>
+    </div>
+  );
+}
+
+function PlaybackSettings() {
+  const s = useSettingsStore();
+  return (
+    <div className="max-w-2xl">
+      <SettingRow
+        label="Ses düzeyini hatırla"
+        description="Uygulama en son ses düzeyiyle açılır."
+      >
+        <Toggle
+          checked={s.rememberVolume}
+          onChange={(v) => s.update("rememberVolume", v)}
+        />
+      </SettingRow>
+      <SettingRow
+        label="Sıradakini önceden indir"
+        description="Bir sonraki şarkıyı arka planda hazırlar → geçiş anlık olur. Biraz daha veri kullanır."
+      >
+        <Toggle
+          checked={s.prefetchEnabled}
+          onChange={(v) => s.update("prefetchEnabled", v)}
+        />
+      </SettingRow>
+    </div>
+  );
+}
+
+function StorageSettings() {
+  const downloadedIds = useLibraryStore((st) => st.downloadedIds);
+  const refreshLibrary = useLibraryStore((st) => st.refresh);
+  const [files, setFiles] = useState<{ sourceId: string; bytes: number }[]>([]);
+  const [clearing, setClearing] = useState(false);
+  const [cleared, setCleared] = useState<string | null>(null);
+
+  async function load() {
+    if (!isTauri()) return;
+    setFiles(await invoke("cache_files"));
+  }
+  useEffect(() => {
+    refreshLibrary();
+    load();
+  }, [refreshLibrary]);
+
+  const dlSourceIds = new Set(
+    [...downloadedIds].map((id) => id.split(":").pop() ?? "")
+  );
+  let cacheBytes = 0,
+    cacheCount = 0,
+    dlBytes = 0,
+    dlCount = 0;
+  for (const f of files) {
+    if (dlSourceIds.has(f.sourceId)) {
+      dlBytes += f.bytes;
+      dlCount++;
+    } else {
+      cacheBytes += f.bytes;
+      cacheCount++;
+    }
+  }
+
+  async function clearCache() {
+    setClearing(true);
+    setCleared(null);
+    const res = await invoke<{ deletedBytes: number; deletedCount: number }>(
+      "delete_cache_except",
+      { keep: [...dlSourceIds] }
+    );
+    setCleared(
+      `${res.deletedCount} dosya (${formatBytes(res.deletedBytes)}) temizlendi`
+    );
+    await load();
+    setClearing(false);
+  }
+
+  return (
+    <div className="max-w-2xl">
+      <SettingRow
+        label="Geçici önbellek"
+        description="Çaldığın ama indirmediğin şarkılar. Silmek güvenli; gerekince yeniden alınır."
+      >
+        <span className="tnum text-sm text-muted">
+          {formatBytes(cacheBytes)} · {cacheCount} şarkı
+        </span>
+      </SettingRow>
+      <SettingRow
+        label="İndirilenler"
+        description="Çevrimdışı için kalıcı tuttukların. Önbellek temizlemede silinmez."
+      >
+        <span className="tnum text-sm text-muted">
+          {formatBytes(dlBytes)} · {dlCount} şarkı
+        </span>
+      </SettingRow>
+      <div className="mt-4 flex items-center gap-3">
+        <button
+          onClick={clearCache}
+          disabled={clearing || cacheCount === 0}
+          className="flex items-center gap-2 rounded-md bg-surface-2 px-3 py-2 text-sm font-medium text-text hover:bg-surface-3 disabled:opacity-40"
+        >
+          <Trash2 size={15} /> Önbelleği temizle
+        </button>
+        {cleared && (
+          <span className="flex items-center gap-1 text-xs text-up">
+            <Check size={14} /> {cleared}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const SHORTCUTS: [string, string][] = [
+  ["Boşluk", "Oynat / Duraklat"],
+  ["→ / ←", "5 sn ileri / geri"],
+  ["Shift + → / ←", "Sonraki / Önceki şarkı"],
+  ["↑ / ↓", "Ses +/−"],
+  ["M", "Sessize al"],
+];
+function ShortcutsSettings() {
+  return (
+    <div className="max-w-2xl">
+      <p className="mb-4 text-sm text-muted">
+        Uygulama açıkken (yazı kutuları hariç) geçerli kısayollar:
+      </p>
+      {SHORTCUTS.map(([k, d]) => (
+        <div
+          key={k}
+          className="flex items-center justify-between border-b border-border py-3 text-sm"
+        >
+          <span className="text-muted">{d}</span>
+          <kbd className="rounded border border-border bg-surface px-2 py-0.5 font-mono text-xs text-text">
+            {k}
+          </kbd>
+        </div>
+      ))}
+      <p className="mt-4 text-xs text-faint">
+        Global kısayollar (uygulama arka plandayken) sonraki sürümde.
+      </p>
+    </div>
+  );
+}
+
+const ACCENTS = [
+  { v: "#e0a33c", label: "Kehribar" },
+  { v: "#5fb87f", label: "Yeşil" },
+  { v: "#4f9bd9", label: "Mavi" },
+  { v: "#d4634e", label: "Mercan" },
+  { v: "#b07ad9", label: "Mor" },
+  { v: "#e0667f", label: "Pembe" },
+];
+function AppearanceSettings() {
+  const accentColor = useSettingsStore((s) => s.accentColor);
+  const update = useSettingsStore((s) => s.update);
+  return (
+    <div className="max-w-2xl">
+      <SettingRow
+        label="Vurgu rengi"
+        description="Butonlar ve etkin öğelerdeki vurgu rengi."
+      >
+        <div className="flex items-center gap-2">
+          {ACCENTS.map((a) => (
+            <button
+              key={a.v}
+              title={a.label}
+              onClick={() => update("accentColor", a.v)}
+              className={`h-7 w-7 rounded-full border-2 transition-transform hover:scale-110 ${
+                accentColor === a.v ? "border-text" : "border-transparent"
+              }`}
+              style={{ backgroundColor: a.v }}
+            />
+          ))}
+        </div>
+      </SettingRow>
+      <p className="mt-3 text-xs text-faint">
+        Tema koyu; açık tema sonraki sürümde.
+      </p>
+    </div>
+  );
+}
+
+function DataSettings() {
+  const [exporting, setExporting] = useState(false);
+  const [savedPath, setSavedPath] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function exportData() {
+    if (!isTauri()) return;
+    setExporting(true);
+    setErr(null);
+    setSavedPath(null);
+    try {
+      const db = await getDb();
+      const [playlists, playlistTracks, tracks, votes, settings] =
+        await Promise.all([
+          db.select("SELECT * FROM playlists"),
+          db.select("SELECT * FROM playlist_tracks"),
+          db.select("SELECT * FROM tracks"),
+          db.select("SELECT * FROM votes"),
+          db.select("SELECT * FROM settings"),
+        ]);
+      const json = JSON.stringify(
+        {
+          version: 1,
+          exportedAt: Date.now(),
+          playlists,
+          playlistTracks,
+          tracks,
+          votes,
+          settings,
+        },
+        null,
+        2
+      );
+      setSavedPath(await invoke<string>("export_data", { json }));
+    } catch (e) {
+      setErr(String(e));
+    }
+    setExporting(false);
+  }
+
+  return (
+    <div className="max-w-2xl">
+      <p className="mb-4 text-sm leading-relaxed text-muted">
+        Çalma listelerin, oyların/karman ve ayarların bir JSON dosyasına
+        yedeklenir (İndirilenler klasörüne). Ses dosyaları dahil değildir.
+      </p>
+      <button
+        onClick={exportData}
+        disabled={exporting}
+        className="flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-medium text-bg disabled:opacity-40"
+      >
+        <Download size={15} /> Yedeği dışa aktar
+      </button>
+      {savedPath && (
+        <p className="mt-3 break-all text-xs text-up">Kaydedildi: {savedPath}</p>
+      )}
+      {err && <p className="mt-3 text-xs text-down">{err}</p>}
+    </div>
+  );
+}
+
+function AboutSettings() {
+  return (
+    <div className="max-w-2xl text-sm leading-relaxed text-muted">
+      <div className="flex items-center gap-3">
+        <div className="grid h-12 w-12 place-items-center rounded-md bg-accent/15 text-xl font-semibold text-accent">
+          ◈
+        </div>
+        <div>
+          <div className="text-base font-semibold text-text">Resonance</div>
+          <div className="text-xs text-faint">Sürüm 0.1.0</div>
+        </div>
+      </div>
+      <p className="mt-4">
+        Hafif, karma tabanlı kişisel müzik oynatıcı. Ses YouTube'dan (yt-dlp)
+        gelir; Spotify / YouTube Music listeleri içe aktarılır.
+      </p>
+      <p className="mt-3 text-faint">
+        Kişisel kullanım içindir. YouTube'dan ses çekmek YouTube Hizmet
+        Şartları'na aykırı olabilir; bu uygulamayı kendi sorumluluğunda kullan.
+      </p>
+      <p className="mt-3 text-faint">
+        Tauri · React · rodio · yt-dlp · ffmpeg ile yapıldı.
+      </p>
+    </div>
+  );
+}
+
 export default function SettingsView() {
-  const [active, setActive] = useState<CatId>("algorithm");
+  const [active, setActive] = useState<CatId>("account");
   const current = categories.find((c) => c.id === active)!;
 
   return (
@@ -257,14 +574,24 @@ export default function SettingsView() {
 
         <div className="min-w-0 flex-1 overflow-y-auto px-8 py-2">
           <h2 className="mb-4 text-lg font-semibold">{current.label}</h2>
-          {active === "algorithm" ? (
-            <AlgorithmSettings />
+          {active === "account" ? (
+            <AccountSettings />
+          ) : active === "playback" ? (
+            <PlaybackSettings />
+          ) : active === "storage" ? (
+            <StorageSettings />
+          ) : active === "shortcuts" ? (
+            <ShortcutsSettings />
           ) : active === "integrations" ? (
             <IntegrationsSettings />
+          ) : active === "appearance" ? (
+            <AppearanceSettings />
+          ) : active === "algorithm" ? (
+            <AlgorithmSettings />
+          ) : active === "data" ? (
+            <DataSettings />
           ) : (
-            <p className="text-sm text-muted">
-              Bu bölüm yakında detaylandırılacak (M6).
-            </p>
+            <AboutSettings />
           )}
         </div>
       </div>
