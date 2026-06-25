@@ -8,7 +8,7 @@ import { usePlayerStore } from "../store/usePlayerStore";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { isTauri } from "../lib/db";
 
-const DEBOUNCE_MS = 250;
+const DEBOUNCE_MS = 150;
 const MIN_CHARS = 2;
 const HISTORY_KEY = "resonance.searchHistory";
 const HISTORY_MAX = 8;

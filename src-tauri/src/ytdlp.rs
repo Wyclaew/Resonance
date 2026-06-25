@@ -30,23 +30,38 @@ fn augmented_path() -> String {
     }
 }
 
-// Paketlenmiş sidecar (uygulamanın yanında) varsa onu, yoksa PATH'teki ismi
-// kullan. Böylece dağıtılan uygulamada kurulum gerekmez, geliştirmede sistemdeki
-// yt-dlp/ffmpeg kullanılır.
+// İkiliyi çöz. ÖNCE sistemde kurulu olanı tercih et — paketlenmiş yt-dlp
+// (PyInstaller onefile) her çağrıda ~12sn açılırken sistemdeki ~1.7sn'de
+// çalışıyor. Sistemde yoksa (temiz makine) uygulamaya gömülü sidecar'a düş →
+// kurulum gerekmeden çalışmaya devam eder.
 fn resolve_bin(name: &str) -> std::ffi::OsString {
+    // 1) Sistemde kurulu mu? (hızlı)
+    let exe_name = if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name.to_string()
+    };
+    for dir in [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+    ] {
+        let p = Path::new(dir).join(&exe_name);
+        if p.exists() {
+            return p.into_os_string();
+        }
+    }
+    // 2) Uygulamaya gömülü sidecar (temiz makineler için)
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            let fname = if cfg!(windows) {
-                format!("{name}.exe")
-            } else {
-                name.to_string()
-            };
-            let p = dir.join(fname);
+            let p = dir.join(&exe_name);
             if p.exists() {
                 return p.into_os_string();
             }
         }
     }
+    // 3) PATH'e bırak
     std::ffi::OsString::from(name)
 }
 

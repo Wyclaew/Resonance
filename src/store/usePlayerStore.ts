@@ -6,6 +6,7 @@ import { isTauri } from "../lib/db";
 import { getRecommendations } from "../lib/recommender";
 import { recordPlay } from "../lib/history";
 import { useSettingsStore } from "./useSettingsStore";
+import { useToastStore } from "./useToastStore";
 
 // Oynatıcı durumu — Rust ses motoruna (rodio) Tauri komutlarıyla bağlı.
 // Pozisyon/durum, ses thread'inden gelen "playback-tick" olayıyla güncellenir.
@@ -93,17 +94,21 @@ function persistVolume(v: number) {
   volSaveTimer = setTimeout(() => s.update("savedVolume", v), 600);
 }
 
-// Sıradaki parçayı arka planda indir/hazırla → "sonraki"ye geçiş anlık olur.
+// Sıradaki parçaları arka planda indir/hazırla → hızlı arka arkaya geçişler de
+// anlık olur. 3 önden hazırlanır (zaten cache'tekiler yt-dlp bile çağırmaz).
 function prefetchNext() {
   if (!isTauri()) return;
   if (!useSettingsStore.getState().prefetchEnabled) return;
   const { queue, queueIndex } = usePlayerStore.getState();
-  const nextItem = queue[queueIndex + 1];
-  if (!nextItem) return;
-  invoke("prefetch_audio", {
-    sourceId: nextItem.sourceId,
-    cookiesBrowser: useSettingsStore.getState().cookiesBrowser,
-  }).catch(() => {});
+  const cookiesBrowser = useSettingsStore.getState().cookiesBrowser;
+  for (let i = 1; i <= 3; i++) {
+    const item = queue[queueIndex + i];
+    if (!item) break;
+    invoke("prefetch_audio", {
+      sourceId: item.sourceId,
+      cookiesBrowser,
+    }).catch(() => {});
+  }
 }
 
 // Çıkan parçayı geçmişe yaz + erken geçilen öneriye yumuşak ceza.
@@ -361,8 +366,10 @@ export async function initPlayer() {
       const s = usePlayerStore.getState();
       const patch: Partial<PlayerState> = { positionMs: position_ms };
       if (duration_ms > 0) patch.durationMs = duration_ms;
-      if (playing) patch.status = "playing";
-      else if (s.status === "playing") patch.status = "paused";
+      if (playing) {
+        patch.status = "playing";
+        consecutiveErrors = 0; // başarılı çalma → hata sayacını sıfırla
+      } else if (s.status === "playing") patch.status = "paused";
       usePlayerStore.setState(patch);
     }
   );
@@ -376,6 +383,21 @@ export async function initPlayer() {
   });
 
   await listen<string>("playback-error", (e) => {
-    usePlayerStore.setState({ status: "idle", error: e.payload });
+    consecutiveErrors++;
+    const s = usePlayerStore.getState();
+    // Bozuk/çalınamayan şarkıyı atla (kuyruk takılmasın); art arda 3 hatadan
+    // sonra dur ki sonsuz döngü olmasın.
+    if (consecutiveErrors <= 3 && s.queue.length > 1) {
+      useToastStore.getState().show("Şarkı çalınamadı, atlanıyor", "error");
+      s.next();
+    } else {
+      useToastStore
+        .getState()
+        .show("Şarkı çalınamadı" + (e.payload ? `: ${e.payload}` : ""), "error");
+      usePlayerStore.setState({ status: "idle", error: e.payload });
+    }
   });
 }
+
+// Art arda çalma hatası sayacı (otomatik atlamada sonsuz döngüyü önler).
+let consecutiveErrors = 0;

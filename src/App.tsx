@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import Sidebar from "./components/Sidebar";
 import NowPlayingBar from "./components/NowPlayingBar";
 import LyricsPanel from "./components/LyricsPanel";
+import Toasts from "./components/Toasts";
 import { getDb, isTauri } from "./lib/db";
 import { initPlayer, usePlayerStore } from "./store/usePlayerStore";
 import HomeView from "./views/HomeView";
@@ -121,6 +122,7 @@ export default function App() {
         </main>
       </div>
       <NowPlayingBar />
+      <Toasts />
     </div>
   );
 }
