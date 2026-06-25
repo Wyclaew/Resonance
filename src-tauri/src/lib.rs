@@ -111,8 +111,9 @@ pub fn run() {
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default();
 
-    // Tek örnek (single instance) yalnızca masaüstünde — ilk plugin olmalı.
-    #[cfg(all(desktop, not(debug_assertions)))]
+    // Tek örnek (single instance) — TÜM masaüstü build'lerinde (debug dahil).
+    // İki kopyanın aynı SQLite DB'sinde yarışıp veri bozmasını önler.
+    #[cfg(desktop)]
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(w) = app.get_webview_window("main") {
@@ -140,6 +141,9 @@ pub fn run() {
             commands::cache_files,
             commands::delete_cache_except,
             commands::export_data,
+            commands::backup_db,
+            commands::list_backups,
+            commands::restore_backup,
             commands::audio_status,
             commands::audio_play,
             commands::audio_pause,

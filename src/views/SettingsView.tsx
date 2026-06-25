@@ -456,10 +456,41 @@ function AppearanceSettings() {
   );
 }
 
+interface BackupInfo {
+  path: string;
+  name: string;
+  bytes: number;
+  modifiedMs: number;
+}
+
 function DataSettings() {
   const [exporting, setExporting] = useState(false);
   const [savedPath, setSavedPath] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [backups, setBackups] = useState<BackupInfo[]>([]);
+  const [confirmRestore, setConfirmRestore] = useState<BackupInfo | null>(null);
+
+  async function loadBackups() {
+    if (!isTauri()) return;
+    try {
+      setBackups(await invoke<BackupInfo[]>("list_backups"));
+    } catch {
+      /* yoksay */
+    }
+  }
+  useEffect(() => {
+    loadBackups();
+  }, []);
+
+  async function backupNow() {
+    if (!isTauri()) return;
+    try {
+      await invoke("backup_db");
+      await loadBackups();
+    } catch (e) {
+      setErr(String(e));
+    }
+  }
 
   async function exportData() {
     if (!isTauri()) return;
@@ -513,6 +544,86 @@ function DataSettings() {
         <p className="mt-3 break-all text-xs text-up">Kaydedildi: {savedPath}</p>
       )}
       {err && <p className="mt-3 text-xs text-down">{err}</p>}
+
+      <div className="mt-8 mb-2 flex items-center justify-between">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">
+          Otomatik yedekler
+        </div>
+        <button
+          onClick={backupNow}
+          className="rounded-md bg-surface-2 px-2.5 py-1 text-xs font-medium text-text hover:bg-surface-3"
+        >
+          Şimdi yedekle
+        </button>
+      </div>
+      <p className="mb-3 text-xs leading-relaxed text-muted">
+        Veri varken her açılışta otomatik yedek alınır (son 12 tutulur). Bir
+        sorun olursa buradan geri yükleyebilirsin.
+      </p>
+      {backups.length === 0 ? (
+        <p className="text-xs text-faint">Henüz yedek yok.</p>
+      ) : (
+        <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
+          {backups.map((b) => (
+            <div
+              key={b.path}
+              className="flex items-center justify-between px-3 py-2"
+            >
+              <div>
+                <div className="text-sm text-text">
+                  {new Date(b.modifiedMs).toLocaleString("tr-TR")}
+                </div>
+                <div className="tnum text-xs text-faint">
+                  {formatBytes(b.bytes)}
+                </div>
+              </div>
+              <button
+                onClick={() => setConfirmRestore(b)}
+                className="rounded-md px-2.5 py-1 text-xs font-medium text-muted hover:bg-surface hover:text-text"
+              >
+                Geri yükle
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {confirmRestore && (
+        <div
+          className="fixed inset-0 z-[60] grid place-items-center bg-black/50"
+          onClick={() => setConfirmRestore(null)}
+        >
+          <div
+            className="w-96 rounded-lg border border-border bg-surface-2 p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-semibold">Yedeği geri yükle?</h3>
+            <p className="mt-1 text-sm leading-relaxed text-muted">
+              {new Date(confirmRestore.modifiedMs).toLocaleString("tr-TR")}{" "}
+              tarihli yedek geri yüklenecek. Mevcut durumun da ayrıca yedeklenir.
+              Uygulama yeniden başlar.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmRestore(null)}
+                className="rounded-md px-3 py-1.5 text-sm text-muted hover:bg-surface hover:text-text"
+              >
+                Vazgeç
+              </button>
+              <button
+                onClick={() =>
+                  invoke("restore_backup", { path: confirmRestore.path }).catch(
+                    () => {}
+                  )
+                }
+                className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-bg hover:opacity-90"
+              >
+                Geri yükle & yeniden başlat
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

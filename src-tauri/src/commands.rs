@@ -1,6 +1,6 @@
 // Frontend'e açılan Tauri komutları: arama + oynatma kontrolü.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -398,6 +398,103 @@ pub fn export_data(app: AppHandle, json: String) -> Result<String, String> {
     let path = dir.join(format!("resonance-yedek-{secs}.json"));
     std::fs::write(&path, json).map_err(|e| e.to_string())?;
     Ok(path.to_string_lossy().to_string())
+}
+
+// --- Veritabanı yedekleme / geri yükleme (veri kaybına karşı güvenlik ağı) ---
+
+fn epoch_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn db_paths(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
+    let cfg = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    Ok((cfg.join("resonance.db"), cfg.join("backups")))
+}
+
+fn prune_backups(bdir: &Path, keep: usize) {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(bdir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.starts_with("resonance-") && n.ends_with(".db"))
+                .unwrap_or(false)
+        })
+        .collect();
+    files.sort(); // zaman damgalı ada göre artan
+    while files.len() > keep {
+        let _ = std::fs::remove_file(files.remove(0));
+    }
+}
+
+/// Mevcut DB'yi zaman damgalı bir yedeğe kopyalar (son 12 tutulur).
+#[tauri::command]
+pub fn backup_db(app: AppHandle) -> Result<String, String> {
+    let (db, bdir) = db_paths(&app)?;
+    if !db.exists() {
+        return Err("Veritabanı bulunamadı".into());
+    }
+    std::fs::create_dir_all(&bdir).map_err(|e| e.to_string())?;
+    let dest = bdir.join(format!("resonance-{}.db", epoch_secs()));
+    std::fs::copy(&db, &dest).map_err(|e| e.to_string())?;
+    prune_backups(&bdir, 12);
+    Ok(dest.to_string_lossy().to_string())
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupInfo {
+    path: String,
+    name: String,
+    bytes: u64,
+    modified_ms: u64,
+}
+
+#[tauri::command]
+pub fn list_backups(app: AppHandle) -> Vec<BackupInfo> {
+    let Ok((_, bdir)) = db_paths(&app) else {
+        return vec![];
+    };
+    let mut out = vec![];
+    if let Ok(rd) = std::fs::read_dir(&bdir) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if !(name.starts_with("resonance-") && name.ends_with(".db")) {
+                continue;
+            }
+            let Ok(meta) = e.metadata() else { continue };
+            let modified = meta
+                .modified()
+                .ok()
+                .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            out.push(BackupInfo {
+                path: e.path().to_string_lossy().to_string(),
+                name,
+                bytes: meta.len(),
+                modified_ms: modified,
+            });
+        }
+    }
+    out.sort_by(|a, b| b.modified_ms.cmp(&a.modified_ms)); // en yeni önce
+    out
+}
+
+/// Bir yedeği geri yükler: önce mevcut DB'yi yedekler, sonra üzerine kopyalar
+/// ve uygulamayı yeniden başlatır (yeni DB yüklensin).
+#[tauri::command]
+pub fn restore_backup(app: AppHandle, path: String) -> Result<(), String> {
+    let (db, _) = db_paths(&app)?;
+    let _ = backup_db(app.clone()); // mevcut durumu da koru
+    std::fs::copy(&path, &db).map_err(|e| e.to_string())?;
+    app.restart()
 }
 
 /// Bir şarkının indirilip cache'lenip lenmediğini söyler (hibrit mod göstergeleri için).

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import Sidebar from "./components/Sidebar";
 import NowPlayingBar from "./components/NowPlayingBar";
 import LyricsPanel from "./components/LyricsPanel";
@@ -49,10 +50,12 @@ export default function App() {
   useEffect(() => {
     if (!isTauri()) return;
     getDb()
-      .then(() => {
+      .then(async () => {
         console.info("[resonance] veritabanı hazır");
-        useLibraryStore.getState().refresh();
-        usePlaylistStore.getState().refresh();
+        await Promise.all([
+          useLibraryStore.getState().refresh(),
+          usePlaylistStore.getState().refresh(),
+        ]);
         useSettingsStore
           .getState()
           .load()
@@ -60,6 +63,11 @@ export default function App() {
             const s = useSettingsStore.getState();
             if (s.rememberVolume) usePlayerStore.getState().setVolume(s.savedVolume);
           });
+        // Veri varsa otomatik yedek al (kazara kayba karşı güvenlik ağı).
+        const hasData =
+          usePlaylistStore.getState().playlists.length > 0 ||
+          useLibraryStore.getState().downloads.length > 0;
+        if (hasData) invoke("backup_db").catch(() => {});
       })
       .catch((e) => console.error("[resonance] veritabanı hatası:", e));
     initPlayer();
