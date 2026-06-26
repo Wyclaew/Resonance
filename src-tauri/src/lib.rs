@@ -150,6 +150,8 @@ pub fn run() {
             commands::audio_stop,
             commands::audio_seek,
             commands::audio_set_volume,
+            commands::update_ytdlp,
+            commands::read_log,
         ])
         .setup(|app| {
             // Log'u her build'de aç (release dahil): Windows indirme/çalma
@@ -161,6 +163,22 @@ pub fn run() {
                     .level(log::LevelFilter::Info)
                     .build(),
             )?;
+            // Çalışma-anı yt-dlp dizinini ayarla (resolve_bin sidecar'dan önce
+            // burayı kullanır). İlk açılışta güncel yt-dlp yoksa arka planda indir.
+            if let Ok(bin) = commands::ytdlp_bin_dir(&app.handle().clone()) {
+                std::env::set_var("RESONANCE_YTDLP_DIR", &bin);
+                let exe = bin.join(if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" });
+                if !exe.exists() {
+                    let h = app.handle().clone();
+                    tauri::async_runtime::spawn(async move {
+                        match commands::update_ytdlp(h).await {
+                            Ok(v) => log::info!("yt-dlp ilk indirme tamam: {v}"),
+                            Err(e) => log::error!("yt-dlp ilk indirme başarısız: {e}"),
+                        }
+                    });
+                }
+            }
+
             // Ses motorunu başlat ve yönetilen duruma ekle.
             let audio = audio::start(app.handle().clone());
             app.manage(audio);

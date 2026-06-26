@@ -104,6 +104,16 @@ fn resolve_bin(name: &str) -> std::ffi::OsString {
             return p.into_os_string();
         }
     }
+    // 1.5) Çalışma anında indirilen GÜNCEL ikili (app_data/bin). Gömülü sidecar
+    // eskidiğinde (YouTube nsig/format değişiklikleri) onu geçersiz kılar.
+    // Sidecar'dan ÖNCE denenir. Yol setup'ta RESONANCE_YTDLP_DIR ile verilir.
+    if let Some(d) = std::env::var_os("RESONANCE_YTDLP_DIR") {
+        let p = Path::new(&d).join(&exe_name);
+        if p.exists() {
+            return p.into_os_string();
+        }
+    }
+
     // 2) Uygulamaya gömülü sidecar (temiz makineler için).
     // Tauri sidecar'ı normalde triple'sız ("ffmpeg.exe") koyar; yine de garanti
     // olsun diye uygulama dizinini TARA ve triple'lı isimleri de

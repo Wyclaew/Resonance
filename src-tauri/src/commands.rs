@@ -556,3 +556,92 @@ pub fn audio_seek(audio: State<'_, AudioHandle>, ms: u64) {
 pub fn audio_set_volume(audio: State<'_, AudioHandle>, volume: f32) {
     audio.send(AudioCmd::SetVolume(volume));
 }
+
+// --- yt-dlp çalışma-anı güncellemesi (eski sidecar'ı geçersiz kılar) ---
+
+/// Güncel yt-dlp ikilisinin tutulduğu dizin (app_config/bin). resolve_bin
+/// (ytdlp.rs) bu dizini RESONANCE_YTDLP_DIR env'inden okuyup sidecar'dan önce
+/// kullanır.
+pub fn ytdlp_bin_dir(app: &AppHandle) -> anyhow::Result<PathBuf> {
+    let dir = app.path().app_config_dir()?.join("bin");
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+fn ytdlp_target_name() -> &'static str {
+    if cfg!(windows) {
+        "yt-dlp.exe"
+    } else {
+        "yt-dlp"
+    }
+}
+
+/// GitHub'dan en güncel yt-dlp'yi indirip app_config/bin'e yazar. Bir sonraki
+/// arama/indirme bunu kullanır. İndirilen sürüm metnini döndürür.
+#[tauri::command]
+pub async fn update_ytdlp(app: AppHandle) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || -> anyhow::Result<String> {
+        let dir = ytdlp_bin_dir(&app)?;
+        let url = if cfg!(windows) {
+            "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
+        } else if cfg!(target_os = "macos") {
+            "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
+        } else {
+            "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
+        };
+        let dest = dir.join(ytdlp_target_name());
+
+        let client = reqwest::blocking::Client::builder()
+            .user_agent("Resonance")
+            .timeout(std::time::Duration::from_secs(120))
+            .build()?;
+        let bytes = client.get(url).send()?.error_for_status()?.bytes()?;
+        if bytes.len() < 1_000_000 {
+            anyhow::bail!("İndirilen dosya beklenenden küçük ({} B)", bytes.len());
+        }
+        // Önce geçici dosyaya yaz, sonra taşı (kısmi indirme bozmasın).
+        let tmp = dir.join("yt-dlp.download");
+        std::fs::write(&tmp, &bytes)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
+        }
+        std::fs::rename(&tmp, &dest)?;
+        log::info!("yt-dlp güncellendi: {}", dest.display());
+
+        // Sürümü öğren (kısa).
+        let ver = std::process::Command::new(&dest)
+            .arg("--version")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+        Ok(ver)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
+}
+
+/// Uygulama log dosyasının son satırlarını döndürür (Ayarlar → Hata Günlüğü).
+#[tauri::command]
+pub fn read_log(app: AppHandle, lines: Option<usize>) -> Result<String, String> {
+    let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    let mut logs: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .map_err(|e| e.to_string())?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("log"))
+        .collect();
+    logs.sort();
+    let path = logs
+        .last()
+        .ok_or_else(|| "Henüz log dosyası yok.".to_string())?;
+    let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let n = lines.unwrap_or(300);
+    let all: Vec<&str> = content.lines().collect();
+    let start = all.len().saturating_sub(n);
+    Ok(all[start..].join("\n"))
+}

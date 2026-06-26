@@ -14,6 +14,9 @@ import {
   Download,
   Upload,
   Check,
+  Bug,
+  RefreshCw,
+  Copy,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
@@ -36,6 +39,7 @@ const categories = [
   { id: "appearance", label: "Görünüm", icon: Palette },
   { id: "algorithm", label: "Resonance Önerisi", icon: Brain },
   { id: "data", label: "Veri & Yedek", icon: Database },
+  { id: "errorlog", label: "Hata Günlüğü", icon: Bug },
   { id: "about", label: "Hakkında", icon: Info },
 ] as const;
 
@@ -178,6 +182,22 @@ function IntegrationsSettings() {
   const spotifyClientId = useSettingsStore((s) => s.spotifyClientId);
   const spotifyClientSecret = useSettingsStore((s) => s.spotifyClientSecret);
   const update = useSettingsStore((s) => s.update);
+  const [updating, setUpdating] = useState(false);
+  const [ytdlpMsg, setYtdlpMsg] = useState<string | null>(null);
+
+  async function updateYtdlp() {
+    if (!isTauri()) return;
+    setUpdating(true);
+    setYtdlpMsg(null);
+    try {
+      const ver = await invoke<string>("update_ytdlp");
+      setYtdlpMsg(`Güncellendi ✓ ${ver ? `(sürüm ${ver})` : ""}`);
+    } catch (e) {
+      setYtdlpMsg(`Hata: ${String(e)}`);
+    } finally {
+      setUpdating(false);
+    }
+  }
 
   return (
     <div className="max-w-2xl">
@@ -213,6 +233,29 @@ function IntegrationsSettings() {
           />
         </div>
       </SettingRow>
+
+      <SettingRow
+        label="İndirme aracını güncelle"
+        description="Şarkı indirilemiyor/çalmıyorsa genelde yt-dlp eskimiştir (YouTube sık değişir). Bu, en güncel sürümü indirir. İlk açılışta otomatik de denenir."
+      >
+        <button
+          onClick={updateYtdlp}
+          disabled={updating}
+          className="flex items-center gap-2 rounded-md bg-surface-2 px-3 py-1.5 text-sm font-medium text-text hover:bg-surface-3 disabled:opacity-40"
+        >
+          <RefreshCw size={14} className={updating ? "animate-spin" : ""} />
+          {updating ? "Güncelleniyor…" : "Güncelle"}
+        </button>
+      </SettingRow>
+      {ytdlpMsg && (
+        <p
+          className={`mt-2 text-xs ${
+            ytdlpMsg.startsWith("Hata") ? "text-down" : "text-up"
+          }`}
+        >
+          {ytdlpMsg}
+        </p>
+      )}
 
       <div className="mt-6 mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">
         Spotify
@@ -690,6 +733,74 @@ function DataSettings() {
   );
 }
 
+function ErrorLogSettings() {
+  const [log, setLog] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  async function refresh() {
+    if (!isTauri()) {
+      setErr("Günlük yalnızca uygulama içinde okunabilir.");
+      return;
+    }
+    setLoading(true);
+    setErr(null);
+    try {
+      setLog(await invoke<string>("read_log", { lines: 500 }));
+    } catch (e) {
+      setErr(String(e));
+      setLog("");
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(log);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* yoksay */
+    }
+  }
+
+  return (
+    <div className="max-w-3xl">
+      <p className="mb-4 text-sm leading-relaxed text-muted">
+        Uygulama günlüğü — indirme/çalma dahil tüm hataların ham hali. Bir sorun
+        yaşarsan buradaki metni <b className="text-text">kopyalayıp paylaş</b>;
+        kök neden hızlıca bulunur. (En son olaylar en altta.)
+      </p>
+      <div className="mb-3 flex gap-2">
+        <button
+          onClick={refresh}
+          disabled={loading}
+          className="flex items-center gap-2 rounded-md bg-surface-2 px-3 py-1.5 text-sm font-medium text-text hover:bg-surface-3 disabled:opacity-40"
+        >
+          <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Yenile
+        </button>
+        <button
+          onClick={copy}
+          disabled={!log}
+          className="flex items-center gap-2 rounded-md bg-surface-2 px-3 py-1.5 text-sm font-medium text-text hover:bg-surface-3 disabled:opacity-40"
+        >
+          {copied ? <Check size={14} className="text-up" /> : <Copy size={14} />}
+          {copied ? "Kopyalandı" : "Tümünü kopyala"}
+        </button>
+      </div>
+      {err && <p className="mb-2 text-xs text-down">{err}</p>}
+      <pre className="max-h-[58vh] overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-surface p-3 font-mono text-[11px] leading-relaxed text-muted">
+        {loading ? "Yükleniyor…" : log || "Günlük boş."}
+      </pre>
+    </div>
+  );
+}
+
 function AboutSettings() {
   const [version, setVersion] = useState("");
   useEffect(() => {
@@ -770,6 +881,8 @@ export default function SettingsView() {
             <AlgorithmSettings />
           ) : active === "data" ? (
             <DataSettings />
+          ) : active === "errorlog" ? (
+            <ErrorLogSettings />
           ) : (
             <AboutSettings />
           )}
