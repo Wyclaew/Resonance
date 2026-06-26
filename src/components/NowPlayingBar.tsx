@@ -95,7 +95,7 @@ export default function NowPlayingBar() {
     <footer className="flex h-20 shrink-0 items-center gap-4 border-t border-border bg-surface px-4">
       {/* Sol: şu an çalan */}
       <div className="flex min-w-0 flex-1 items-center gap-3">
-        <div className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-md bg-surface-3 text-faint">
+        <div className="grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-lg bg-surface-3 text-faint shadow-lg shadow-black/30 ring-1 ring-white/5 transition-transform hover:scale-[1.03]">
           {current?.thumbnail ? (
             <img
               src={current.thumbnail}
@@ -103,7 +103,7 @@ export default function NowPlayingBar() {
               className="h-full w-full object-cover"
             />
           ) : (
-            <Music2 size={20} />
+            <Music2 size={22} />
           )}
         </div>
         <div className="min-w-0">

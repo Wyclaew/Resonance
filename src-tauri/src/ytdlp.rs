@@ -395,6 +395,12 @@ pub fn ensure_audio(
         // height<=480: muxed'e düşülürse gereksiz büyük video inmesin (ses için yeter).
         "-f",
         "bestaudio[ext=m4a]/bestaudio/best[height<=480]/best",
+        // KRİTİK (Windows): yt-dlp.exe'de JS runtime (deno) yok → 'web' client'ın
+        // nsig/JS imzası çözülemez ve formatları düşer ("Requested format is not
+        // available"). 'android' client imza çözmeden çalışır (mobil API). android
+        // önce denenir; diğerleri yedek. Mac'te de sorunsuz.
+        "--extractor-args",
+        "youtube:player_client=android,web,ios,tv",
         "-N",
         "4", // paralel parça indirme — daha hızlı
         "--no-playlist",
@@ -412,6 +418,24 @@ pub fn ensure_audio(
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         log::error!("yt-dlp indirme hata {video_id}: {}", err.trim());
+        // Teşhis: YouTube bu video için HANGİ formatları sunuyor? (format yoksa
+        // bot koruması/imza sorunu; varsa selector sorunu.)
+        if let Ok(lf) = run_yt_dlp(
+            &[
+                "-F",
+                "--extractor-args",
+                "youtube:player_client=android,web,ios,tv",
+                "--no-warnings",
+                "--",
+                &url,
+            ],
+            cookies,
+        ) {
+            log::error!(
+                "mevcut formatlar {video_id}:\n{}",
+                String::from_utf8_lossy(&lf.stdout).trim()
+            );
+        }
         anyhow::bail!("İndirme başarısız: {}", err.trim());
     }
 

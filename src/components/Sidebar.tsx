@@ -27,7 +27,7 @@ function NavItem({ icon, label, active, collapsed, onClick }: NavItemProps) {
     <button
       onClick={onClick}
       title={collapsed ? label : undefined}
-      className={`flex w-full items-center rounded-md text-sm transition-colors ${
+      className={`group relative flex w-full items-center rounded-md text-sm transition-all ${
         collapsed ? "justify-center px-0 py-2.5" : "gap-3 px-3 py-2"
       } ${
         active
@@ -35,7 +35,16 @@ function NavItem({ icon, label, active, collapsed, onClick }: NavItemProps) {
           : "text-muted hover:bg-surface hover:text-text"
       }`}
     >
-      <span className={active ? "text-accent" : ""}>{icon}</span>
+      {active && !collapsed && (
+        <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-accent" />
+      )}
+      <span
+        className={`transition-colors ${
+          active ? "text-accent" : "group-hover:text-text"
+        }`}
+      >
+        {icon}
+      </span>
       {!collapsed && <span className="truncate">{label}</span>}
     </button>
   );
