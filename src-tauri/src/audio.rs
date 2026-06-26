@@ -111,10 +111,14 @@ fn audio_loop(rx: Receiver<AudioCmd>, shared: Arc<Shared>, app: AppHandle) {
                         }
                         Ok(Err(e)) => {
                             log::error!("çözümleme hatası {path:?}: {e}");
+                            // Boş sink'in sahte 'track-ended' yaymasını önle:
+                            // atlamayı frontend zaten playback-error ile yapar.
+                            ended_emitted = true;
                             let _ = app.emit("playback-error", e.to_string());
                         }
                         Err(_) => {
                             log::error!("çözümleme paniği {path:?}");
+                            ended_emitted = true;
                             let _ = app.emit(
                                 "playback-error",
                                 "ses çözümlenemedi (desteklenmeyen format)".to_string(),

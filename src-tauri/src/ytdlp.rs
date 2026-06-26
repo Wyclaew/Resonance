@@ -6,6 +6,24 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+// Windows'ta alt süreçler (yt-dlp/ffmpeg) varsayılan olarak bir konsol penceresi
+// açar; arama/çalma/prefetch çok kez çağrıldığı için ekrana üst üste pencere
+// fırlar. CREATE_NO_WINDOW bunu bastırır.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+// Komutu Windows'ta konsol penceresi açmayacak şekilde işaretler (no-op değil
+// platformlarda).
+#[cfg(windows)]
+fn no_window(c: &mut Command) {
+    c.creation_flags(CREATE_NO_WINDOW);
+}
+#[cfg(not(windows))]
+fn no_window(_c: &mut Command) {}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchResult {
@@ -23,10 +41,18 @@ pub struct SearchResult {
 // /usr/local/bin'dedir. Komutun PATH'ini bu dizinlerle zenginleştiriyoruz —
 // bu hem yt-dlp'yi bulur hem de yt-dlp'nin çağırdığı ffmpeg'i.
 fn augmented_path() -> String {
+    let current = std::env::var("PATH").unwrap_or_default();
+    // Windows GUI uygulamaları sistem PATH'ini zaten miras alır; ayrıca yol
+    // ayracı ';' olduğu için Unix dizinlerini ':' ile eklemek PATH'i bozar.
+    // O yüzden Windows'ta mevcut PATH'i olduğu gibi bırak.
+    if cfg!(windows) {
+        return current;
+    }
     let extra = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin";
-    match std::env::var("PATH") {
-        Ok(p) if !p.is_empty() => format!("{extra}:{p}"),
-        _ => extra.to_string(),
+    if current.is_empty() {
+        extra.to_string()
+    } else {
+        format!("{extra}:{current}")
     }
 }
 
@@ -71,25 +97,63 @@ fn resolve_bin(name: &str) -> std::ffi::OsString {
 fn yt_dlp(cookies: Option<&str>) -> Command {
     let mut c = Command::new(resolve_bin("yt-dlp"));
     c.env("PATH", augmented_path());
+    no_window(&mut c);
     if let Some(b) = cookies {
         if !b.is_empty() {
-            // Opera GX ayrı bir profil dizininde durur; yt-dlp "opera" tipiyle
-            // birlikte o yolu vererek bulmasını sağlıyoruz.
-            let arg = if b == "opera-gx" {
-                match std::env::var_os("HOME") {
-                    Some(home) => format!(
-                        "opera:{}/Library/Application Support/com.operasoftware.OperaGX",
-                        home.to_string_lossy()
-                    ),
-                    None => "opera".to_string(),
-                }
-            } else {
-                b.to_string()
-            };
-            c.args(["--cookies-from-browser", &arg]);
+            c.args(["--cookies-from-browser", &cookies_arg(b)]);
         }
     }
     c
+}
+
+// Tarayıcı seçimini yt-dlp'nin `--cookies-from-browser` argümanına çevirir.
+// Opera GX ayrı bir profil dizininde durur; yt-dlp onu doğrudan tanımadığı için
+// "opera:<profil-yolu>" biçiminde platforma göre yolu veriyoruz.
+fn cookies_arg(browser: &str) -> String {
+    if browser == "opera-gx" {
+        #[cfg(windows)]
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            return format!(
+                "opera:{}\\Opera Software\\Opera GX Stable",
+                appdata.to_string_lossy()
+            );
+        }
+        #[cfg(target_os = "macos")]
+        if let Some(home) = std::env::var_os("HOME") {
+            return format!(
+                "opera:{}/Library/Application Support/com.operasoftware.OperaGX",
+                home.to_string_lossy()
+            );
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(home) = std::env::var_os("HOME") {
+            return format!("opera:{}/.config/opera-gx", home.to_string_lossy());
+        }
+        return "opera".to_string();
+    }
+    browser.to_string()
+}
+
+// yt-dlp çıktısının bir çerez bulma hatası olup olmadığını anlar (yanlış
+// tarayıcı seçimi, eksik profil vb.). Böyle bir durumda çerezsiz tekrar
+// denemek aramayı/indirmeyi tamamen kırmaktan iyidir.
+fn is_cookie_error(stderr: &str) -> bool {
+    let s = stderr.to_lowercase();
+    s.contains("cookies") && (s.contains("could not find") || s.contains("could not copy"))
+}
+
+// yt-dlp'yi verilen argümanlarla çalıştırır. Çerez hatası alırsa çerezsiz bir
+// kez daha dener — hatalı tarayıcı ayarı tüm işlemi kırmasın (yalnızca
+// tam-playlist/özel-liste avantajı kaybolur).
+fn run_yt_dlp(args: &[&str], cookies: Option<&str>) -> std::io::Result<std::process::Output> {
+    let out = yt_dlp(cookies).args(args).output()?;
+    if cookies.is_some() && !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        if is_cookie_error(&stderr) {
+            return yt_dlp(None).args(args).output();
+        }
+    }
+    Ok(out)
 }
 
 /// YouTube'da arama yapar ve düz (flat) sonuç listesi döndürür.
@@ -99,15 +163,16 @@ pub fn search(
     cookies: Option<&str>,
 ) -> anyhow::Result<Vec<SearchResult>> {
     let spec = format!("ytsearch{}:{}", limit.max(1).min(50), query);
-    let out = yt_dlp(cookies)
-        .args([
+    let out = run_yt_dlp(
+        &[
             "--flat-playlist",
             "--dump-json",
             "--no-warnings",
             "--ignore-errors",
             &spec,
-        ])
-        .output()?;
+        ],
+        cookies,
+    )?;
 
     if out.stdout.is_empty() && !out.status.success() {
         anyhow::bail!(
@@ -173,15 +238,16 @@ pub struct PlaylistMeta {
 
 /// Bir YouTube / YouTube Music çalma listesi URL'inden başlık + şarkıları çıkarır.
 pub fn playlist_meta(url: &str, cookies: Option<&str>) -> anyhow::Result<PlaylistMeta> {
-    let out = yt_dlp(cookies)
-        .args([
+    let out = run_yt_dlp(
+        &[
             "--flat-playlist",
             "--dump-single-json",
             "--no-warnings",
             "--ignore-errors",
             url,
-        ])
-        .output()?;
+        ],
+        cookies,
+    )?;
 
     if out.stdout.is_empty() {
         anyhow::bail!(
@@ -222,6 +288,7 @@ pub fn playlist_meta(url: &str, cookies: Option<&str>) -> anyhow::Result<Playlis
 fn ffmpeg() -> Command {
     let mut c = Command::new(resolve_bin("ffmpeg"));
     c.env("PATH", augmented_path());
+    no_window(&mut c);
     c
 }
 
@@ -256,8 +323,8 @@ pub fn ensure_audio(
     let url = format!("https://www.youtube.com/watch?v={video_id}");
     let dl_tmpl = cache_dir.join(format!("{video_id}.src.%(ext)s"));
 
-    let status = yt_dlp(cookies)
-        .args([
+    let out = run_yt_dlp(
+        &[
             "-f",
             "bestaudio[ext=m4a]/bestaudio",
             "-N",
@@ -269,9 +336,10 @@ pub fn ensure_audio(
             dl_tmpl.to_str().unwrap(),
             "--",
             &url,
-        ])
-        .status()?;
-    if !status.success() {
+        ],
+        cookies,
+    )?;
+    if !out.status.success() {
         anyhow::bail!("yt-dlp ses indirme başarısız ({video_id})");
     }
 

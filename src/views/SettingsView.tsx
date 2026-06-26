@@ -151,9 +151,15 @@ function AlgorithmSettings() {
   );
 }
 
+// macOS dışında Safari yok; Windows'ta seçilirse yt-dlp çerez bulamaz.
+// (Backend yine de çerez hatasında çerezsiz tekrar dener, ama listede
+// göstermemek daha doğru.)
+const IS_MAC =
+  typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
+
 const BROWSERS = [
   { v: "", label: "Kapalı" },
-  { v: "safari", label: "Safari" },
+  ...(IS_MAC ? [{ v: "safari", label: "Safari" }] : []),
   { v: "chrome", label: "Chrome" },
   { v: "brave", label: "Brave" },
   { v: "edge", label: "Edge" },
