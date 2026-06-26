@@ -42,6 +42,9 @@ interface PlayerState {
   toggle: () => void;
   next: () => void;
   prev: () => void;
+  jumpTo: (index: number) => void;
+  removeFromQueue: (uid: string) => void;
+  moveInQueue: (from: number, to: number) => void;
   seek: (ms: number) => void;
   setVolume: (v: number) => void;
   toggleMute: () => void;
@@ -321,6 +324,54 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     });
     loadAndPlay(item);
     prefetchNext();
+  },
+
+  // Kuyrukta belirli bir indekse atla ve çal (Sıra panelinden tıklama).
+  jumpTo: (index) => {
+    const { queue } = get();
+    if (index < 0 || index >= queue.length) return;
+    recordOutgoing(get());
+    const item = queue[index];
+    set({
+      queueIndex: index,
+      current: item,
+      status: "loading",
+      positionMs: 0,
+      durationMs: item.durationMs,
+    });
+    loadAndPlay(item);
+    prefetchNext();
+  },
+
+  // Bir öğeyi kuyruktan çıkar (çalan öğe çıkarılamaz). current'ı takip eder.
+  removeFromQueue: (uid) => {
+    const { queue, queueIndex, current } = get();
+    if (current?.uid === uid) return;
+    const idx = queue.findIndex((i) => i.uid === uid);
+    if (idx < 0) return;
+    const nextQueue = queue.filter((i) => i.uid !== uid);
+    const nextIndex = idx < queueIndex ? queueIndex - 1 : queueIndex;
+    set({ queue: nextQueue, queueIndex: nextIndex });
+  },
+
+  // Kuyrukta öğe taşı (sürükle-bırak). Çalan öğenin indeksi korunur.
+  moveInQueue: (from, to) => {
+    const { queue, current } = get();
+    if (
+      from === to ||
+      from < 0 ||
+      to < 0 ||
+      from >= queue.length ||
+      to >= queue.length
+    )
+      return;
+    const nq = [...queue];
+    const [moved] = nq.splice(from, 1);
+    nq.splice(to, 0, moved);
+    const nextIndex = current
+      ? nq.findIndex((i) => i.uid === current.uid)
+      : get().queueIndex;
+    set({ queue: nq, queueIndex: nextIndex });
   },
 
   seek: (ms) => {

@@ -54,7 +54,7 @@ export default function LyricsPanel() {
   }, [activeIdx]);
 
   return (
-    <div className="absolute inset-0 z-20 flex flex-col bg-bg/95 backdrop-blur-sm">
+    <div className="absolute inset-0 z-20 flex flex-col bg-bg/95 backdrop-blur-sm animate-panel-in">
       <header className="flex items-start justify-between px-8 pb-3 pt-6">
         <div className="min-w-0">
           <h2 className="truncate text-lg font-semibold">

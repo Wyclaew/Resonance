@@ -42,17 +42,43 @@ pub struct SearchResult {
 // bu hem yt-dlp'yi bulur hem de yt-dlp'nin çağırdığı ffmpeg'i.
 fn augmented_path() -> String {
     let current = std::env::var("PATH").unwrap_or_default();
-    // Windows GUI uygulamaları sistem PATH'ini zaten miras alır; ayrıca yol
-    // ayracı ';' olduğu için Unix dizinlerini ':' ile eklemek PATH'i bozar.
-    // O yüzden Windows'ta mevcut PATH'i olduğu gibi bırak.
-    if cfg!(windows) {
-        return current;
+    // Yol ayracı platforma göre değişir (Windows ';', diğerleri ':').
+    let sep = if cfg!(windows) { ";" } else { ":" };
+    let mut extra: Vec<String> = Vec::new();
+    // Sidecar dizini (uygulama exe'sinin yanı): gömülü yt-dlp, kendi
+    // çağırdığı ffmpeg'i (DASH m4a FixupM4a için) PATH üzerinden de bulabilsin.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            extra.push(dir.to_string_lossy().into_owned());
+        }
     }
-    let extra = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin";
-    if current.is_empty() {
-        extra.to_string()
+    // macOS/Linux GUI uygulamaları kabuk PATH'ini miras almaz; Homebrew vb.
+    // yaygın dizinleri ekle (Windows GUI uygulamaları sistem PATH'ini alır).
+    #[cfg(not(windows))]
+    {
+        for d in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"] {
+            extra.push(d.to_string());
+        }
+    }
+    let prefix = extra.join(sep);
+    match (prefix.is_empty(), current.is_empty()) {
+        (true, _) => current,
+        (false, true) => prefix,
+        (false, false) => format!("{prefix}{sep}{current}"),
+    }
+}
+
+// yt-dlp'ye verilecek ffmpeg yolu. YouTube ses akışları artık DASH m4a olduğu
+// için yt-dlp indirdikten sonra container'ı ffmpeg ile düzeltir (FixupM4a).
+// ffmpeg PATH'te yoksa (Windows: sistemde kurulu değil, sidecar yanında ama
+// yt-dlp bilmiyor) ham/bozuk m4a yazar → çalma/dönüştürme başarısız olur.
+// Sidecar/sistemdeki gerçek ffmpeg yolunu açıkça vererek bunu önlüyoruz.
+fn ffmpeg_path() -> Option<PathBuf> {
+    let p = PathBuf::from(resolve_bin("ffmpeg"));
+    if p.is_absolute() && p.exists() {
+        Some(p)
     } else {
-        format!("{extra}:{current}")
+        None
     }
 }
 
@@ -323,24 +349,31 @@ pub fn ensure_audio(
     let url = format!("https://www.youtube.com/watch?v={video_id}");
     let dl_tmpl = cache_dir.join(format!("{video_id}.src.%(ext)s"));
 
-    let out = run_yt_dlp(
-        &[
-            "-f",
-            "bestaudio[ext=m4a]/bestaudio",
-            "-N",
-            "4", // paralel parça indirme — daha hızlı
-            "--no-playlist",
-            "--no-warnings",
-            "--no-part",
-            "-o",
-            dl_tmpl.to_str().unwrap(),
-            "--",
-            &url,
-        ],
-        cookies,
-    )?;
+    let dl_tmpl_str = dl_tmpl.to_str().unwrap();
+    let ff = ffmpeg_path();
+    let ff_str = ff.as_ref().map(|p| p.to_string_lossy());
+    let mut args: Vec<&str> = vec![
+        "-f",
+        "bestaudio[ext=m4a]/bestaudio",
+        "-N",
+        "4", // paralel parça indirme — daha hızlı
+        "--no-playlist",
+        "--no-warnings",
+        "--no-part",
+    ];
+    // ffmpeg'i açıkça bildir (DASH m4a düzeltmesi için; Windows'ta şart).
+    if let Some(s) = ff_str.as_deref() {
+        args.push("--ffmpeg-location");
+        args.push(s);
+    }
+    args.extend(["-o", dl_tmpl_str, "--", &url]);
+
+    let out = run_yt_dlp(&args, cookies)?;
     if !out.status.success() {
-        anyhow::bail!("yt-dlp ses indirme başarısız ({video_id})");
+        anyhow::bail!(
+            "yt-dlp ses indirme başarısız ({video_id}): {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
     }
 
     let src = find_src(cache_dir, video_id)

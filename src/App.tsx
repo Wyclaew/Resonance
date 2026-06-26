@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import Sidebar from "./components/Sidebar";
 import NowPlayingBar from "./components/NowPlayingBar";
 import LyricsPanel from "./components/LyricsPanel";
+import QueuePanel from "./components/QueuePanel";
+import CommandPalette from "./components/CommandPalette";
 import Toasts from "./components/Toasts";
 import { getDb, isTauri } from "./lib/db";
 import { initPlayer, usePlayerStore } from "./store/usePlayerStore";
@@ -45,6 +47,10 @@ function CurrentView() {
 export default function App() {
   const accentColor = useSettingsStore((s) => s.accentColor);
   const lyricsOpen = useAppStore((s) => s.lyricsOpen);
+  const queueOpen = useAppStore((s) => s.queueOpen);
+  const commandOpen = useAppStore((s) => s.commandOpen);
+  const view = useAppStore((s) => s.view);
+  const activePlaylistId = useAppStore((s) => s.activePlaylistId);
 
   // DB'yi açılışta başlat (migration'ları tetikler). Tauri dışında atlanır.
   useEffect(() => {
@@ -81,6 +87,13 @@ export default function App() {
   // Klavye kısayolları (input/textarea dışında).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      // Komut paleti (Cmd/Ctrl+K) — input içindeyken bile çalışır.
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault();
+        const a = useAppStore.getState();
+        a.setCommand(!a.commandOpen);
+        return;
+      }
       const t = e.target as HTMLElement | null;
       if (
         t &&
@@ -125,11 +138,16 @@ export default function App() {
       <div className="flex min-h-0 flex-1">
         <Sidebar />
         <main className="relative min-w-0 flex-1 overflow-hidden bg-bg">
-          <CurrentView />
+          {/* view (ve aktif liste) değişince yumuşak fade-in */}
+          <div key={`${view}:${activePlaylistId ?? ""}`} className="h-full animate-fade-in">
+            <CurrentView />
+          </div>
           {lyricsOpen && <LyricsPanel />}
+          {queueOpen && <QueuePanel />}
         </main>
       </div>
       <NowPlayingBar />
+      {commandOpen && <CommandPalette />}
       <Toasts />
     </div>
   );

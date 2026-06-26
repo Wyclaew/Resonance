@@ -12,6 +12,7 @@ import {
   Music2,
   Sparkles,
   ScrollText,
+  ListMusic,
 } from "lucide-react";
 import { usePlayerStore } from "../store/usePlayerStore";
 import { useAppStore } from "../store/useAppStore";
@@ -47,6 +48,8 @@ export default function NowPlayingBar() {
 
   const lyricsOpen = useAppStore((s) => s.lyricsOpen);
   const toggleLyrics = useAppStore((s) => s.toggleLyrics);
+  const queueOpen = useAppStore((s) => s.queueOpen);
+  const toggleQueue = useAppStore((s) => s.toggleQueue);
 
   const isPlaying = status === "playing";
   const pct = durationMs > 0 ? (positionMs / durationMs) * 100 : 0;
@@ -156,8 +159,15 @@ export default function NowPlayingBar() {
         </div>
       </div>
 
-      {/* Sağ: sözler, uyku, ses */}
+      {/* Sağ: sıra, sözler, uyku, ses */}
       <div className="flex flex-1 items-center justify-end gap-3">
+        <button
+          onClick={toggleQueue}
+          title="Sıra"
+          className={queueOpen ? "text-accent" : "text-muted hover:text-text"}
+        >
+          <ListMusic size={16} />
+        </button>
         <button
           onClick={toggleLyrics}
           title="Sözler"

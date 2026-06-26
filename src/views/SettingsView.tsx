@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Play,
   HardDrive,
@@ -12,6 +12,7 @@ import {
   Cloud,
   Trash2,
   Download,
+  Upload,
   Check,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
@@ -19,9 +20,11 @@ import ViewHeader from "../components/ViewHeader";
 import Toggle from "../components/Toggle";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { useLibraryStore } from "../store/useLibraryStore";
+import { usePlaylistStore } from "../store/usePlaylistStore";
 import { getDeviceId } from "../lib/device";
 import { getDb, isTauri } from "../lib/db";
 import { formatBytes } from "../lib/format";
+import { importBackup, type ImportResult } from "../lib/backup";
 
 const categories = [
   { id: "account", label: "Hesap & Senkron", icon: Cloud },
@@ -475,6 +478,33 @@ function DataSettings() {
   const [err, setErr] = useState<string | null>(null);
   const [backups, setBackups] = useState<BackupInfo[]>([]);
   const [confirmRestore, setConfirmRestore] = useState<BackupInfo | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  async function onImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setErr(null);
+    setSavedPath(null);
+    setImportResult(null);
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const r = await importBackup(text);
+      setImportResult(r);
+      // Mağazaları tazele ki içe aktarılanlar anında görünsün.
+      await Promise.all([
+        useLibraryStore.getState().refresh(),
+        usePlaylistStore.getState().refresh(),
+      ]);
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setImporting(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
 
   async function loadBackups() {
     if (!isTauri()) return;
@@ -536,18 +566,43 @@ function DataSettings() {
   return (
     <div className="max-w-2xl">
       <p className="mb-4 text-sm leading-relaxed text-muted">
-        Çalma listelerin, oyların/karman ve ayarların bir JSON dosyasına
-        yedeklenir (İndirilenler klasörüne). Ses dosyaları dahil değildir.
+        Çalma listelerin, oyların/karman bir JSON dosyasına yedeklenir
+        (İndirilenler klasörüne). Bu dosyayı başka bir cihazda ya da bir
+        arkadaşınla <b className="text-text">içe aktararak</b> tüm listeleri
+        paylaşabilirsin. Ses dosyaları dahil değildir — şarkılar her cihazda ilk
+        çalmada otomatik indirilir. (Ayarlar/gizli anahtarlar paylaşılmaz.)
       </p>
-      <button
-        onClick={exportData}
-        disabled={exporting}
-        className="flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-medium text-bg disabled:opacity-40"
-      >
-        <Download size={15} /> Yedeği dışa aktar
-      </button>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          onClick={exportData}
+          disabled={exporting}
+          className="flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-medium text-bg disabled:opacity-40"
+        >
+          <Download size={15} /> Yedeği dışa aktar
+        </button>
+        <button
+          onClick={() => fileRef.current?.click()}
+          disabled={importing}
+          className="flex items-center gap-2 rounded-md bg-surface-2 px-4 py-2 text-sm font-medium text-text hover:bg-surface-3 disabled:opacity-40"
+        >
+          <Upload size={15} /> {importing ? "İçe aktarılıyor…" : "İçe aktar"}
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".json,application/json"
+          hidden
+          onChange={onImportFile}
+        />
+      </div>
       {savedPath && (
         <p className="mt-3 break-all text-xs text-up">Kaydedildi: {savedPath}</p>
+      )}
+      {importResult && (
+        <p className="mt-3 text-xs text-up">
+          İçe aktarıldı: {importResult.playlists} liste, {importResult.tracks}{" "}
+          şarkı, {importResult.votes} oy.
+        </p>
       )}
       {err && <p className="mt-3 text-xs text-down">{err}</p>}
 
@@ -600,7 +655,7 @@ function DataSettings() {
           onClick={() => setConfirmRestore(null)}
         >
           <div
-            className="w-96 rounded-lg border border-border bg-surface-2 p-5 shadow-2xl"
+            className="w-96 animate-pop-in rounded-lg border border-border bg-surface-2 p-5 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-base font-semibold">Yedeği geri yükle?</h3>

@@ -106,6 +106,78 @@ textarea:focus-visible {
   outline: none;
 }
 
+/* ---- Animasyonlar (ölçülü; hareket azaltma tercihine saygılı) ---- */
+@keyframes res-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes res-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes res-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes res-shimmer {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}
+
+.animate-fade-in {
+  animation: res-fade-in 0.22s ease both;
+}
+.animate-panel-in {
+  animation: res-panel-in 0.2s ease both;
+}
+.animate-pop-in {
+  animation: res-pop-in 0.14s ease both;
+}
+
+/* Yükleme iskeleti (skeleton) */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-2) 25%,
+    var(--color-surface-3) 50%,
+    var(--color-surface-2) 75%
+  );
+  background-size: 800px 100%;
+  animation: res-shimmer 1.3s linear infinite;
+  border-radius: var(--radius);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-panel-in,
+  .animate-pop-in,
+  .skeleton {
+    animation: none;
+  }
+}
+
 /* İlerleme / ses kaydırıcıları — özel, ince, kehribar dolgulu */
 .resonance-range {
   -webkit-appearance: none;

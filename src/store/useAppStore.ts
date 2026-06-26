@@ -7,10 +7,14 @@ interface AppState {
   activePlaylistId: string | null;
   sidebarCollapsed: boolean;
   lyricsOpen: boolean;
+  queueOpen: boolean;
+  commandOpen: boolean;
 
   navigate: (view: ViewId, playlistId?: string | null) => void;
   toggleSidebar: () => void;
   toggleLyrics: () => void;
+  toggleQueue: () => void;
+  setCommand: (open: boolean) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -18,10 +22,15 @@ export const useAppStore = create<AppState>((set) => ({
   activePlaylistId: null,
   sidebarCollapsed: false,
   lyricsOpen: false,
+  queueOpen: false,
+  commandOpen: false,
 
   navigate: (view, playlistId = null) =>
-    set({ view, activePlaylistId: playlistId }),
+    set({ view, activePlaylistId: playlistId, commandOpen: false }),
   toggleSidebar: () =>
     set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
-  toggleLyrics: () => set((s) => ({ lyricsOpen: !s.lyricsOpen })),
+  // Sözler ve Sıra panelleri aynı yeri kaplar — biri açılınca diğeri kapanır.
+  toggleLyrics: () => set((s) => ({ lyricsOpen: !s.lyricsOpen, queueOpen: false })),
+  toggleQueue: () => set((s) => ({ queueOpen: !s.queueOpen, lyricsOpen: false })),
+  setCommand: (open) => set({ commandOpen: open }),
 }));
