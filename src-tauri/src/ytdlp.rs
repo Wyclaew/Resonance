@@ -378,8 +378,13 @@ pub fn ensure_audio(
         ff.as_deref().map(|p| p.display().to_string())
     );
     let mut args: Vec<&str> = vec![
+        // /best fallback ŞART: eski/sınırlı yt-dlp (özellikle Windows sidecar)
+        // YouTube'un nsig/JS challenge'ını çözemeyince audio-only DASH formatları
+        // görünmez ve "Requested format is not available" hatası gelir. Bu durumda
+        // muxed 'best' (video+ses) indirilir ve ffmpeg ile sadece ses çıkarılır (-vn).
+        // height<=480: muxed'e düşülürse gereksiz büyük video inmesin (ses için yeter).
         "-f",
-        "bestaudio[ext=m4a]/bestaudio",
+        "bestaudio[ext=m4a]/bestaudio/best[height<=480]/best",
         "-N",
         "4", // paralel parça indirme — daha hızlı
         "--no-playlist",
@@ -412,6 +417,7 @@ pub fn ensure_audio(
             "error",
             "-i",
             src.to_str().unwrap(),
+            "-vn", // video varsa (muxed best) at — sadece ses
             "-c:a",
             "copy",
             "-f",
@@ -438,6 +444,7 @@ pub fn ensure_audio(
                 "error",
                 "-i",
                 src.to_str().unwrap(),
+                "-vn", // video varsa (muxed best) at — sadece ses
                 "-c:a",
                 "aac",
                 "-b:a",
