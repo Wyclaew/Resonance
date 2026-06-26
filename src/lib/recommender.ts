@@ -38,6 +38,17 @@ function isWeekend(dow: number): boolean {
   return dow === 0 || dow === 6;
 }
 
+// Şarkı kimlik anahtarı (başlık+sanatçı, normalize). Aynı şarkının farklı
+// YouTube video id'lerini de eşleştirir → mevcut listedeki bir parçanın
+// "başka bir kaydı" öneri olarak gelmesin.
+function normKey(title: string, artist: string): string {
+  return `${title} ${artist}`
+    .toLowerCase()
+    .replace(/\(.*?\)|\[.*?\]/g, "") // (Official Video), [HD] vb.
+    .replace(/[^a-z0-9çğıöşü]+/gi, "")
+    .trim();
+}
+
 // O anki bağlama (saat/gün) yakınlık ağırlığı.
 function contextWeight(
   voteHour: number,
@@ -106,6 +117,18 @@ export async function getRecommendations(
   const recs: Recommendation[] = [];
   const taken = new Set<string>(opts.excludeIds);
 
+  // Mevcut çalan listedeki şarkıların başlık+sanatçı anahtarları. Öneriler bu
+  // listeden (farklı video id'li aynı şarkı dahil) GELMESİN — kullanıcı farklı
+  // bir listesi varsa öneriler oradan/kütüphaneden gelir.
+  const playlistKeys = new Set<string>();
+  const plTrackRows = await db.select<{ title: string; artist: string }[]>(
+    `SELECT t.title, t.artist
+     FROM playlist_tracks pt JOIN tracks t ON t.id = pt.track_id
+     WHERE pt.playlist_id = $1`,
+    [opts.playlistId]
+  );
+  for (const r of plTrackRows) playlistKeys.add(normKey(r.title, r.artist));
+
   // 2) Kütüphane adayları (mevcut listede olmayan, oy/karma'ya göre puanlı).
   if (opts.useLibrary) {
     const cands = await db.select<CandidateRow[]>(
@@ -126,6 +149,7 @@ export async function getRecommendations(
 
     for (const { c } of scored) {
       if (taken.has(c.id)) continue;
+      if (playlistKeys.has(normKey(c.title, c.artist))) continue;
       const aff = artistAffinity.get(c.artist) ?? 0;
       recs.push({
         ...toTrack(c),
@@ -173,6 +197,7 @@ export async function getRecommendations(
         let added = 0;
         for (const r of results) {
           if (taken.has(r.id) || added >= 2) continue;
+          if (playlistKeys.has(normKey(r.title, r.artist))) continue;
           recs.push({
             ...r,
             recSource: "youtube",

@@ -94,6 +94,12 @@ export default function App() {
         a.setCommand(!a.commandOpen);
         return;
       }
+      // Yan paneli daralt/genişlet (Cmd/Ctrl+B).
+      if ((e.metaKey || e.ctrlKey) && (e.key === "b" || e.key === "B")) {
+        e.preventDefault();
+        useAppStore.getState().toggleSidebar();
+        return;
+      }
       const t = e.target as HTMLElement | null;
       if (
         t &&

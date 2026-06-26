@@ -152,13 +152,15 @@ pub fn run() {
             commands::audio_set_volume,
         ])
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            // Log'u her build'de aç (release dahil): Windows indirme/çalma
+            // sorunlarının teşhisi için log dosyası şart. Dosya:
+            // Windows  %APPDATA%\com.resonance.app\logs\
+            // macOS    ~/Library/Logs/com.resonance.app/
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .build(),
+            )?;
             // Ses motorunu başlat ve yönetilen duruma ekle.
             let audio = audio::start(app.handle().clone());
             app.manage(audio);

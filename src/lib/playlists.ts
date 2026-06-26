@@ -221,6 +221,36 @@ export async function getPlaylistTracks(
   }));
 }
 
+// Tek bir parçanın (bir liste bağlamındaki) karma + son oy bilgisi.
+// Alt baradan (NowPlayingBar) çalan şarkıyı oylamak için.
+export async function getTrackKarma(
+  playlistId: string,
+  trackId: string
+): Promise<{ karma: number; lastVoteAt?: number; myVote: Vote }> {
+  const db = await getDb();
+  const events = await db.select<{ value: number; created_at: number }[]>(
+    `SELECT value, created_at FROM votes WHERE playlist_id = $1 AND track_id = $2`,
+    [playlistId, trackId]
+  );
+  const voteEvents: VoteEvent[] = events.map((e) => ({
+    value: e.value,
+    createdAt: e.created_at,
+  }));
+  let lastAt: number | undefined;
+  let lastDir = 0;
+  for (const e of events) {
+    if (lastAt == null || e.created_at >= lastAt) {
+      lastAt = e.created_at;
+      lastDir = Math.sign(e.value);
+    }
+  }
+  return {
+    karma: computeKarma(voteEvents, Date.now()),
+    lastVoteAt: lastAt,
+    myVote: lastDir as Vote,
+  };
+}
+
 // Bir parçaya oy ver — BİRİKEN model (toggle yok): her up +1, down -1 ekler.
 // Şarkı başına saatte 1 (cooldown). Olay zaman bağlamıyla loglanır (karma + M4).
 export async function voteTrack(

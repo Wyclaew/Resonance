@@ -14,10 +14,15 @@ import {
   ScrollText,
   ListMusic,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { usePlayerStore } from "../store/usePlayerStore";
 import { useAppStore } from "../store/useAppStore";
+import { useToastStore } from "../store/useToastStore";
 import { formatMs } from "../lib/format";
+import { isTauri } from "../lib/db";
+import { getTrackKarma, voteTrack } from "../lib/playlists";
 import AddToPlaylistButton from "./AddToPlaylistButton";
+import KarmaControl from "./KarmaControl";
 import SleepTimerButton from "./SleepTimerButton";
 
 function VolumeIcon({ volume, muted }: { volume: number; muted: boolean }) {
@@ -50,6 +55,38 @@ export default function NowPlayingBar() {
   const toggleLyrics = useAppStore((s) => s.toggleLyrics);
   const queueOpen = useAppStore((s) => s.queueOpen);
   const toggleQueue = useAppStore((s) => s.toggleQueue);
+  const showToast = useToastStore((s) => s.show);
+
+  // Çalan şarkının (bir liste bağlamındaysa) karma bilgisi — alt baradan oylama.
+  const [karma, setKarma] = useState<{ karma: number; lastVoteAt?: number } | null>(
+    null
+  );
+  const playlistId = current?.playlistId;
+  useEffect(() => {
+    if (playlistId && current?.id && isTauri()) {
+      getTrackKarma(playlistId, current.id)
+        .then((k) => setKarma({ karma: k.karma, lastVoteAt: k.lastVoteAt }))
+        .catch(() => setKarma(null));
+    } else {
+      setKarma(null);
+    }
+  }, [current?.id, playlistId]);
+
+  async function handleVote(dir: 1 | -1) {
+    if (!playlistId || !current?.id) return;
+    try {
+      const res = await voteTrack(playlistId, current.id, dir);
+      if (!res.ok) {
+        const mins = Math.ceil(res.cooldownRemainingMs / 60_000);
+        showToast(`Bu şarkı için ${mins} dk sonra tekrar oy verebilirsin`, "info");
+        return;
+      }
+      const k = await getTrackKarma(playlistId, current.id);
+      setKarma({ karma: k.karma, lastVoteAt: k.lastVoteAt });
+    } catch {
+      /* yoksay */
+    }
+  }
 
   const isPlaying = status === "playing";
   const pct = durationMs > 0 ? (positionMs / durationMs) * 100 : 0;
@@ -91,6 +128,13 @@ export default function NowPlayingBar() {
         </div>
         {current?.isRecommendation && (
           <AddToPlaylistButton track={current} always openUp />
+        )}
+        {karma && (
+          <KarmaControl
+            karma={karma.karma}
+            lastVoteAt={karma.lastVoteAt}
+            onVote={handleVote}
+          />
         )}
       </div>
 

@@ -104,12 +104,29 @@ fn resolve_bin(name: &str) -> std::ffi::OsString {
             return p.into_os_string();
         }
     }
-    // 2) Uygulamaya gömülü sidecar (temiz makineler için)
+    // 2) Uygulamaya gömülü sidecar (temiz makineler için).
+    // Tauri sidecar'ı normalde triple'sız ("ffmpeg.exe") koyar; yine de garanti
+    // olsun diye uygulama dizinini TARA ve triple'lı isimleri de
+    // ("ffmpeg-x86_64-pc-windows-msvc.exe") yakala. İsimlendirme farkı yüzünden
+    // ffmpeg/yt-dlp bulunamayıp indirme/çalmanın kırılmasını önler.
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            let p = dir.join(&exe_name);
-            if p.exists() {
-                return p.into_os_string();
+            let direct = dir.join(&exe_name);
+            if direct.exists() {
+                return direct.into_os_string();
+            }
+            if let Ok(rd) = std::fs::read_dir(dir) {
+                let want_exact = exe_name.to_lowercase();
+                let want_prefix = format!("{name}-").to_lowercase();
+                for e in rd.flatten() {
+                    let fname = e.file_name().to_string_lossy().to_lowercase();
+                    let is_match = fname == want_exact
+                        || (fname.starts_with(&want_prefix)
+                            && (!cfg!(windows) || fname.ends_with(".exe")));
+                    if is_match && e.path().is_file() {
+                        return e.path().into_os_string();
+                    }
+                }
             }
         }
     }
@@ -352,6 +369,14 @@ pub fn ensure_audio(
     let dl_tmpl_str = dl_tmpl.to_str().unwrap();
     let ff = ffmpeg_path();
     let ff_str = ff.as_ref().map(|p| p.to_string_lossy());
+
+    // Teşhis: hangi ikilileri ve ffmpeg yolunu kullanıyoruz? (Windows'ta
+    // sidecar bulunamazsa burada görünür.)
+    log::info!(
+        "ensure_audio {video_id}: yt-dlp={:?}, ffmpeg={:?}",
+        resolve_bin("yt-dlp"),
+        ff.as_deref().map(|p| p.display().to_string())
+    );
     let mut args: Vec<&str> = vec![
         "-f",
         "bestaudio[ext=m4a]/bestaudio",
@@ -370,10 +395,9 @@ pub fn ensure_audio(
 
     let out = run_yt_dlp(&args, cookies)?;
     if !out.status.success() {
-        anyhow::bail!(
-            "yt-dlp ses indirme başarısız ({video_id}): {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        );
+        let err = String::from_utf8_lossy(&out.stderr);
+        log::error!("yt-dlp indirme hata {video_id}: {}", err.trim());
+        anyhow::bail!("İndirme başarısız: {}", err.trim());
     }
 
     let src = find_src(cache_dir, video_id)
@@ -381,7 +405,7 @@ pub fn ensure_audio(
     let target = cache_dir.join(format!("{video_id}.aac"));
 
     // 1) Hızlı yol: AAC akışını kopyalayarak ADTS'ye remux et.
-    let copied = ffmpeg()
+    let remux = ffmpeg()
         .args([
             "-y",
             "-v",
@@ -394,14 +418,20 @@ pub fn ensure_audio(
             "adts",
             target.to_str().unwrap(),
         ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
+        .output();
+    let copied = match &remux {
+        Ok(o) => o.status.success(),
+        Err(e) => {
+            // ffmpeg hiç çalıştırılamadı (bulunamadı). En olası Windows kök nedeni.
+            log::error!("ffmpeg çalıştırılamadı (remux): {e}");
+            false
+        }
+    };
 
-    // 2) Kaynak AAC değilse (opus/webm) aac'ye transcode et.
+    // 2) Kaynak AAC değilse (opus/webm) ya da kopyalama başarısızsa transcode et.
     if !copied || !target.exists() {
         let _ = std::fs::remove_file(&target);
-        ffmpeg()
+        match ffmpeg()
             .args([
                 "-y",
                 "-v",
@@ -416,7 +446,24 @@ pub fn ensure_audio(
                 "adts",
                 target.to_str().unwrap(),
             ])
-            .status()?;
+            .output()
+        {
+            Ok(o) if o.status.success() => {}
+            Ok(o) => {
+                let _ = std::fs::remove_file(&src);
+                let err = String::from_utf8_lossy(&o.stderr);
+                log::error!("ffmpeg dönüştürme hata {video_id}: {}", err.trim());
+                anyhow::bail!("Ses dönüştürme başarısız (ffmpeg): {}", err.trim());
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&src);
+                // ffmpeg bulunamadı — kullanıcıya net söyle (yol bilgisiyle).
+                anyhow::bail!(
+                    "ffmpeg bulunamadı/çalıştırılamadı ({e}). ffmpeg yolu: {:?}",
+                    ff.as_deref().map(|p| p.display().to_string())
+                );
+            }
+        }
     }
 
     let _ = std::fs::remove_file(&src);

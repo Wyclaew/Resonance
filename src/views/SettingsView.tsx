@@ -16,6 +16,7 @@ import {
   Check,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import ViewHeader from "../components/ViewHeader";
 import Toggle from "../components/Toggle";
 import { useSettingsStore } from "../store/useSettingsStore";
@@ -690,6 +691,13 @@ function DataSettings() {
 }
 
 function AboutSettings() {
+  const [version, setVersion] = useState("");
+  useEffect(() => {
+    if (!isTauri()) return;
+    getVersion()
+      .then(setVersion)
+      .catch(() => {});
+  }, []);
   return (
     <div className="max-w-2xl text-sm leading-relaxed text-muted">
       <div className="flex items-center gap-3">
@@ -698,7 +706,7 @@ function AboutSettings() {
         </div>
         <div>
           <div className="text-base font-semibold text-text">Resonance</div>
-          <div className="text-xs text-faint">Sürüm 0.1.0</div>
+          <div className="text-xs text-faint">Sürüm {version || "—"}</div>
         </div>
       </div>
       <p className="mt-4">

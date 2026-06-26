@@ -81,7 +81,10 @@ function loadAndPlay(item: QueueItem) {
     },
     cookiesBrowser: useSettingsStore.getState().cookiesBrowser,
   }).catch((e) => {
+    // Hatayı SESSİZCE yutma — kullanıcı neden çalmadığını görsün (özellikle
+    // Windows'ta ffmpeg/yt-dlp sorunlarının teşhisi için kritik).
     console.error("[resonance] play_track hatası:", e);
+    useToastStore.getState().show(`Şarkı yüklenemedi — ${String(e)}`, "error");
     usePlayerStore.setState({ status: "idle", error: String(e) });
   });
 }
@@ -242,6 +245,17 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         while (ri < recItems.length) q.push(recItems[ri++]);
         return { queue: q };
       });
+      // Önerileri kuyruktaki konumlarından BAĞIMSIZ olarak hemen prefetch et
+      // (prefetchNext yalnızca 3 önden bakar; öneri daha geride olabilir).
+      // Böylece sıra geldiğinde çözümleme/indirme zaten tamamlanmış olur.
+      if (isTauri() && s.prefetchEnabled) {
+        for (const r of recs) {
+          invoke("prefetch_audio", {
+            sourceId: r.sourceId,
+            cookiesBrowser: s.cookiesBrowser,
+          }).catch(() => {});
+        }
+      }
     } catch (e) {
       console.error("[resonance] radyo önerileri alınamadı:", e);
     }
