@@ -213,8 +213,12 @@ fn run_yt_dlp(args: &[&str], cookies: Option<&str>) -> std::io::Result<std::proc
 pub fn search(
     query: &str,
     limit: u32,
-    cookies: Option<&str>,
+    _cookies: Option<&str>, // bilerek yok sayılır — aşağıdaki nota bakın
 ) -> anyhow::Result<Vec<SearchResult>> {
+    // Aramada çerez KULLANMA: (1) her tuş vuruşunda tarayıcı çerez veritabanını
+    // (yüzlerce çerez) okumak aramayı ciddi yavaşlatır; (2) giriş yapılmış çerez
+    // YouTube'u "bot" moduna sokup yalnızca storyboard döndürebilir. Düz arama
+    // (flat-playlist) zaten çerez gerektirmez.
     let spec = format!("ytsearch{}:{}", limit.max(1).min(50), query);
     let out = run_yt_dlp(
         &[
@@ -224,7 +228,7 @@ pub fn search(
             "--ignore-errors",
             &spec,
         ],
-        cookies,
+        None,
     )?;
 
     if out.stdout.is_empty() && !out.status.success() {
@@ -414,23 +418,25 @@ pub fn ensure_audio(
     }
     args.extend(["-o", dl_tmpl_str, "--", &url]);
 
-    let out = run_yt_dlp(&args, cookies)?;
+    // Önce ÇEREZSİZ dene: çerezsiz akış gerçek formatları getirir. Giriş
+    // yapılmış çerez ise YouTube'u "bot" moduna sokup yalnızca storyboard
+    // döndürebiliyor ("Requested format is not available"). Başarısız olur ve
+    // kullanıcı bir tarayıcı seçtiyse, çerezle bir kez daha dene (yaş/bölge
+    // kısıtlı veya özel video için).
+    let mut out = run_yt_dlp(&args, None)?;
+    if !out.status.success() {
+        if let Some(c) = cookies {
+            if !c.is_empty() {
+                log::info!("çerezsiz başarısız, çerezle yeniden deneniyor: {video_id}");
+                out = run_yt_dlp(&args, Some(c))?;
+            }
+        }
+    }
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         log::error!("yt-dlp indirme hata {video_id}: {}", err.trim());
-        // Teşhis: YouTube bu video için HANGİ formatları sunuyor? (format yoksa
-        // bot koruması/imza sorunu; varsa selector sorunu.)
-        if let Ok(lf) = run_yt_dlp(
-            &[
-                "-F",
-                "--extractor-args",
-                "youtube:player_client=android,web,ios,tv",
-                "--no-warnings",
-                "--",
-                &url,
-            ],
-            cookies,
-        ) {
+        // Teşhis: YouTube bu video için HANGİ formatları sunuyor? (çerezsiz)
+        if let Ok(lf) = run_yt_dlp(&["-F", "--no-warnings", "--", &url], None) {
             log::error!(
                 "mevcut formatlar {video_id}:\n{}",
                 String::from_utf8_lossy(&lf.stdout).trim()
