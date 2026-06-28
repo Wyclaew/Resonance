@@ -13,6 +13,8 @@ import {
   DownloadCloud,
   CircleCheck,
   Loader2,
+  Search,
+  X,
 } from "lucide-react";
 import ViewHeader from "../components/ViewHeader";
 import TrackRow from "../components/TrackRow";
@@ -36,6 +38,7 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
   const [shareOpen, setShareOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [sortMode, setSortMode] = useState<"manual" | "karma">("manual");
+  const [query, setQuery] = useState("");
   const dragIndex = useRef<number | null>(null);
   const [dragging, setDragging] = useState<number | null>(null);
 
@@ -117,11 +120,21 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
   }
 
   // Görüntüleme sırası: elle (pozisyon) ya da karmaya göre.
-  const displayTracks =
+  const sorted =
     sortMode === "karma"
       ? [...tracks].sort((a, b) => b.karma - a.karma)
       : tracks;
-  const canDrag = sortMode === "manual";
+  // Arama filtresi (başlık/sanatçı).
+  const q = query.trim().toLowerCase();
+  const displayTracks = q
+    ? sorted.filter(
+        (t) =>
+          t.title.toLowerCase().includes(q) ||
+          t.artist.toLowerCase().includes(q)
+      )
+    : sorted;
+  // Filtre veya karma sıralaması varken sürükle-bırak kapalı (sıra anlamsızlaşır).
+  const canDrag = sortMode === "manual" && !q;
 
   // --- Sürükle-bırak sıralama (yerel HTML5 DnD) ---
   function onDragStart(i: number) {
@@ -296,7 +309,33 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
             </p>
           </div>
         ) : (
-          displayTracks.map((t, i) => (
+          <>
+            {tracks.length > 4 && (
+              <div className="mb-2 flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 focus-within:border-border-strong">
+                <Search size={15} className="shrink-0 text-faint" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Bu listede ara…"
+                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-faint"
+                />
+                {query && (
+                  <button
+                    onClick={() => setQuery("")}
+                    className="shrink-0 text-faint hover:text-text"
+                    title="Temizle"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+            )}
+            {displayTracks.length === 0 ? (
+              <p className="py-12 text-center text-sm text-faint">
+                "{query}" için sonuç yok.
+              </p>
+            ) : (
+              displayTracks.map((t, i) => (
             <TrackRow
               key={t.id}
               track={t}
@@ -320,7 +359,9 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
                 />
               }
             />
-          ))
+              ))
+            )}
+          </>
         )}
       </div>
 

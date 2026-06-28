@@ -1,10 +1,11 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import Sidebar from "./components/Sidebar";
 import NowPlayingBar from "./components/NowPlayingBar";
 import LyricsPanel from "./components/LyricsPanel";
 import QueuePanel from "./components/QueuePanel";
 import CommandPalette from "./components/CommandPalette";
+import Screensaver from "./components/Screensaver";
 import Toasts from "./components/Toasts";
 import { getDb, isTauri } from "./lib/db";
 import { initPlayer, usePlayerStore } from "./store/usePlayerStore";
@@ -51,6 +52,30 @@ export default function App() {
   const commandOpen = useAppStore((s) => s.commandOpen);
   const view = useAppStore((s) => s.view);
   const activePlaylistId = useAppStore((s) => s.activePlaylistId);
+  const screensaverSeconds = useSettingsStore((s) => s.screensaverSeconds);
+  const [idle, setIdle] = useState(false);
+
+  // Ambiyans/ekran koruyucu: belirlenen süre etkileşim olmazsa devreye girer,
+  // herhangi bir hareket/tuş/tıkla kapanır. 0 = kapalı.
+  useEffect(() => {
+    if (!screensaverSeconds || screensaverSeconds <= 0) {
+      setIdle(false);
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout>;
+    const arm = () => {
+      setIdle(false);
+      clearTimeout(timer);
+      timer = setTimeout(() => setIdle(true), screensaverSeconds * 1000);
+    };
+    const events = ["mousemove", "mousedown", "keydown", "wheel", "touchstart"];
+    events.forEach((e) => window.addEventListener(e, arm, { passive: true }));
+    arm();
+    return () => {
+      clearTimeout(timer);
+      events.forEach((e) => window.removeEventListener(e, arm));
+    };
+  }, [screensaverSeconds]);
 
   // DB'yi açılışta başlat (migration'ları tetikler). Tauri dışında atlanır.
   useEffect(() => {
@@ -154,6 +179,7 @@ export default function App() {
       </div>
       <NowPlayingBar />
       {commandOpen && <CommandPalette />}
+      {idle && <Screensaver />}
       <Toasts />
     </div>
   );

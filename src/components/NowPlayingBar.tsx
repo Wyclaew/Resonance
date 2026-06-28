@@ -13,11 +13,15 @@ import {
   Sparkles,
   ScrollText,
   ListMusic,
+  Download,
+  CircleCheck,
+  Loader2,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { usePlayerStore } from "../store/usePlayerStore";
 import { useAppStore } from "../store/useAppStore";
 import { useToastStore } from "../store/useToastStore";
+import { useLibraryStore } from "../store/useLibraryStore";
 import { formatMs } from "../lib/format";
 import { isTauri } from "../lib/db";
 import { getTrackKarma, voteTrack } from "../lib/playlists";
@@ -56,6 +60,16 @@ export default function NowPlayingBar() {
   const queueOpen = useAppStore((s) => s.queueOpen);
   const toggleQueue = useAppStore((s) => s.toggleQueue);
   const showToast = useToastStore((s) => s.show);
+
+  // Çalan şarkının indirme durumu (alt bardan indir/kaldır).
+  const downloaded = useLibraryStore((s) =>
+    current ? s.downloadedIds.has(current.id) : false
+  );
+  const downloading = useLibraryStore((s) =>
+    current ? s.downloadingIds.has(current.id) : false
+  );
+  const downloadTrack = useLibraryStore((s) => s.download);
+  const removeTrack = useLibraryStore((s) => s.remove);
 
   // Çalan şarkının (bir liste bağlamındaysa) karma bilgisi — alt baradan oylama.
   const [karma, setKarma] = useState<{ karma: number; lastVoteAt?: number } | null>(
@@ -203,8 +217,41 @@ export default function NowPlayingBar() {
         </div>
       </div>
 
-      {/* Sağ: sıra, sözler, uyku, ses */}
+      {/* Sağ: indir, sıra, sözler, uyku, ses */}
       <div className="flex flex-1 items-center justify-end gap-3">
+        {current && (
+          <button
+            onClick={() =>
+              downloading
+                ? undefined
+                : downloaded
+                ? removeTrack(current)
+                : downloadTrack(current)
+            }
+            title={
+              downloading
+                ? "İndiriliyor…"
+                : downloaded
+                ? "İndirildi — kaldır"
+                : "İndir"
+            }
+            className={
+              downloaded
+                ? "text-up"
+                : downloading
+                ? "text-accent"
+                : "text-muted hover:text-text"
+            }
+          >
+            {downloading ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : downloaded ? (
+              <CircleCheck size={16} />
+            ) : (
+              <Download size={16} />
+            )}
+          </button>
+        )}
         <button
           onClick={toggleQueue}
           title="Sıra"

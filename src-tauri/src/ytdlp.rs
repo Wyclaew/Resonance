@@ -397,14 +397,12 @@ pub fn ensure_audio(
         // görünmez ve "Requested format is not available" hatası gelir. Bu durumda
         // muxed 'best' (video+ses) indirilir ve ffmpeg ile sadece ses çıkarılır (-vn).
         // height<=480: muxed'e düşülürse gereksiz büyük video inmesin (ses için yeter).
+        // NOT: player_client'ı 'android'e ZORLAMA — android yalnızca muxed
+        // format 18'i (96k, düşük kaliteli ses) verir. Default client (çerezsiz)
+        // yt-dlp'nin kendi JS çözücüsüyle audio-only 140'ı (128k m4a, kaliteli)
+        // verir; nsig için deno bile gerekmez. O yüzden default bırakılır.
         "-f",
         "bestaudio[ext=m4a]/bestaudio/best[height<=480]/best",
-        // KRİTİK (Windows): yt-dlp.exe'de JS runtime (deno) yok → 'web' client'ın
-        // nsig/JS imzası çözülemez ve formatları düşer ("Requested format is not
-        // available"). 'android' client imza çözmeden çalışır (mobil API). android
-        // önce denenir; diğerleri yedek. Mac'te de sorunsuz.
-        "--extractor-args",
-        "youtube:player_client=android,web,ios,tv",
         "-N",
         "4", // paralel parça indirme — daha hızlı
         "--no-playlist",

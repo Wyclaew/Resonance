@@ -446,6 +446,8 @@ const SHORTCUTS: [string, string][] = [
   ["Shift + → / ←", "Sonraki / Önceki şarkı"],
   ["↑ / ↓", "Ses +/−"],
   ["M", "Sessize al"],
+  ["⌘/Ctrl + K", "Komut paleti (hızlı gezinme)"],
+  ["⌘/Ctrl + B", "Yan paneli aç/kapat"],
 ];
 function ShortcutsSettings() {
   return (
@@ -479,8 +481,17 @@ const ACCENTS = [
   { v: "#b07ad9", label: "Mor" },
   { v: "#e0667f", label: "Pembe" },
 ];
+const SCREENSAVER_OPTS = [
+  { v: 0, label: "Kapalı" },
+  { v: 30, label: "30 saniye" },
+  { v: 60, label: "1 dakika" },
+  { v: 90, label: "1.5 dakika" },
+  { v: 180, label: "3 dakika" },
+  { v: 300, label: "5 dakika" },
+];
 function AppearanceSettings() {
   const accentColor = useSettingsStore((s) => s.accentColor);
+  const screensaverSeconds = useSettingsStore((s) => s.screensaverSeconds);
   const update = useSettingsStore((s) => s.update);
   return (
     <div className="max-w-2xl">
@@ -500,6 +511,30 @@ function AppearanceSettings() {
               style={{ backgroundColor: a.v }}
             />
           ))}
+        </div>
+      </SettingRow>
+      <SettingRow
+        label="Ambiyans ekranı"
+        description="Bu kadar süre etkileşim olmazsa ekran yalnızca çalan şarkıyı gösterir (dinlenme/ambiyans modu). Hareket edince kapanır."
+      >
+        <div className="relative">
+          <select
+            value={screensaverSeconds}
+            onChange={(e) =>
+              update("screensaverSeconds", Number(e.target.value))
+            }
+            className="w-40 cursor-pointer appearance-none rounded-md border border-border bg-surface py-1.5 pl-3 pr-9 text-sm text-text outline-none transition-colors hover:border-border-strong focus:border-border-strong"
+          >
+            {SCREENSAVER_OPTS.map((o) => (
+              <option key={o.v} value={o.v}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          <ChevronDown
+            size={15}
+            className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted"
+          />
         </div>
       </SettingRow>
       <p className="mt-3 text-xs text-faint">
