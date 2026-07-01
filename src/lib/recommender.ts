@@ -38,6 +38,22 @@ function isWeekend(dow: number): boolean {
   return dow === 0 || dow === 6;
 }
 
+// Öneri havuzuna yalnızca GERÇEK şarkılar girsin: süre + başlık sezgisiyle
+// mix/podcast/full album/compilation/livestream gibi içerikleri ele.
+const NON_SONG_MARKERS = [
+  "mix", "megamix", "nonstop", "non-stop", "full album", "full ep",
+  "compilation", "playlist", "podcast", "live stream", "livestream",
+  "greatest hits", "best of", "dj set", "hour", "hours", " mixtape",
+  "continuous", "all songs", "top 100", "top 50",
+];
+function isLikelySong(t: Track): boolean {
+  const ms = t.durationMs;
+  // 40 sn – 12 dk dışı büyük olasılıkla şarkı değil (intro/skit ya da uzun içerik).
+  if (ms > 0 && (ms < 40_000 || ms > 12 * 60_000)) return false;
+  const title = t.title.toLowerCase();
+  return !NON_SONG_MARKERS.some((m) => title.includes(m));
+}
+
 // Şarkı kimlik anahtarı (başlık+sanatçı, normalize). Aynı şarkının farklı
 // YouTube video id'lerini de eşleştirir → mevcut listedeki bir parçanın
 // "başka bir kaydı" öneri olarak gelmesin.
@@ -150,6 +166,7 @@ export async function getRecommendations(
     for (const { c } of scored) {
       if (taken.has(c.id)) continue;
       if (playlistKeys.has(normKey(c.title, c.artist))) continue;
+      if (!isLikelySong(toTrack(c))) continue; // uzun içerik/mix ele
       const aff = artistAffinity.get(c.artist) ?? 0;
       recs.push({
         ...toTrack(c),
@@ -198,6 +215,7 @@ export async function getRecommendations(
         for (const r of results) {
           if (taken.has(r.id) || added >= 2) continue;
           if (playlistKeys.has(normKey(r.title, r.artist))) continue;
+          if (!isLikelySong(r)) continue; // mix/podcast/uzun içerik ele
           recs.push({
             ...r,
             recSource: "youtube",

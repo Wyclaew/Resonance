@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import Sidebar from "./components/Sidebar";
 import NowPlayingBar from "./components/NowPlayingBar";
@@ -53,7 +53,8 @@ export default function App() {
   const view = useAppStore((s) => s.view);
   const activePlaylistId = useAppStore((s) => s.activePlaylistId);
   const screensaverSeconds = useSettingsStore((s) => s.screensaverSeconds);
-  const [idle, setIdle] = useState(false);
+  const idle = useAppStore((s) => s.idle);
+  const setIdle = useAppStore((s) => s.setIdle);
 
   // Ambiyans/ekran koruyucu: belirlenen süre etkileşim olmazsa devreye girer,
   // herhangi bir hareket/tuş/tıkla kapanır. 0 = kapalı.
@@ -93,6 +94,17 @@ export default function App() {
           .then(() => {
             const s = useSettingsStore.getState();
             if (s.rememberVolume) usePlayerStore.getState().setVolume(s.savedVolume);
+            // Kaldığın yerden devam: son çalan şarkıyı duraklatılmış geri yükle.
+            if (s.resumeState) {
+              try {
+                const { track, positionMs } = JSON.parse(s.resumeState);
+                if (track?.id) {
+                  usePlayerStore.getState().restoreState(track, positionMs || 0);
+                }
+              } catch {
+                /* bozuk resume state — yoksay */
+              }
+            }
           });
         // Veri varsa otomatik yedek al (kazara kayba karşı güvenlik ağı).
         const hasData =

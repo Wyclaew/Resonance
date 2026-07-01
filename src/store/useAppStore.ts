@@ -9,12 +9,14 @@ interface AppState {
   lyricsOpen: boolean;
   queueOpen: boolean;
   commandOpen: boolean;
+  idle: boolean; // ekran koruyucu aktif mi (arka plan işleri kısılır)
 
   navigate: (view: ViewId, playlistId?: string | null) => void;
   toggleSidebar: () => void;
   toggleLyrics: () => void;
   toggleQueue: () => void;
   setCommand: (open: boolean) => void;
+  setIdle: (idle: boolean) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -24,6 +26,7 @@ export const useAppStore = create<AppState>((set) => ({
   lyricsOpen: false,
   queueOpen: false,
   commandOpen: false,
+  idle: false,
 
   navigate: (view, playlistId = null) =>
     set({ view, activePlaylistId: playlistId, commandOpen: false }),
@@ -33,4 +36,5 @@ export const useAppStore = create<AppState>((set) => ({
   toggleLyrics: () => set((s) => ({ lyricsOpen: !s.lyricsOpen, queueOpen: false })),
   toggleQueue: () => set((s) => ({ queueOpen: !s.queueOpen, lyricsOpen: false })),
   setCommand: (open) => set({ commandOpen: open }),
+  setIdle: (idle) => set({ idle }),
 }));

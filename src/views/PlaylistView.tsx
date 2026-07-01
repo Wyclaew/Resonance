@@ -27,6 +27,7 @@ import { usePlaylistStore } from "../store/usePlaylistStore";
 import { useAppStore } from "../store/useAppStore";
 import * as pl from "../lib/playlists";
 import { isTauri } from "../lib/db";
+import { useToastStore } from "../store/useToastStore";
 
 export default function PlaylistView({ playlistId }: { playlistId: string | null }) {
   const [meta, setMeta] = useState<Playlist | null>(null);
@@ -116,6 +117,19 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
           ? { ...t, karma: t.karma + dir, lastVoteAt: Date.now(), myVote: dir }
           : t
       )
+    );
+    // "Geri al" — yanlış oy düzeltme.
+    const pid = playlistId;
+    useToastStore.getState().show(
+      dir > 0 ? "Beğenildi" : "Beğenilmedi",
+      "info",
+      {
+        label: "Geri al",
+        fn: async () => {
+          await pl.undoVote(pid, track.id);
+          await load();
+        },
+      }
     );
   }
 

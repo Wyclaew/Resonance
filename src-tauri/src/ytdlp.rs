@@ -249,7 +249,11 @@ pub fn search(
             Err(_) => continue,
         };
         if let Some(r) = entry_to_result(&v) {
-            results.push(r);
+            // Aşırı uzun içerikleri (>1 saat: mix, livestream, podcast) ele —
+            // bunlar şarkı değil. Süre bilinmiyorsa (0) tut.
+            if r.duration_ms == 0 || r.duration_ms <= 3_600_000 {
+                results.push(r);
+            }
         }
     }
     Ok(results)

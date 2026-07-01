@@ -15,6 +15,8 @@ pub struct PlayInput {
     pub source_id: String,
     pub duration_ms: u64,
     pub track_id: String,
+    #[serde(default)]
+    pub resume_ms: u64, // kaldığın yerden devam (0 = baştan)
 }
 
 fn audio_cache_dir(app: &AppHandle) -> anyhow::Result<PathBuf> {
@@ -238,6 +240,7 @@ pub async fn play_track(
         path,
         duration_ms: input.duration_ms,
         track_id: input.track_id,
+        start_ms: input.resume_ms,
     });
     Ok(())
 }

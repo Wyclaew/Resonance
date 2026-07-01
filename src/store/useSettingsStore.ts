@@ -18,6 +18,7 @@ export interface Settings {
   savedVolume: number; // hatırlanan ses düzeyi
   prefetchEnabled: boolean; // sıradakini önceden indir
   screensaverSeconds: number; // kaç sn etkileşimsizlikte ambiyans ekranı (0=kapalı)
+  resumeState: string; // son çalan şarkı + pozisyon (JSON) — kaldığın yerden devam
 }
 
 const DEFAULTS: Settings = {
@@ -34,6 +35,7 @@ const DEFAULTS: Settings = {
   savedVolume: 0.9,
   prefetchEnabled: true,
   screensaverSeconds: 90,
+  resumeState: "",
 };
 
 // Ayar alanı ↔ DB anahtarı eşlemesi.
@@ -51,6 +53,7 @@ const KEYS: Record<keyof Settings, string> = {
   savedVolume: "playback.savedVolume",
   prefetchEnabled: "playback.prefetch",
   screensaverSeconds: "appearance.screensaverSeconds",
+  resumeState: "playback.resumeState",
 };
 
 interface SettingsState extends Settings {

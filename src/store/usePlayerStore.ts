@@ -7,6 +7,7 @@ import { getRecommendations } from "../lib/recommender";
 import { recordPlay } from "../lib/history";
 import { useSettingsStore } from "./useSettingsStore";
 import { useToastStore } from "./useToastStore";
+import { useAppStore } from "./useAppStore";
 
 // Oynatıcı durumu — Rust ses motoruna (rodio) Tauri komutlarıyla bağlı.
 // Pozisyon/durum, ses thread'inden gelen "playback-tick" olayıyla güncellenir.
@@ -39,6 +40,7 @@ interface PlayerState {
 
   playNow: (track: Track, queue?: Track[], playlistId?: string) => void;
   startRadio: (tracks: KarmaTrack[], playlistId: string) => Promise<void>;
+  restoreState: (track: Track, positionMs: number) => void;
   toggle: () => void;
   next: () => void;
   prev: () => void;
@@ -71,13 +73,21 @@ function weightedShuffle(tracks: KarmaTrack[]): KarmaTrack[] {
     .map((x) => x.t);
 }
 
-function loadAndPlay(item: QueueItem) {
+// Ses motoruna en az bir kez Load gönderildi mi? (açılışta "kaldığın yerden
+// devam" için: current var ama henüz yüklenmemişse, play'e basınca kaldığı
+// pozisyondan yükle.)
+let hasLoaded = false;
+let resumeMsPending = 0;
+
+function loadAndPlay(item: QueueItem, startMs = 0) {
   if (!isTauri()) return;
+  hasLoaded = true;
   invoke("play_track", {
     input: {
       sourceId: item.sourceId,
       durationMs: item.durationMs,
       trackId: item.id,
+      resumeMs: Math.floor(startMs),
     },
     cookiesBrowser: useSettingsStore.getState().cookiesBrowser,
   }).catch((e) => {
@@ -100,10 +110,38 @@ function persistVolume(v: number) {
   volSaveTimer = setTimeout(() => s.update("savedVolume", v), 600);
 }
 
+// Son çalan şarkı + pozisyonu ayarlara kaydet (kaldığın yerden devam). Tick her
+// 250ms geldiği için throttle'lanır (~5sn'de bir yazılır).
+let lastStateSave = 0;
+function persistPlaybackState(force = false) {
+  const st = usePlayerStore.getState();
+  const c = st.current;
+  if (!c) return;
+  const now = Date.now();
+  if (!force && now - lastStateSave < 5000) return;
+  lastStateSave = now;
+  const payload = JSON.stringify({
+    track: {
+      id: c.id,
+      source: c.source,
+      sourceId: c.sourceId,
+      title: c.title,
+      artist: c.artist,
+      album: c.album,
+      thumbnail: c.thumbnail,
+      durationMs: c.durationMs,
+    },
+    positionMs: st.positionMs,
+  });
+  useSettingsStore.getState().update("resumeState", payload);
+}
+
 // Sıradaki parçaları arka planda indir/hazırla → hızlı arka arkaya geçişler de
 // anlık olur. 3 önden hazırlanır (zaten cache'tekiler yt-dlp bile çağırmaz).
 function prefetchNext() {
   if (!isTauri()) return;
+  // Ekran koruyucu aktifken ağır yt-dlp çağrılarını durdur (CPU/disk tasarrufu).
+  if (useAppStore.getState().idle) return;
   if (!useSettingsStore.getState().prefetchEnabled) return;
   const { queue, queueIndex } = usePlayerStore.getState();
   const cookiesBrowser = useSettingsStore.getState().cookiesBrowser;
@@ -128,6 +166,59 @@ function recordOutgoing(s: PlayerState) {
     const skipped = new Set(s.skippedRecIds);
     skipped.add(s.current.id);
     usePlayerStore.setState({ skippedRecIds: skipped });
+  }
+}
+
+// Radyo uzun oturumda tükenmesin: kuyruk sonuna yaklaşınca arka planda yeni
+// öneri çekip ekler (sonsuz radyo). Ekran koruyucu aktifken çalışmaz.
+let refilling = false;
+async function refillRadio() {
+  if (refilling || !isTauri()) return;
+  if (useAppStore.getState().idle) return;
+  const st = usePlayerStore.getState();
+  if (!st.radioActive || !st.radioPlaylistId) return;
+  const s = useSettingsStore.getState();
+  if (!s.recEnabled || (!s.recYouTube && !s.recLibrary)) return;
+  const playlistId = st.radioPlaylistId;
+  refilling = true;
+  try {
+    const exclude = new Set<string>([
+      ...st.queue.map((i) => i.id),
+      ...st.skippedRecIds,
+    ]);
+    const recs = await getRecommendations({
+      playlistId,
+      excludeIds: exclude,
+      limit: 5,
+      useYouTube: s.recYouTube,
+      useLibrary: s.recLibrary,
+      halfLifeDays: s.karmaHalfLifeDays,
+    });
+    if (recs.length === 0) return;
+    usePlayerStore.setState((state) => {
+      if (!state.radioActive || state.radioPlaylistId !== playlistId) return {};
+      const recItems: QueueItem[] = recs.map((r) => ({
+        ...r,
+        uid: crypto.randomUUID(),
+        playlistId,
+        isRecommendation: true,
+        recSource: r.recSource,
+        recReason: r.reason,
+      }));
+      return { queue: [...state.queue, ...recItems] };
+    });
+    if (s.prefetchEnabled) {
+      for (const r of recs) {
+        invoke("prefetch_audio", {
+          sourceId: r.sourceId,
+          cookiesBrowser: s.cookiesBrowser,
+        }).catch(() => {});
+      }
+    }
+  } catch (e) {
+    console.error("[resonance] radyo beslenemedi:", e);
+  } finally {
+    refilling = false;
   }
 }
 
@@ -261,6 +352,22 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
   },
 
+  // Açılışta son çalan şarkıyı DURAKLATILMIŞ geri yükle (çalmaz). Play'e
+  // basılınca kaldığı pozisyondan yüklenir.
+  restoreState: (track, positionMs) => {
+    const item = toQueueItem(track);
+    hasLoaded = false;
+    resumeMsPending = positionMs;
+    set({
+      queue: [item],
+      queueIndex: 0,
+      current: item,
+      status: "paused",
+      positionMs,
+      durationMs: track.durationMs,
+    });
+  },
+
   toggle: () => {
     const { status, current } = get();
     if (!current) return;
@@ -268,8 +375,15 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       if (isTauri()) invoke("audio_pause").catch(() => {});
       set({ status: "paused" });
     } else {
-      if (isTauri()) invoke("audio_play").catch(() => {});
-      set({ status: "playing" });
+      // Henüz hiç yüklenmediyse (açılış resume) kaldığı pozisyondan yükle.
+      if (!hasLoaded) {
+        set({ status: "loading" });
+        loadAndPlay(current, resumeMsPending);
+        resumeMsPending = 0;
+      } else {
+        if (isTauri()) invoke("audio_play").catch(() => {});
+        set({ status: "playing" });
+      }
     }
   },
 
@@ -317,6 +431,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     });
     loadAndPlay(item);
     prefetchNext();
+    // Radyoda kuyruğun sonuna yaklaşıldıysa arka planda yeni öneri çek (sonsuz radyo).
+    if (radioActive && nextIdx >= queue.length - 3) refillRadio();
   },
 
   prev: () => {
@@ -436,6 +552,8 @@ export async function initPlayer() {
         consecutiveErrors = 0; // başarılı çalma → hata sayacını sıfırla
       } else if (s.status === "playing") patch.status = "paused";
       usePlayerStore.setState(patch);
+      // Çalarken pozisyonu periyodik kaydet (kaldığın yerden devam).
+      if (playing) persistPlaybackState();
     }
   );
 

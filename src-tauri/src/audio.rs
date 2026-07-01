@@ -19,6 +19,7 @@ pub enum AudioCmd {
         path: PathBuf,
         duration_ms: u64,
         track_id: String,
+        start_ms: u64, // kaldığın yerden devam için başlangıç pozisyonu (0 = baştan)
     },
     Play,
     Pause,
@@ -92,6 +93,7 @@ fn audio_loop(rx: Receiver<AudioCmd>, shared: Arc<Shared>, app: AppHandle) {
                     path,
                     duration_ms,
                     track_id,
+                    start_ms,
                 } => {
                     sink.stop();
                     sink = Sink::try_new(&handle).expect("sink");
@@ -104,8 +106,13 @@ fn audio_loop(rx: Receiver<AudioCmd>, shared: Arc<Shared>, app: AppHandle) {
                     match decoded {
                         Ok(Ok(src)) => {
                             sink.append(src);
+                            // Kaldığın yerden devam: verilen pozisyona atla.
+                            if start_ms > 0 {
+                                let _ = sink.try_seek(Duration::from_millis(start_ms));
+                            }
                             sink.play();
                             shared.duration_ms.store(duration_ms, Ordering::Relaxed);
+                            shared.position_ms.store(start_ms, Ordering::Relaxed);
                             *shared.track_id.lock().unwrap() = Some(track_id);
                             ended_emitted = false;
                         }

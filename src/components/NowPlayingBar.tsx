@@ -24,7 +24,7 @@ import { useToastStore } from "../store/useToastStore";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { formatMs } from "../lib/format";
 import { isTauri } from "../lib/db";
-import { getTrackKarma, voteTrack } from "../lib/playlists";
+import { getTrackKarma, voteTrack, undoVote } from "../lib/playlists";
 import AddToPlaylistButton from "./AddToPlaylistButton";
 import KarmaControl from "./KarmaControl";
 import SleepTimerButton from "./SleepTimerButton";
@@ -97,6 +97,17 @@ export default function NowPlayingBar() {
       }
       const k = await getTrackKarma(playlistId, current.id);
       setKarma({ karma: k.karma, lastVoteAt: k.lastVoteAt });
+      // "Geri al" — yanlış oy düzeltme.
+      const pid = playlistId;
+      const tid = current.id;
+      showToast(dir > 0 ? "Beğenildi" : "Beğenilmedi", "info", {
+        label: "Geri al",
+        fn: async () => {
+          await undoVote(pid, tid);
+          const k2 = await getTrackKarma(pid, tid);
+          setKarma({ karma: k2.karma, lastVoteAt: k2.lastVoteAt });
+        },
+      });
     } catch {
       /* yoksay */
     }

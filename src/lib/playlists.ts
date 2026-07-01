@@ -287,6 +287,35 @@ export async function voteTrack(
   return { ok: true, cooldownRemainingMs: 60 * 60 * 1000 };
 }
 
+// Son oyu geri al (yanlış upvote/downvote düzeltme): en son vote kaydını sil,
+// pt.vote'u kalan son oya (yoksa 0) döndür. Silme cooldown'ı da kaldırır
+// (MAX(created_at) küçülür), böylece kullanıcı hemen doğru oyu verebilir.
+export async function undoVote(
+  playlistId: string,
+  trackId: string
+): Promise<boolean> {
+  const db = await getDb();
+  const rows = await db.select<{ id: number }[]>(
+    `SELECT id FROM votes WHERE playlist_id = $1 AND track_id = $2
+     ORDER BY created_at DESC LIMIT 1`,
+    [playlistId, trackId]
+  );
+  const id = rows[0]?.id;
+  if (id == null) return false;
+  await db.execute(`DELETE FROM votes WHERE id = $1`, [id]);
+  const last = await db.select<{ value: number }[]>(
+    `SELECT value FROM votes WHERE playlist_id = $1 AND track_id = $2
+     ORDER BY created_at DESC LIMIT 1`,
+    [playlistId, trackId]
+  );
+  const v = last[0]?.value ?? 0;
+  await db.execute(
+    `UPDATE playlist_tracks SET vote = $1 WHERE playlist_id = $2 AND track_id = $3`,
+    [Math.sign(v), playlistId, trackId]
+  );
+  return true;
+}
+
 // Sürükle-bırak sonrası yeni sırayı kaydeder.
 export async function reorderPlaylist(
   playlistId: string,

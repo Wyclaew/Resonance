@@ -22,6 +22,17 @@ export default function Toasts() {
         >
           {ICONS[t.kind]}
           <span className="text-text">{t.message}</span>
+          {t.action && (
+            <button
+              onClick={() => {
+                t.action?.fn();
+                dismiss(t.id);
+              }}
+              className="ml-1 shrink-0 rounded-md bg-surface-3 px-2 py-1 text-xs font-medium text-accent hover:bg-surface"
+            >
+              {t.action.label}
+            </button>
+          )}
           <button
             onClick={() => dismiss(t.id)}
             className="ml-1 text-faint hover:text-text"

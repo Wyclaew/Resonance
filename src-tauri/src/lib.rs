@@ -120,6 +120,11 @@ pub fn run() {
                 let _ = w.set_focus();
             }
         }));
+        // Windows açılışında otomatik başlatma (Ayarlar'dan aç/kapa).
+        builder = builder.plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ));
     }
 
     builder

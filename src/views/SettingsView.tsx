@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
+import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
 import ViewHeader from "../components/ViewHeader";
 import Toggle from "../components/Toggle";
 import { useSettingsStore } from "../store/useSettingsStore";
@@ -333,6 +334,22 @@ function AccountSettings() {
 
 function PlaybackSettings() {
   const s = useSettingsStore();
+  const [autostart, setAutostart] = useState(false);
+  useEffect(() => {
+    if (!isTauri()) return;
+    isEnabled()
+      .then(setAutostart)
+      .catch(() => {});
+  }, []);
+  async function toggleAutostart(v: boolean) {
+    try {
+      if (v) await enable();
+      else await disable();
+      setAutostart(v);
+    } catch {
+      /* yoksay */
+    }
+  }
   return (
     <div className="max-w-2xl">
       <SettingRow
@@ -352,6 +369,12 @@ function PlaybackSettings() {
           checked={s.prefetchEnabled}
           onChange={(v) => s.update("prefetchEnabled", v)}
         />
+      </SettingRow>
+      <SettingRow
+        label="Bilgisayar açılışında başlat"
+        description="Windows/macOS oturumu açıldığında Resonance otomatik çalışsın."
+      >
+        <Toggle checked={autostart} onChange={toggleAutostart} />
       </SettingRow>
     </div>
   );
