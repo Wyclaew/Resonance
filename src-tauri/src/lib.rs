@@ -103,6 +103,21 @@ fn migrations() -> Vec<Migration> {
             // ayrıca `votes` olay günlüğünden (zaman decay'li) hesaplanır.
             sql: "ALTER TABLE playlist_tracks ADD COLUMN vote INTEGER NOT NULL DEFAULT 0;",
         },
+        Migration {
+            version: 4,
+            description: "add_recommendation_history",
+            kind: MigrationKind::Up,
+            // Önerilen parçaların KALICI günlüğü: uygulama kapatılıp açılınca bile
+            // aynı öneriler tekrar gelmesin diye. Yakın zamanda önerilenler
+            // öneri havuzundan dışlanır (recommender.ts).
+            sql: "CREATE TABLE IF NOT EXISTS recommendation_history (
+                    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                    track_id       TEXT NOT NULL,
+                    recommended_at INTEGER NOT NULL
+                  );
+                  CREATE INDEX IF NOT EXISTS idx_rechist_track ON recommendation_history(track_id);
+                  CREATE INDEX IF NOT EXISTS idx_rechist_at ON recommendation_history(recommended_at);",
+        },
     ]
 }
 

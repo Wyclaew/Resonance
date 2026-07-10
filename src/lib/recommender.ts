@@ -104,7 +104,30 @@ export interface RecommendOpts {
   halfLifeDays: number;
 }
 
+// Dış arayüz: önerileri hesaplar VE kalıcı geçmişe yazar. Kayıt sayesinde
+// uygulama kapatılıp açılınca aynı öneriler tekrar gelmez.
 export async function getRecommendations(
+  opts: RecommendOpts
+): Promise<Recommendation[]> {
+  const recs = await computeRecommendations(opts);
+  if (recs.length > 0 && isTauri()) {
+    try {
+      const db = await getDb();
+      const now = Date.now();
+      for (const r of recs) {
+        await db.execute(
+          `INSERT INTO recommendation_history (track_id, recommended_at) VALUES ($1, $2)`,
+          [r.id, now]
+        );
+      }
+    } catch (e) {
+      console.error("[resonance] öneri geçmişi yazılamadı:", e);
+    }
+  }
+  return recs;
+}
+
+async function computeRecommendations(
   opts: RecommendOpts
 ): Promise<Recommendation[]> {
   if (!isTauri()) return [];
@@ -132,6 +155,19 @@ export async function getRecommendations(
 
   const recs: Recommendation[] = [];
   const taken = new Set<string>(opts.excludeIds);
+
+  // Kalıcı geçmiş: son 45 günde önerilmiş parçaları dışla (kapat-aç sonrası
+  // aynı öneriler tekrar gelmesin). Havuz tükenirse 45 günden eskiler tekrar açılır.
+  try {
+    const RECENT_MS = 45 * 24 * 60 * 60 * 1000;
+    const histRows = await db.select<{ track_id: string }[]>(
+      `SELECT DISTINCT track_id FROM recommendation_history WHERE recommended_at >= $1`,
+      [now - RECENT_MS]
+    );
+    for (const h of histRows) taken.add(h.track_id);
+  } catch {
+    /* tablo henüz yoksa yoksay */
+  }
 
   // Mevcut çalan listedeki şarkıların başlık+sanatçı anahtarları. Öneriler bu
   // listeden (farklı video id'li aynı şarkı dahil) GELMESİN — kullanıcı farklı

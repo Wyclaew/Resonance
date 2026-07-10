@@ -106,7 +106,7 @@ export default function HomeView() {
                 <div
                   key={p.id}
                   onClick={() => navigate("playlist", p.id)}
-                  className="group flex cursor-pointer items-center gap-3 rounded-lg border border-border bg-surface/60 p-3 transition-colors hover:border-border-strong hover:bg-surface"
+                  className="group flex cursor-pointer items-center gap-3 rounded-lg border border-border bg-surface/60 p-3 transition-all duration-150 hover:-translate-y-0.5 hover:border-border-strong hover:bg-surface hover:shadow-lg hover:shadow-black/20"
                 >
                   <div className="grid h-11 w-11 shrink-0 place-items-center rounded-md bg-accent/15 text-accent">
                     <ListMusic size={20} />

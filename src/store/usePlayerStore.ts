@@ -113,6 +113,20 @@ function loadAndPlay(item: QueueItem, startMs = 0) {
 // Art arda yükleme (indirme) hatası sayacı — başarılı çalmada sıfırlanır.
 let loadFailCount = 0;
 
+// Yüklemeyi kısa süre geciktir (debounce). Kullanıcı hızlıca şarkı geçerken
+// HER basış ayrı bir indirme+play_track tetikleyip uygulamayı şişiriyordu; ayrıca
+// indirmeler yarışıp ses motoru başka, arayüz başka şarkı gösteriyordu. Bu
+// sarmalayıcı yalnızca EN SON seçilen şarkıyı (basış durduktan ~180ms sonra)
+// yükler → tek indirme, arayüz-ses her zaman aynı.
+let loadTimer: ReturnType<typeof setTimeout> | undefined;
+function scheduleLoad(item: QueueItem, startMs = 0) {
+  clearTimeout(loadTimer);
+  loadTimer = setTimeout(() => {
+    loadAndPlay(item, startMs);
+    prefetchNext();
+  }, 180);
+}
+
 let sleepTimeout: ReturnType<typeof setTimeout> | undefined;
 
 // Ses düzeyini ayarlara debounce'lu kaydet (sürükleme sırasında DB'yi yormamak için).
@@ -291,8 +305,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       radioPlaylistId: null,
       error: null,
     });
-    loadAndPlay(current);
-    prefetchNext();
+    scheduleLoad(current);
   },
 
   startRadio: async (tracks, playlistId) => {
@@ -313,8 +326,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       radioPlaylistId: playlistId,
       error: null,
     });
-    loadAndPlay(first);
-    prefetchNext();
+    scheduleLoad(first);
 
     // Önerileri arka planda getir ve kuyruğa serpiştir (oynatmayı bekletmeden).
     if (!s.recEnabled || (!s.recYouTube && !s.recLibrary)) return;
@@ -400,7 +412,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       // Henüz hiç yüklenmediyse (açılış resume) kaldığı pozisyondan yükle.
       if (!hasLoaded) {
         set({ status: "loading" });
-        loadAndPlay(current, resumeMsPending);
+        scheduleLoad(current, resumeMsPending);
         resumeMsPending = 0;
       } else {
         if (isTauri()) invoke("audio_play").catch(() => {});
@@ -417,7 +429,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     if (repeat === "one") {
       const cur = queue[queueIndex];
       set({ status: "loading", positionMs: 0 });
-      loadAndPlay(cur);
+      scheduleLoad(cur);
       return;
     }
 
@@ -451,8 +463,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       positionMs: 0,
       durationMs: item.durationMs,
     });
-    loadAndPlay(item);
-    prefetchNext();
+    scheduleLoad(item);
     // Radyoda kuyruğun sonuna yaklaşıldıysa arka planda yeni öneri çek (sonsuz radyo).
     if (radioActive && nextIdx >= queue.length - 3) refillRadio();
   },
@@ -474,8 +485,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       positionMs: 0,
       durationMs: item.durationMs,
     });
-    loadAndPlay(item);
-    prefetchNext();
+    scheduleLoad(item);
   },
 
   // Kuyrukta belirli bir indekse atla ve çal (Sıra panelinden tıklama).
@@ -491,8 +501,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       positionMs: 0,
       durationMs: item.durationMs,
     });
-    loadAndPlay(item);
-    prefetchNext();
+    scheduleLoad(item);
   },
 
   // Bir öğeyi kuyruktan çıkar (çalan öğe çıkarılamaz). current'ı takip eder.

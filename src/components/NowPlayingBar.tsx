@@ -59,6 +59,7 @@ export default function NowPlayingBar() {
   const toggleLyrics = useAppStore((s) => s.toggleLyrics);
   const queueOpen = useAppStore((s) => s.queueOpen);
   const toggleQueue = useAppStore((s) => s.toggleQueue);
+  const navigate = useAppStore((s) => s.navigate);
   const showToast = useToastStore((s) => s.show);
 
   // Çalan şarkının indirme durumu (alt bardan indir/kaldır).
@@ -120,7 +121,19 @@ export default function NowPlayingBar() {
     <footer className="flex h-20 shrink-0 items-center gap-4 border-t border-border bg-surface px-4">
       {/* Sol: şu an çalan */}
       <div className="flex min-w-0 flex-1 items-center gap-3">
-        <div className="grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-lg bg-surface-3 text-faint shadow-lg shadow-black/30 ring-1 ring-white/5 transition-transform hover:scale-[1.03]">
+        <div
+          onClick={() =>
+            current &&
+            navigate(
+              current.playlistId ? "playlist" : "now",
+              current.playlistId
+            )
+          }
+          title={current ? "Çalan yere git" : undefined}
+          className={`grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-lg bg-surface-3 text-faint shadow-lg shadow-black/30 ring-1 ring-white/5 transition-transform hover:scale-[1.03] ${
+            current ? "cursor-pointer" : ""
+          }`}
+        >
           {current?.thumbnail ? (
             <img
               src={current.thumbnail}
