@@ -209,6 +209,24 @@ fn run_yt_dlp(args: &[&str], cookies: Option<&str>) -> std::io::Result<std::proc
     Ok(out)
 }
 
+// Kalıcı (kurtarılamaz) YouTube hatası mı? Video silinmiş/özel/erişilemez ise
+// ne çerez ne başka client kurtarır → boşuna tekrar denemeyip hemen vazgeç.
+// DİKKAT: "requested format is not available" (aralıklı throttle) buraya
+// GİRMEMELİ — o geçici, tekrar denenebilir.
+fn is_permanent_error(stderr: &str) -> bool {
+    let s = stderr.to_lowercase();
+    s.contains("video unavailable")
+        || s.contains("this video is not available")
+        || s.contains("video is not available")
+        || s.contains("private video")
+        || s.contains("removed by the uploader")
+        || s.contains("has been removed")
+        || s.contains("no longer available")
+        || s.contains("terminated")
+        || s.contains("members-only")
+        || s.contains("who has blocked it")
+}
+
 /// YouTube'da arama yapar ve düz (flat) sonuç listesi döndürür.
 pub fn search(
     query: &str,
@@ -427,6 +445,13 @@ pub fn ensure_audio(
     // kısıtlı veya özel video için).
     let mut out = run_yt_dlp(&args, None)?;
     if !out.status.success() {
+        let err0 = String::from_utf8_lossy(&out.stderr).into_owned();
+        // Kalıcı hata (silinmiş/özel/erişilemez): çerez de -F de kurtarmaz → dur.
+        if is_permanent_error(&err0) {
+            log::error!("kalıcı hata {video_id}: {}", err0.trim());
+            anyhow::bail!("Bu video kullanılamıyor (kaldırılmış/özel/kısıtlı).");
+        }
+        // Geçici olabilir: kullanıcı tarayıcı seçtiyse çerezle bir kez daha dene.
         if let Some(c) = cookies {
             if !c.is_empty() {
                 log::info!("çerezsiz başarısız, çerezle yeniden deneniyor: {video_id}");
@@ -437,7 +462,10 @@ pub fn ensure_audio(
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         log::error!("yt-dlp indirme hata {video_id}: {}", err.trim());
-        // Teşhis: YouTube bu video için HANGİ formatları sunuyor? (çerezsiz)
+        if is_permanent_error(&err) {
+            anyhow::bail!("Bu video kullanılamıyor (kaldırılmış/özel/kısıtlı).");
+        }
+        // Teşhis (yalnızca geçici hatalarda): YouTube hangi formatları sunuyor?
         if let Ok(lf) = run_yt_dlp(&["-F", "--no-warnings", "--", &url], None) {
             log::error!(
                 "mevcut formatlar {video_id}:\n{}",

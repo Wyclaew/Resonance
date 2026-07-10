@@ -91,13 +91,27 @@ function loadAndPlay(item: QueueItem, startMs = 0) {
     },
     cookiesBrowser: useSettingsStore.getState().cookiesBrowser,
   }).catch((e) => {
-    // Hatayı SESSİZCE yutma — kullanıcı neden çalmadığını görsün (özellikle
-    // Windows'ta ffmpeg/yt-dlp sorunlarının teşhisi için kritik).
+    // İndirilemeyen şarkı (silinmiş video, geçici hata) kuyruğu TIKAMASIN:
+    // sıradaki varsa otomatik atla (radyo/kuyruk akışı sürsün). Art arda çok
+    // hata olursa dur ki sonsuz döngü olmasın.
     console.error("[resonance] play_track hatası:", e);
-    useToastStore.getState().show(`Şarkı yüklenemedi — ${String(e)}`, "error");
-    usePlayerStore.setState({ status: "idle", error: String(e) });
+    const st = usePlayerStore.getState();
+    loadFailCount++;
+    if (
+      loadFailCount <= 5 &&
+      st.queue.length > 1 &&
+      st.queueIndex < st.queue.length - 1
+    ) {
+      useToastStore.getState().show("Şarkı yüklenemedi, atlanıyor", "error");
+      st.next();
+    } else {
+      useToastStore.getState().show(`Şarkı yüklenemedi — ${String(e)}`, "error");
+      usePlayerStore.setState({ status: "idle", error: String(e) });
+    }
   });
 }
+// Art arda yükleme (indirme) hatası sayacı — başarılı çalmada sıfırlanır.
+let loadFailCount = 0;
 
 let sleepTimeout: ReturnType<typeof setTimeout> | undefined;
 
@@ -169,6 +183,10 @@ function recordOutgoing(s: PlayerState) {
   }
 }
 
+// Bu oturumda önerilen tüm parça id'leri — aynı şarkının tekrar tekrar
+// önerilmesini engeller (kullanıcı "sürekli aynı şeyler geliyor" demişti).
+const recommendedThisSession = new Set<string>();
+
 // Radyo uzun oturumda tükenmesin: kuyruk sonuna yaklaşınca arka planda yeni
 // öneri çekip ekler (sonsuz radyo). Ekran koruyucu aktifken çalışmaz.
 let refilling = false;
@@ -185,6 +203,7 @@ async function refillRadio() {
     const exclude = new Set<string>([
       ...st.queue.map((i) => i.id),
       ...st.skippedRecIds,
+      ...recommendedThisSession,
     ]);
     const recs = await getRecommendations({
       playlistId,
@@ -195,6 +214,7 @@ async function refillRadio() {
       halfLifeDays: s.karmaHalfLifeDays,
     });
     if (recs.length === 0) return;
+    recs.forEach((r) => recommendedThisSession.add(r.id));
     usePlayerStore.setState((state) => {
       if (!state.radioActive || state.radioPlaylistId !== playlistId) return {};
       const recItems: QueueItem[] = recs.map((r) => ({
@@ -302,6 +322,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       const exclude = new Set([
         ...tracks.map((t) => t.id),
         ...get().skippedRecIds,
+        ...recommendedThisSession,
       ]);
       const recs = await getRecommendations({
         playlistId,
@@ -312,6 +333,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         halfLifeDays: s.karmaHalfLifeDays,
       });
       if (recs.length === 0) return;
+      recs.forEach((r) => recommendedThisSession.add(r.id));
 
       set((state) => {
         if (!state.radioActive || state.radioPlaylistId !== playlistId) {
@@ -549,7 +571,8 @@ export async function initPlayer() {
       if (duration_ms > 0) patch.durationMs = duration_ms;
       if (playing) {
         patch.status = "playing";
-        consecutiveErrors = 0; // başarılı çalma → hata sayacını sıfırla
+        consecutiveErrors = 0; // başarılı çalma → hata sayaçlarını sıfırla
+        loadFailCount = 0;
       } else if (s.status === "playing") patch.status = "paused";
       usePlayerStore.setState(patch);
       // Çalarken pozisyonu periyodik kaydet (kaldığın yerden devam).

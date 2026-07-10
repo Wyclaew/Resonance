@@ -183,11 +183,16 @@ export async function getRecommendations(
 
   // 3) YouTube adayları — en yüksek yakınlıklı sanatçılardan (yoksa liste sanatçıları).
   if (opts.useYouTube) {
+    // Seed çeşitliliği: en yüksek yakınlıklı ilk 6 sanatçıdan RASTGELE 3'ünü seç.
+    // Böylece her çağrı (özellikle radyo beslemeleri) farklı arama yapar →
+    // sürekli aynı şarkıların önerilmesi ve kısa sürede tükenme önlenir.
     let seeds = [...artistAffinity.entries()]
       .filter(([, v]) => v > 0)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 2)
-      .map(([artist]) => artist);
+      .slice(0, 6)
+      .map(([artist]) => artist)
+      .sort(() => Math.random() - 0.5)
+      .slice(0, 3);
 
     // Soğuk başlangıç: hiç sinyal yoksa listenin kendi sanatçılarından çek.
     let cold = false;
