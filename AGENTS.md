@@ -45,8 +45,7 @@ Uygulama logu: macOS `~/Library/Logs/com.resonance.app/`, Windows `%APPDATA%\com
 - **Oynatıcı** (`src/store/usePlayerStore.ts` — en büyük dosya): kuyruk, `playNow`, `startSmartShuffle`,
   `startDiscovery`, `refillRadio`, `restoreState`, uyku zamanlayıcı, medya tuşları, prefetch.
   Ses motoruna Tauri komutlarıyla bağlı; pozisyon `playback-tick` olayıyla gelir.
-- **Rust komutları** (`src-tauri/src/commands.rs`): search_youtube, **music_radio** (öneri kaynağı),
-  import_playlist, import_spotify,
+- **Rust komutları** (`src-tauri/src/commands.rs`): search_youtube, import_playlist, import_spotify,
   get_lyrics, play_track, download_audio, prefetch_audio, delete_audio, is_cached, cache_files,
   delete_cache_except, export_data, backup_db / list_backups / restore_backup, update_ytdlp, read_log,
   audio_play/pause/seek/stop/set_volume/status.
@@ -65,32 +64,11 @@ Tüm sinyaller tek skorda birleşir:
 - **Dinleme davranışı** (`play_history`): <5sn −0.35, oran <%15 −0.25, >%40 +0.15, >%70 +0.4
   (aynı decay/bağlam çarpanıyla). Yani sadece upvote'lananlar değil, gerçekten dinlenenler de sayılır.
 - **Kaynaklar:** (a) kütüphane — yalnızca **BAŞKA** bir playlist'te olan parçalar (o an çalan listeden
-  öneri yok), sanatçı başına en fazla 2; (b) YouTube — **YouTube Music radyosu** (aşağıda).
-- **⭐ YouTube kaynağı = RADYO, metin araması DEĞİL** (`ytdlp::music_radio` → `music_radio` komutu).
-  `https://music.youtube.com/watch?v=<id>&list=RDAMVM<id>` → YouTube Music'in kendi öneri motoru.
-  **Neden:** eskiden `ytsearch:songs like {sanatçı}` yapılıyordu; YouTube o sorguya VİDEO döndürüyor,
-  şarkı değil → kuyruk röportaj, tepki videosu, "5 Things You Didn't Know…", belgesel kesiti, kısa film
-  ile doluyordu. **Bu başlık sezgisiyle çözülemez** ("Meet Dark R&B's Newest Darling" bir röportajdır;
-  hiçbir anahtar kelime yanlış-eleme yapmadan yakalayamaz). Radyo yapısı gereği yalnız şarkı döner.
-  - **Seed = VİDEO ID** (sanatçı adı değil) → seed'ler en güçlü sinyalli **parçalar**
-    (`trackKarma + artistAffinity`).
-  - **⚠️ SANATÇI BAŞINA EN İYİ TEK PARÇA** → en güçlü 12 SANATÇI → karıştır → **3 radyo paralel**.
-    Eskiden "en iyi 12 PARÇA" alınıyordu: son oylar tek sanatçıda toplanınca 12'nin çoğu o sanatçı
-    oluyordu (ölçüm: 200 denemenin **200'ünde** aynı sanatçıdan >1 seed) → tüm radyolar aynı tarz →
-    "hep rap öneriyor" bug'ı. Sanatçı başına tek parça ile bu oran **%0**.
-  - **⚠️ ROUND-ROBIN**: her radyodan SIRAYLA birer parça alınır. Eskiden radyolar sırayla tüketiliyordu →
-    ilk radyo 20 kontenjanın hepsini doldurup diğerlerine hiç sıra gelmiyordu (yine tek tarz).
-  - **Reroll** (`rerollDiscovery`, Sıra panelinde "Başka tarz"): `excludeSeedArtists` ile mevcut partinin
-    seed sanatçıları dışlanır → gelen tarz gerçekten değişir. `Recommendation.seedArtist` bunu taşır;
-    store `discoverySeedArtists`'te tutar, panel başlığında "… tarzı" diye gösterir.
-  - **Sınır:** seed çeşitliliği sinyalli sanatçı sayısıyla sınırlı (oy/dinleme geçmişi darsa az tarz).
-  - Ölçüm: seed başına **~2.9sn / 50 sonuç / 15-46 farklı sanatçı / süresi eksik 0**.
-    (Limitsiz çekilirse 1000+ sonuç ama ~20sn → `--playlist-end 50` şart.)
-  - Radyo sonuçları **karıştırılır** (hep ilk parçalar gelmesin) + **sanatçı başına 2 sınırı**:
-    radyonun başı seed sanatçının kendi şarkılarıyla dolu (Tarkan radyosunda ilk 3 parça Tarkan).
-  - `isLikelySong` yine uygulanır — radyoda da 1000'de ~5 uzun içerik çıkıyor.
-  - **Metin araması yalnız soğuk-başlangıç YEDEĞİ** (`addSearchFallback`): hiç oy/dinleme yoksa veya
-    radyo boş dönerse. Birkaç sinyal sonrası bir daha çalışmaz.
+  öneri yok), sanatçı başına en fazla 2; (b) YouTube — seed sanatçılardan arama.
+- **Seed'ler:** en yakın 12 sanatçıdan karıştırılmış seçim; sayı hedefe göre uyarlanır (`ceil(ihtiyaç/2)`),
+  seed başına 2–4 sonuç. İlk seed `"{sanatçı} songs"` (garanti sonuç), diğerleri **benzer-tarz keşif**:
+  `songs like / artists similar to / music like {seed}` → tanımadığın sanatçılar da gelir.
+  Aramalar **3'erli paralel** (tek tek çok yavaş; 3'ten fazlası throttle riski).
 - **Filtreler:** `isLikelySong` (süre + başlık/kanal deseni — aşağıda ayrı not), `normKey` (başlık+sanatçı),
   **`songCore`** (sanatçıdan BAĞIMSIZ şarkı-adı çekirdeği → aynı şarkının cover / sped-up / slowed+reverb /
   "official video" versiyonlarını eler), kalıcı geçmiş (son 45 gün, `recommendation_history`).
@@ -119,10 +97,10 @@ Tüm sinyaller tek skorda birleşir:
   `\b\d+\s*hours?\s+(of|loop)\b`.
 - **Kanal sinyali** (`t.artist` = YouTube'da kanal adı) bilerek dar: yalnız `\bpodcasts?\b`.
   `talk`/`tv`/`fm` eklenmemeli — *Kral TV*, *MTV*, "FM Records" gibi müzik kanallarını eler.
-- **YT Music ARAMASI denendi, OLMUYOR** (radyo ile karıştırma!): `music.youtube.com/search?q=…` yalnız
-  müzik döndürür ama flat-playlist çıktısında **süre ve sanatçı yok**, bazı satırlarda başlık bile boş →
-  `songCore`/süre filtresi/`spreadByArtist` çalışamaz. **RADYO** (`…/watch?v=X&list=RDAMVMX`) ise tüm
-  alanları dolu verir — asıl YouTube kaynağı bu (yukarıya bak).
+- **Kaynakta filtreleme denendi, OLMUYOR:** `music.youtube.com/search` (yt-dlp destekliyor) yalnız müzik
+  döndürür ama flat-playlist çıktısında **süre ve sanatçı yok**, bazı satırlarda başlık bile boş →
+  `songCore`/süre filtresi/`spreadByArtist` çalışamaz. Tam çıkarım sonuç başına ~1.7sn → çok yavaş.
+  Bu yüzden normal `ytsearch` + sezgisel filtre kullanılıyor.
 
 ## Kritik kararlar & GOTCHA'lar (bunları bil)
 1. **Ses biçimi = ADTS `.aac`**: bestaudio (m4a) indirilir, `ffmpeg -vn -c:a copy -f adts` ile YENİDEN
@@ -150,20 +128,14 @@ Tüm sinyaller tek skorda birleşir:
     DİKKAT: "requested format is not available" **geçicidir**, buraya ASLA ekleme.
 12. **`tracks`'e ASLA `INSERT OR REPLACE` YAPMA** → satırı silip ekler, `ON DELETE CASCADE` şarkıyı TÜM
     listelerden uçurur. `ensureTrack` (`src/lib/playlists.ts`) `ON CONFLICT(id) DO UPDATE` kullanır; onu çağır.
-13. **Oy vermeden ÖNCE `ensureTrack` çağır — yoksa OY SAYILMAZ.** `recommender.ts` oyları
-    `votes v JOIN tracks t ON t.id = v.track_id` (INNER) ile okur. Keşfet/radyo önerisi hiçbir listede
-    olmadığı için `tracks`'te de yoktu → JOIN oyu düşürüyordu, Keşfet'te oy vermek öğrenmeye HİÇ etki
-    etmiyordu (ölçüldü: 15 oyun yalnız 11'i görülüyordu). `NowPlayingBar.handleVote` artık önce
-    `ensureTrack` yapıyor. Bu bir listeye EKLEME değildir: İndirilenler `cache.downloaded=1` ister,
-    Kütüphane playlist'leri gösterir → parça yalnız öğrenme sinyali olarak sayılır.
-14. **Spotify sesi alınamaz** → sadece metadata → YouTube'da eşleştirilir.
-15. **`audio.rs` hata dalları**: hata verirken `ended_emitted = true` yap; yoksa hem `playback-error` hem
+13. **Spotify sesi alınamaz** → sadece metadata → YouTube'da eşleştirilir.
+14. **`audio.rs` hata dalları**: hata verirken `ended_emitted = true` yap; yoksa hem `playback-error` hem
     `track-ended` gidip **çift atlama** olur.
-16. **Windows `augmented_path()`**: PATH ayracı platforma göre (`;` vs `:`) — Unix yollarını `:` ile Windows
+15. **Windows `augmented_path()`**: PATH ayracı platforma göre (`;` vs `:`) — Unix yollarını `:` ile Windows
     PATH'ine eklemek PATH'i komple bozuyordu.
-17. **Windows'ta `CREATE_NO_WINDOW`** (`no_window()`, 0x08000000): yoksa her yt-dlp/ffmpeg çağrısında konsol
+16. **Windows'ta `CREATE_NO_WINDOW`** (`no_window()`, 0x08000000): yoksa her yt-dlp/ffmpeg çağrısında konsol
     penceresi fırlar.
-18. **Veri güvenliği:** açılışta veri varsa otomatik DB yedeği (son 12, `backups/`), tek-örnek koruması TÜM
+17. **Veri güvenliği:** açılışta veri varsa otomatik DB yedeği (son 12, `backups/`), tek-örnek koruması TÜM
     build'lerde. Geçmişte iki-instance yarışından şüphelenilen bir veri kaybı yaşandı; önlemler o yüzden.
 
 ## Özellikler (v1.1.0 — hepsi canlı)
@@ -176,10 +148,6 @@ Tüm sinyaller tek skorda birleşir:
   tek tık; açılışta **prewarm** sayesinde anında başlar, sıra paneli otomatik açılır, sıradaki **~20 şarkı
   hep dolu ve önden indirilmiş** tutulur (`TARGET_QUEUE_AHEAD = 20`). Keşif zaten aktifken Keşfet'e basmak
   yeni sıra kurmaz, mevcut sırayı açar.
-  - **"Başka tarz" (reroll)**: Sıra panelinin başlığında; gelen tarzı beğenmediysen mevcut seed
-    sanatçıları dışlayıp yeni parti kurar. Başlıkta partinin tarzı yazar ("… tarzı").
-  - Keşfet'te **oy vermek yalnız algoritmayı eğitir** — parça hiçbir listeye/İndirilenler'e eklenmez
-    (bkz. gotcha #13: ama `ensureTrack` şart, yoksa oy hiç sayılmaz).
 - **Akıllı karışık** (Spotify tarzı): karıştır butonu 3 durumlu — kapalı → karışık → **akıllı karışık**
   (karışık + öneri serpiştirme + sürekli besleme). Ayrı "Radyo" butonu kaldırıldı.
 - Arka arkaya aynı sanatçı/tarz gelmesin diye `spreadByArtist()`.

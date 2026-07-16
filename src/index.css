@@ -178,6 +178,13 @@ textarea:focus-visible {
   }
 }
 
+/* Arka plan FPS modu: pencere odağı yokken (ör. ikinci ekranda dururken) tüm
+   animasyon/geçişleri durdur → GPU/CPU yükü ciddi azalır. */
+.bg-throttle * {
+  animation: none !important;
+  transition: none !important;
+}
+
 /* İlerleme / ses kaydırıcıları — özel, ince, kehribar dolgulu */
 .resonance-range {
   -webkit-appearance: none;

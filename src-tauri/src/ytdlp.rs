@@ -3,8 +3,24 @@
 // (gerekirse ffmpeg ile bir kez remux/transcode edilir) ve cache'lenir.
 
 use serde::Serialize;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, Mutex, OnceLock};
+
+// Aynı video_id için eşzamanlı ensure_audio çağrılarını SERİLEŞTİRİR. Play +
+// prefetch + radyo besleme aynı şarkıyı aynı anda indirmeye kalkınca aynı
+// .src dosyasına yazıp birbirini bozuyordu (HTTP 416, "no such file",
+// "invalid data"). Video başına tek kilit → ilk indirir, diğerleri bekleyip
+// hazır dosyayı bulur.
+fn inflight_lock(video_id: &str) -> Arc<Mutex<()>> {
+    static MAP: OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
+    let map = MAP.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut m = map.lock().unwrap();
+    m.entry(video_id.to_string())
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
+}
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -277,6 +293,56 @@ pub fn search(
     Ok(results)
 }
 
+/// YouTube Music RADYOSU: bir video id'sinden "benzer şarkılar" listesi.
+///
+/// NEDEN: metin araması (`ytsearch:songs like X`) YouTube'a VİDEO sorar, şarkı
+/// değil → röportaj, tepki videosu, "5 Things You Didn't Know", belgesel kesiti,
+/// kısa film döner. Başlık sezgisiyle bunları ayıklamak mümkün değil (ör. "Meet
+/// Dark R&B's Newest Darling" bir röportaj). Radyo listesi ise YouTube Music'in
+/// KENDİ öneri motoru: yapısı gereği yalnız şarkı döner, üstelik süre + kanal
+/// alanları dolu gelir (music.youtube.com ARAMASI'nın aksine — orada süre/sanatçı
+/// boş gelir, o yüzden arama için kullanılamıyor).
+///
+/// Ölçüm (6 gerçek kütüphane parçası, limit=50): 6/6 radyo bulundu, ~2.9 sn,
+/// 50 sonuç, 15-46 farklı sanatçı, süresi eksik 0.
+///
+/// Çerez KULLANILMAZ — arama ile aynı gerekçe (bkz. `search`).
+pub fn music_radio(video_id: &str, limit: u32) -> anyhow::Result<Vec<SearchResult>> {
+    let url =
+        format!("https://music.youtube.com/watch?v={video_id}&list=RDAMVM{video_id}");
+    let end = limit.clamp(1, 100).to_string();
+    let out = run_yt_dlp(
+        &[
+            "--flat-playlist",
+            "--dump-json",
+            "--no-warnings",
+            "--ignore-errors",
+            "--playlist-end",
+            &end,
+            &url,
+        ],
+        None,
+    )?;
+
+    let mut results = Vec::new();
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let line = line.trim();
+        if !line.starts_with('{') {
+            continue;
+        }
+        let v: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if let Some(r) = entry_to_result(&v) {
+            results.push(r);
+        }
+    }
+    // Radyosu olmayan/kaldırılmış video → boş liste (hata değil): çağıran taraf
+    // başka bir seed'e ya da metin aramasına düşer.
+    Ok(results)
+}
+
 // Tek bir flat-playlist/arama girdisini SearchResult'a çevirir.
 fn entry_to_result(v: &serde_json::Value) -> Option<SearchResult> {
     let id = v.get("id").and_then(|x| x.as_str()).unwrap_or_default();
@@ -399,6 +465,14 @@ pub fn ensure_audio(
         return Ok(p);
     }
 
+    // Aynı video için başka bir indirme sürüyorsa bekle (dosya çakışmasını önle).
+    let lock = inflight_lock(video_id);
+    let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+    // Kilidi aldıktan sonra tekrar bak: beklerken başka çağrı indirmiş olabilir.
+    if let Some(p) = find_cached(cache_dir, video_id) {
+        return Ok(p);
+    }
+
     let url = format!("https://www.youtube.com/watch?v={video_id}");
     let dl_tmpl = cache_dir.join(format!("{video_id}.src.%(ext)s"));
 
@@ -423,10 +497,11 @@ pub fn ensure_audio(
         // format 18'i (96k, düşük kaliteli ses) verir. Default client (çerezsiz)
         // yt-dlp'nin kendi JS çözücüsüyle audio-only 140'ı (128k m4a, kaliteli)
         // verir; nsig için deno bile gerekmez. O yüzden default bırakılır.
+        // NOT: -N (paralel parça) KULLANMA — ses dosyaları küçük; paralel bağlantı
+        // + çok eşzamanlı indirme YouTube throttle'ına (HTTP 403/416) yol açıyordu.
+        // Tek bağlantı daha güvenilir.
         "-f",
         "bestaudio[ext=m4a]/bestaudio/best[height<=480]/best",
-        "-N",
-        "4", // paralel parça indirme — daha hızlı
         "--no-playlist",
         "--no-warnings",
         "--no-part",

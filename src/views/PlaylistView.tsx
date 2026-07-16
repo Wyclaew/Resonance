@@ -7,7 +7,6 @@ import {
   Check,
   Flame,
   ListOrdered,
-  Radio,
   Share2,
   Copy,
   DownloadCloud,
@@ -46,7 +45,6 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
   const current = usePlayerStore((s) => s.current);
   const status = usePlayerStore((s) => s.status);
   const playNow = usePlayerStore((s) => s.playNow);
-  const startRadio = usePlayerStore((s) => s.startRadio);
 
   const rename = usePlaylistStore((s) => s.rename);
   const removePlaylist = usePlaylistStore((s) => s.remove);
@@ -222,14 +220,6 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
             className="mr-1 flex items-center gap-2 rounded-full bg-accent px-4 py-2 text-sm font-medium text-bg transition-transform hover:scale-105 disabled:opacity-30 disabled:hover:scale-100"
           >
             <Play size={16} fill="currentColor" /> Oynat
-          </button>
-          <button
-            onClick={() => tracks.length && startRadio(tracks, playlistId)}
-            disabled={tracks.length === 0}
-            title="Resonance Radyosu — karma sıralı, araya öneriler"
-            className="mr-1 flex items-center gap-2 rounded-full border border-accent/50 px-3.5 py-2 text-sm font-medium text-accent transition-colors hover:bg-accent/10 disabled:opacity-30"
-          >
-            <Radio size={16} /> Radyo
           </button>
           <button
             onClick={downloadAll}

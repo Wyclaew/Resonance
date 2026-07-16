@@ -9,14 +9,17 @@
       <stop offset="1" stop-color="#c4861f"/>
     </linearGradient>
   </defs>
-  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
+  <!-- Zemin yuvarlak-köşe kare 1024 kanvas içinde 832x832 ortalanır (macOS
+       kenar payı standardı: kenarlar şeffaf kalır). Çubuklar 0.8125 ölçekle
+       merkeze (512,512) göre küçültülür. -->
+  <rect x="96" y="96" width="832" height="832" rx="182" fill="url(#bg)"/>
   <g fill="url(#amber)">
-    <rect x="168" y="412" width="64" height="200" rx="32"/>
-    <rect x="272" y="342" width="64" height="340" rx="32"/>
-    <rect x="376" y="272" width="64" height="480" rx="32"/>
-    <rect x="480" y="212" width="64" height="600" rx="32"/>
-    <rect x="584" y="272" width="64" height="480" rx="32"/>
-    <rect x="688" y="342" width="64" height="340" rx="32"/>
-    <rect x="792" y="412" width="64" height="200" rx="32"/>
+    <rect x="232.5" y="430.75" width="52" height="162.5" rx="26"/>
+    <rect x="317" y="373.875" width="52" height="276.25" rx="26"/>
+    <rect x="401.5" y="317" width="52" height="390" rx="26"/>
+    <rect x="486" y="268.25" width="52" height="487.5" rx="26"/>
+    <rect x="570.5" y="317" width="52" height="390" rx="26"/>
+    <rect x="655" y="373.875" width="52" height="276.25" rx="26"/>
+    <rect x="739.5" y="430.75" width="52" height="162.5" rx="26"/>
   </g>
 </svg>

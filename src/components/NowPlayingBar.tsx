@@ -24,7 +24,7 @@ import { useToastStore } from "../store/useToastStore";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { formatMs } from "../lib/format";
 import { isTauri } from "../lib/db";
-import { getTrackKarma, voteTrack, undoVote } from "../lib/playlists";
+import { getTrackKarma, voteTrack, undoVote, ensureTrack } from "../lib/playlists";
 import AddToPlaylistButton from "./AddToPlaylistButton";
 import KarmaControl from "./KarmaControl";
 import SleepTimerButton from "./SleepTimerButton";
@@ -43,7 +43,7 @@ export default function NowPlayingBar() {
     durationMs,
     volume,
     muted,
-    shuffle,
+    shuffleMode,
     repeat,
     toggle,
     next,
@@ -51,7 +51,7 @@ export default function NowPlayingBar() {
     seek,
     setVolume,
     toggleMute,
-    toggleShuffle,
+    cycleShuffle,
     cycleRepeat,
   } = usePlayerStore();
 
@@ -90,6 +90,24 @@ export default function NowPlayingBar() {
   async function handleVote(dir: 1 | -1) {
     if (!playlistId || !current?.id) return;
     try {
+      // Parçayı `tracks`'e yaz — YOKSA OY SAYILMAZ. recommender.ts oyları
+      // `votes v JOIN tracks t` ile okuyor; Keşfet'ten gelen parça hiçbir
+      // listede olmadığı için `tracks`'te de yoktu → INNER JOIN oyu düşürüyordu,
+      // yani Keşfet'te oy vermek öğrenmeye HİÇ etki etmiyordu.
+      // Bu yalnızca metadata satırı: parça bir listeye ya da İndirilenler'e
+      // (cache.downloaded=1 şartı var) EKLENMEZ — sadece öğrenme sinyali sayılır.
+      // ensureTrack ON CONFLICT DO UPDATE kullanır (INSERT OR REPLACE değil →
+      // cascade tetiklenmez, bkz. CLAUDE.md gotcha #12).
+      await ensureTrack({
+        id: current.id,
+        source: current.source,
+        sourceId: current.sourceId,
+        title: current.title,
+        artist: current.artist,
+        album: current.album,
+        durationMs: current.durationMs,
+        thumbnail: current.thumbnail,
+      });
       const res = await voteTrack(playlistId, current.id, dir);
       if (!res.ok) {
         const mins = Math.ceil(res.cooldownRemainingMs / 60_000);
@@ -180,11 +198,28 @@ export default function NowPlayingBar() {
       <div className="flex max-w-2xl flex-1 flex-col items-center gap-1.5">
         <div className="flex items-center gap-4">
           <button
-            onClick={toggleShuffle}
-            title="Karıştır"
-            className={shuffle ? "text-accent" : "text-muted hover:text-text"}
+            onClick={cycleShuffle}
+            title={
+              shuffleMode === "off"
+                ? "Karışık kapalı"
+                : shuffleMode === "shuffle"
+                ? "Karışık"
+                : "Akıllı karışık — Resonance önerileriyle"
+            }
+            className={`relative ${
+              shuffleMode === "off"
+                ? "text-muted hover:text-text"
+                : "text-accent"
+            }`}
           >
             <Shuffle size={16} />
+            {shuffleMode === "smart" && (
+              <Sparkles
+                size={9}
+                className="absolute -right-1.5 -top-1 text-accent"
+                fill="currentColor"
+              />
+            )}
           </button>
           <button
             onClick={prev}

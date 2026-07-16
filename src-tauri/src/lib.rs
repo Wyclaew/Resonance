@@ -140,6 +140,9 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ));
+        // Global kısayollar (medya tuşları: kulaklık/klavye oynat-geç-duraklat).
+        builder =
+            builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
     }
 
     builder
@@ -150,6 +153,7 @@ pub fn run() {
         )
         .invoke_handler(tauri::generate_handler![
             commands::search_youtube,
+            commands::music_radio,
             commands::import_playlist,
             commands::import_spotify,
             commands::get_lyrics,

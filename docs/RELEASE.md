@@ -24,22 +24,36 @@ otomatik derler — sen sadece bir **etiket (tag)** push edersin.
 
 ## Her sürüm çıkarışında
 
-1. `src-tauri/tauri.conf.json` içindeki `"version"` değerini artır (ör. `0.1.0` → `0.1.1`).
-2. Commit'le, sonra bir **sürüm etiketi** push et:
+1. Sürüm numarasını **üç dosyada birden** artır (ör. `1.1.0` → `1.1.1`):
+   - `package.json` → `"version"`
+   - `src-tauri/tauri.conf.json` → `"version"`  ← Hakkında ekranı bunu gösterir
+   - `src-tauri/Cargo.toml` → `version`
+
+2. `Cargo.lock`'u yenile (aksi halde CI'da eski sürüm kalır):
 
    ```bash
-   git add -A && git commit -m "v0.1.0"
-   git tag v0.1.0
+   cd src-tauri && cargo check    # Cargo.lock'taki resonance sürümünü günceller
+   ```
+
+3. Doğrula: `npm run build` (frontend) temiz geçmeli.
+
+4. Commit'le, sonra bir **sürüm etiketi** push et:
+
+   ```bash
+   git add -A && git commit -m "v1.1.0"
+   git tag v1.1.0
    git push origin main --tags
    ```
 
-3. Etiket push'lanınca **GitHub Actions** otomatik başlar:
+   > Etiket zaten varsa: `git tag -d v1.1.0 && git push origin :refs/tags/v1.1.0` ile sil, sonra tekrar at.
+
+5. Etiket push'lanınca **GitHub Actions** otomatik başlar:
    - macOS runner → `.dmg` üretir
    - Windows runner → `.exe` üretir
    - yt-dlp + ffmpeg'i indirip uygulamaya gömer (kurulum gerekmez)
    - Bir **taslak (draft) Release** oluşturup dosyaları ekler
 
-4. GitHub → repo → **Releases** sekmesine git. Taslağı aç, gözden geçir,
+6. GitHub → repo → **Releases** sekmesine git. Taslağı aç, gözden geçir,
    **Publish release**'e bas. Artık `.dmg` ve `.exe` o sayfadan indirilebilir.
 
 ## Notlar

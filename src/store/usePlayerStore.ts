@@ -1,9 +1,21 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { PlaybackStatus, QueueItem, RepeatMode, Track } from "../types";
+import { register } from "@tauri-apps/plugin-global-shortcut";
+import type {
+  PlaybackStatus,
+  QueueItem,
+  RepeatMode,
+  ShuffleMode,
+  Track,
+} from "../types";
 import { isTauri } from "../lib/db";
-import { getRecommendations } from "../lib/recommender";
+import {
+  getRecommendations,
+  recordRecommended,
+  songCore,
+  type Recommendation,
+} from "../lib/recommender";
 import { recordPlay } from "../lib/history";
 import { useSettingsStore } from "./useSettingsStore";
 import { useToastStore } from "./useToastStore";
@@ -24,13 +36,16 @@ interface PlayerState {
   durationMs: number;
   volume: number;
   muted: boolean;
-  shuffle: boolean;
+  shuffleMode: ShuffleMode;
   repeat: RepeatMode;
 
   // Resonance Radyosu
   radioActive: boolean;
   radioPlaylistId: string | null;
   skippedRecIds: Set<string>;
+  discovering: boolean; // keşif hazırlanıyor (Sidebar butonu spinner gösterir)
+  // Şu anki keşif partisini getiren seed sanatçılar — "reroll"da dışlanır.
+  discoverySeedArtists: string[];
 
   // Uyku zamanlayıcı
   sleepTimerEndsAt: number | null;
@@ -39,7 +54,9 @@ interface PlayerState {
   error: string | null;
 
   playNow: (track: Track, queue?: Track[], playlistId?: string) => void;
-  startRadio: (tracks: KarmaTrack[], playlistId: string) => Promise<void>;
+  startSmartShuffle: (tracks: KarmaTrack[], playlistId: string) => Promise<void>;
+  startDiscovery: () => Promise<void>;
+  rerollDiscovery: () => Promise<void>;
   restoreState: (track: Track, positionMs: number) => void;
   toggle: () => void;
   next: () => void;
@@ -50,11 +67,15 @@ interface PlayerState {
   seek: (ms: number) => void;
   setVolume: (v: number) => void;
   toggleMute: () => void;
-  toggleShuffle: () => void;
+  cycleShuffle: () => void;
   cycleRepeat: () => void;
 }
 
 const repeatOrder: RepeatMode[] = ["off", "all", "one"];
+
+// Keşif modu: playlist'e bağlı olmayan, tamamen öğrenen algoritmanın önerileriyle
+// ilerleyen radyo. Bu özel kimlik radioPlaylistId olarak kullanılır.
+export const DISCOVERY_ID = "__discovery__";
 
 function toQueueItem(t: Track, playlistId?: string): QueueItem {
   return { ...t, uid: crypto.randomUUID(), playlistId };
@@ -73,15 +94,106 @@ function weightedShuffle(tracks: KarmaTrack[]): KarmaTrack[] {
     .map((x) => x.t);
 }
 
+// Bir öneriyi kuyruk öğesine çevir (araya serpiştirme + keşif için ortak).
+function toRecItem(r: Recommendation, playlistId: string): QueueItem {
+  return {
+    ...r,
+    uid: crypto.randomUUID(),
+    playlistId,
+    isRecommendation: true,
+    recSource: r.recSource,
+    recReason: r.reason,
+  };
+}
+
+// Çeşitlilik: bir öneri dizisinde arka arkaya AYNI sanatçı gelmesin. İki komşu
+// öğe aynı sanatçıysa, sonraki farklı sanatçılı öğeyle yer değiştirilir.
+function spreadByArtist<T extends { artist: string }>(items: T[]): T[] {
+  const out = [...items];
+  for (let i = 1; i < out.length; i++) {
+    if (out[i].artist && out[i].artist === out[i - 1].artist) {
+      let j = i + 1;
+      while (j < out.length && out[j].artist === out[i - 1].artist) j++;
+      if (j < out.length) [out[i], out[j]] = [out[j], out[i]];
+    }
+  }
+  return out;
+}
+
+// Öneri getir ve MEVCUT kuyruğa, queueIndex sonrasında recEveryN aralıkla
+// serpiştir. Hem startSmartShuffle (taze karışık kuyruk) hem de akıllı-karışığa
+// geçiş (mevcut kuyruk korunur) tarafından paylaşılır.
+async function fetchAndInterleave(
+  playlistId: string,
+  extraExclude: string[] = []
+) {
+  const s = useSettingsStore.getState();
+  if (!s.recEnabled || (!s.recYouTube && !s.recLibrary)) return;
+  const st = usePlayerStore.getState();
+  const remaining = Math.max(1, st.queue.length - st.queueIndex);
+  try {
+    const exclude = new Set<string>([
+      ...extraExclude,
+      ...st.queue.map((i) => i.id),
+      ...st.skippedRecIds,
+      ...recommendedThisSession,
+    ]);
+    const recs = await getRecommendations({
+      playlistId,
+      excludeIds: exclude,
+      excludeCores: buildExcludeCores(),
+      limit: Math.max(2, Math.ceil(remaining / s.recEveryN) + 1),
+      useYouTube: s.recYouTube,
+      useLibrary: s.recLibrary,
+      halfLifeDays: s.karmaHalfLifeDays,
+    });
+    if (recs.length === 0) return;
+    rememberRecs(recs);
+    const spread = spreadByArtist(recs);
+    usePlayerStore.setState((state) => {
+      if (!state.radioActive || state.radioPlaylistId !== playlistId) return {};
+      const q = [...state.queue];
+      const recItems = spread.map((r) => toRecItem(r, playlistId));
+      // Mevcut konumdan sonra her recEveryN parçada bir öneri ekle.
+      let insertAt = state.queueIndex + s.recEveryN + 1;
+      let ri = 0;
+      while (ri < recItems.length && insertAt <= q.length) {
+        q.splice(insertAt, 0, recItems[ri++]);
+        insertAt += s.recEveryN + 1;
+      }
+      while (ri < recItems.length) q.push(recItems[ri++]);
+      return { queue: q };
+    });
+    // Önerileri konumlarından bağımsız hemen prefetch et (sıra gelince hazır olsun).
+    if (isTauri() && s.prefetchEnabled) {
+      for (const r of recs) {
+        invoke("prefetch_audio", {
+          sourceId: r.sourceId,
+          cookiesBrowser: s.cookiesBrowser,
+        }).catch(() => {});
+      }
+    }
+  } catch (e) {
+    console.error("[resonance] öneriler serpiştirilemedi:", e);
+  }
+}
+
 // Ses motoruna en az bir kez Load gönderildi mi? (açılışta "kaldığın yerden
 // devam" için: current var ama henüz yüklenmemişse, play'e basınca kaldığı
 // pozisyondan yükle.)
 let hasLoaded = false;
 let resumeMsPending = 0;
+// Her loadAndPlay çağrısına artan bir token verilir. Yükleme HATASI geldiğinde
+// yalnızca EN GÜNCEL yükleme kuyruğu ilerletir; bu arada kullanıcı başka şarkıya
+// geçtiyse (token eskidi) hiçbir şey yapılmaz. Aksi halde eski/indirilemeyen bir
+// öneri hata verince O AN çalan şarkı yanlışlıkla atlanıyordu ("durup dururken
+// şarkı geçti" bug'ı).
+let currentLoadToken = 0;
 
 function loadAndPlay(item: QueueItem, startMs = 0) {
   if (!isTauri()) return;
   hasLoaded = true;
+  const myToken = ++currentLoadToken;
   invoke("play_track", {
     input: {
       sourceId: item.sourceId,
@@ -91,9 +203,10 @@ function loadAndPlay(item: QueueItem, startMs = 0) {
     },
     cookiesBrowser: useSettingsStore.getState().cookiesBrowser,
   }).catch((e) => {
-    // İndirilemeyen şarkı (silinmiş video, geçici hata) kuyruğu TIKAMASIN:
-    // sıradaki varsa otomatik atla (radyo/kuyruk akışı sürsün). Art arda çok
-    // hata olursa dur ki sonsuz döngü olmasın.
+    // Bu yükleme hâlâ güncel mi? Değilse (kullanıcı başka şarkıya geçti) DOKUNMA.
+    if (myToken !== currentLoadToken) return;
+    // İndirilemeyen şarkı (silinmiş/geçici hata) kuyruğu TIKAMASIN: sıradaki varsa
+    // atla. Art arda çok hata olursa dur ki sonsuz döngü olmasın.
     console.error("[resonance] play_track hatası:", e);
     const st = usePlayerStore.getState();
     loadFailCount++;
@@ -119,12 +232,14 @@ let loadFailCount = 0;
 // sarmalayıcı yalnızca EN SON seçilen şarkıyı (basış durduktan ~180ms sonra)
 // yükler → tek indirme, arayüz-ses her zaman aynı.
 let loadTimer: ReturnType<typeof setTimeout> | undefined;
+let prefetchTimer: ReturnType<typeof setTimeout> | undefined;
 function scheduleLoad(item: QueueItem, startMs = 0) {
   clearTimeout(loadTimer);
-  loadTimer = setTimeout(() => {
-    loadAndPlay(item, startMs);
-    prefetchNext();
-  }, 180);
+  loadTimer = setTimeout(() => loadAndPlay(item, startMs), 180);
+  // Prefetch'i daha uzun beklet: kullanıcı hızlıca şarkı geçerken geçilen
+  // şarkılar boşuna indirilmesin — yalnızca durduktan sonra sıradakiler hazırlanır.
+  clearTimeout(prefetchTimer);
+  prefetchTimer = setTimeout(() => prefetchNext(), 1500);
 }
 
 let sleepTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -200,11 +315,83 @@ function recordOutgoing(s: PlayerState) {
 // Bu oturumda önerilen tüm parça id'leri — aynı şarkının tekrar tekrar
 // önerilmesini engeller (kullanıcı "sürekli aynı şeyler geliyor" demişti).
 const recommendedThisSession = new Set<string>();
+// Aynı şarkının FARKLI kaydı/versiyonu (başka sanatçıdan, slowed+reverb vb.)
+// farklı ID taşır → ID dışlaması yetmez. Önerilen şarkıların "adı çekirdeği"
+// burada tutulur ve her öneri isteğine geçirilir (partiler arası tekrar engeli).
+const recommendedCoresThisSession = new Set<string>();
+
+// Öneri isteklerine geçilecek çekirdek dışlama kümesi: bu oturumda önerilenler
+// + hâlihazırda kuyrukta olanlar.
+function buildExcludeCores(): Set<string> {
+  const cores = new Set<string>(recommendedCoresThisSession);
+  for (const it of usePlayerStore.getState().queue) {
+    cores.add(songCore(it.title, it.artist));
+  }
+  return cores;
+}
+
+// Kabul edilen önerileri oturum hafızasına (id + çekirdek) işle.
+// Bir öneri partisini hangi sanatçıların radyoları getirdi (benzersiz).
+function seedArtistsOf(recs: Recommendation[]): string[] {
+  return [...new Set(recs.map((r) => r.seedArtist).filter(Boolean) as string[])];
+}
+
+function rememberRecs(recs: Recommendation[]) {
+  for (const r of recs) {
+    recommendedThisSession.add(r.id);
+    recommendedCoresThisSession.add(songCore(r.title, r.artist));
+  }
+}
+
+// --- Keşif prewarm: açılışta (ve her keşif başlangıcından sonra) arka planda bir
+// öneri partisi hazırlanır ve ilk şarkı indirilir; böylece Keşfet'e basınca
+// ANINDA başlar. Kayıt YAPILMAZ (record:false) — kullanılmadan "harcanmasın";
+// kullanılınca recordRecommended ile kaydedilir. ---
+let discoveryPrewarm: Recommendation[] | null = null;
+let prewarming = false;
+export async function prewarmDiscovery() {
+  if (prewarming || discoveryPrewarm || !isTauri()) return;
+  const s = useSettingsStore.getState();
+  if (!s.recEnabled || (!s.recYouTube && !s.recLibrary)) return;
+  prewarming = true;
+  try {
+    const recs = await getRecommendations({
+      playlistId: DISCOVERY_ID,
+      excludeIds: new Set(recommendedThisSession),
+      excludeCores: buildExcludeCores(),
+      limit: 20,
+      useYouTube: s.recYouTube,
+      useLibrary: s.recLibrary,
+      halfLifeDays: s.karmaHalfLifeDays,
+      record: false, // kullanılana kadar geçmişe yazma
+    });
+    if (recs.length > 0) {
+      discoveryPrewarm = recs;
+      // İlk şarkıyı indirmeye başla → buton anında tepki versin.
+      if (s.prefetchEnabled) {
+        invoke("prefetch_audio", {
+          sourceId: recs[0].sourceId,
+          cookiesBrowser: s.cookiesBrowser,
+        }).catch(() => {});
+      }
+    }
+  } catch (e) {
+    console.error("[resonance] keşif prewarm başarısız:", e);
+  } finally {
+    prewarming = false;
+  }
+}
+
+// Radyo/keşifte sırada hep bu kadar (yaklaşık) şarkı yüklü tutulur; altına
+// inince hemen tamamlanır.
+const TARGET_QUEUE_AHEAD = 20;
 
 // Radyo uzun oturumda tükenmesin: kuyruk sonuna yaklaşınca arka planda yeni
 // öneri çekip ekler (sonsuz radyo). Ekran koruyucu aktifken çalışmaz.
 let refilling = false;
-async function refillRadio() {
+// playAfter: kuyruk BİTTİĞİ için çağrıldıysa, besledikten sonra ilk yeni
+// öneriye otomatik geç (radyo durmasın).
+async function refillRadio(playAfter = false) {
   if (refilling || !isTauri()) return;
   if (useAppStore.getState().idle) return;
   const st = usePlayerStore.getState();
@@ -214,6 +401,10 @@ async function refillRadio() {
   const playlistId = st.radioPlaylistId;
   refilling = true;
   try {
+    // Sıradaki (upcoming) şarkı sayısı hep TARGET_QUEUE_AHEAD (~20) tutulsun:
+    // eksiği kadar öneri çek.
+    const upcoming = st.queue.length - st.queueIndex - 1;
+    const needed = Math.max(TARGET_QUEUE_AHEAD - upcoming, 6);
     const exclude = new Set<string>([
       ...st.queue.map((i) => i.id),
       ...st.skippedRecIds,
@@ -222,35 +413,55 @@ async function refillRadio() {
     const recs = await getRecommendations({
       playlistId,
       excludeIds: exclude,
-      limit: 5,
+      excludeCores: buildExcludeCores(),
+      limit: needed,
       useYouTube: s.recYouTube,
       useLibrary: s.recLibrary,
       halfLifeDays: s.karmaHalfLifeDays,
     });
-    if (recs.length === 0) return;
-    recs.forEach((r) => recommendedThisSession.add(r.id));
+    if (recs.length === 0) {
+      // Öneri bulunamadıysa ve kuyruk bittiyse dur; kullanıcıya bildir.
+      if (playAfter) {
+        usePlayerStore.setState({ status: "idle" });
+        useToastStore
+          .getState()
+          .show("Şimdilik yeni öneri kalmadı — biraz sonra tekrar dene", "info");
+      }
+      return;
+    }
+    rememberRecs(recs);
+    const spread = spreadByArtist(recs);
     usePlayerStore.setState((state) => {
       if (!state.radioActive || state.radioPlaylistId !== playlistId) return {};
-      const recItems: QueueItem[] = recs.map((r) => ({
-        ...r,
-        uid: crypto.randomUUID(),
-        playlistId,
-        isRecommendation: true,
-        recSource: r.recSource,
-        recReason: r.reason,
-      }));
+      const recItems: QueueItem[] = spread.map((r) => toRecItem(r, playlistId));
       return { queue: [...state.queue, ...recItems] };
     });
-    if (s.prefetchEnabled) {
-      for (const r of recs) {
-        invoke("prefetch_audio", {
-          sourceId: r.sourceId,
-          cookiesBrowser: s.cookiesBrowser,
-        }).catch(() => {});
+    // Eklenen TÜM önerileri önden indir (sıradaki 20 hep hazır olsun).
+    for (const r of recs) {
+      invoke("prefetch_audio", {
+        sourceId: r.sourceId,
+        cookiesBrowser: s.cookiesBrowser,
+      }).catch(() => {});
+    }
+    // Kuyruk bitmişti → yeni eklenen ilk öneriye geç.
+    if (playAfter) {
+      const cur = usePlayerStore.getState();
+      const nextIdx = cur.queueIndex + 1;
+      if (cur.radioActive && nextIdx < cur.queue.length) {
+        const item = cur.queue[nextIdx];
+        usePlayerStore.setState({
+          queueIndex: nextIdx,
+          current: item,
+          status: "loading",
+          positionMs: 0,
+          durationMs: item.durationMs,
+        });
+        scheduleLoad(item);
       }
     }
   } catch (e) {
     console.error("[resonance] radyo beslenemedi:", e);
+    if (playAfter) usePlayerStore.setState({ status: "idle" });
   } finally {
     refilling = false;
   }
@@ -266,12 +477,14 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   durationMs: 0,
   volume: 0.9,
   muted: false,
-  shuffle: false,
+  shuffleMode: "off",
   repeat: "off",
 
   radioActive: false,
   radioPlaylistId: null,
   skippedRecIds: new Set(),
+  discoverySeedArtists: [],
+  discovering: false,
 
   sleepTimerEndsAt: null,
   setSleepTimer: (minutes) => {
@@ -308,9 +521,11 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     scheduleLoad(current);
   },
 
-  startRadio: async (tracks, playlistId) => {
+  // Akıllı karışık: karma-ağırlıklı karıştırılmış kuyruk + araya Resonance
+  // önerileri serpiştirilir (Spotify "smart shuffle" benzeri). shuffleMode="smart"
+  // olur ve radyo döngüsü (sonsuz besleme) aktifleşir.
+  startSmartShuffle: async (tracks, playlistId) => {
     if (tracks.length === 0) return;
-    const s = useSettingsStore.getState();
     const baseItems = weightedShuffle(tracks).map((t) =>
       toQueueItem(t, playlistId)
     );
@@ -324,65 +539,176 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       durationMs: first.durationMs,
       radioActive: true,
       radioPlaylistId: playlistId,
+      shuffleMode: "smart",
       error: null,
     });
     scheduleLoad(first);
-
     // Önerileri arka planda getir ve kuyruğa serpiştir (oynatmayı bekletmeden).
-    if (!s.recEnabled || (!s.recYouTube && !s.recLibrary)) return;
-    try {
-      const exclude = new Set([
-        ...tracks.map((t) => t.id),
-        ...get().skippedRecIds,
-        ...recommendedThisSession,
-      ]);
-      const recs = await getRecommendations({
-        playlistId,
-        excludeIds: exclude,
-        limit: Math.max(2, Math.ceil(baseItems.length / s.recEveryN) + 1),
-        useYouTube: s.recYouTube,
-        useLibrary: s.recLibrary,
-        halfLifeDays: s.karmaHalfLifeDays,
-      });
-      if (recs.length === 0) return;
-      recs.forEach((r) => recommendedThisSession.add(r.id));
+    await fetchAndInterleave(playlistId, tracks.map((t) => t.id));
+  },
 
-      set((state) => {
-        if (!state.radioActive || state.radioPlaylistId !== playlistId) {
-          return {};
-        }
-        const q = [...state.queue];
-        const recItems: QueueItem[] = recs.map((r) => ({
-          ...r,
-          uid: crypto.randomUUID(),
-          playlistId,
-          isRecommendation: true,
-          recSource: r.recSource,
-          recReason: r.reason,
-        }));
-        // Mevcut konumdan sonra her recEveryN parçada bir öneri ekle.
-        let insertAt = state.queueIndex + s.recEveryN + 1;
-        let ri = 0;
-        while (ri < recItems.length && insertAt <= q.length) {
-          q.splice(insertAt, 0, recItems[ri++]);
-          insertAt += s.recEveryN + 1;
-        }
-        while (ri < recItems.length) q.push(recItems[ri++]);
-        return { queue: q };
+  // Keşif modu: playlist yok — tamamen öğrenen algoritmanın önerileriyle ilerler.
+  // Sürekli beslenir (refillRadio radioPlaylistId=DISCOVERY_ID ile çalışır).
+  startDiscovery: async () => {
+    // Keşif ZATEN çalışıyorsa: yeni sıra oluşturma — sadece mevcut sırayı göster.
+    const cur = get();
+    if (
+      cur.radioActive &&
+      cur.radioPlaylistId === DISCOVERY_ID &&
+      cur.queue.length > 0
+    ) {
+      useAppStore.setState({ queueOpen: true, lyricsOpen: false });
+      return;
+    }
+    if (get().discovering) return; // arka arkaya basışları yut
+
+    const s = useSettingsStore.getState();
+    if (!s.recEnabled || (!s.recYouTube && !s.recLibrary)) {
+      useToastStore
+        .getState()
+        .show("Öneriler kapalı — Ayarlar → Resonance Önerisi", "info");
+      return;
+    }
+    set({ discovering: true, status: "loading" });
+    try {
+      // Prewarm hazırsa anında kullan; değilse taze çek.
+      let recs = discoveryPrewarm;
+      discoveryPrewarm = null;
+      if (!recs) {
+        recs = await getRecommendations({
+          playlistId: DISCOVERY_ID,
+          excludeIds: new Set<string>([
+            ...get().skippedRecIds,
+            ...recommendedThisSession,
+          ]),
+          excludeCores: buildExcludeCores(),
+          limit: 20,
+          useYouTube: s.recYouTube,
+          useLibrary: s.recLibrary,
+          halfLifeDays: s.karmaHalfLifeDays,
+        });
+      } else {
+        // Prewarm kayıt yapmamıştı — kullanıldığı için şimdi kaydet.
+        await recordRecommended(recs.map((r) => r.id));
+      }
+      if (recs.length === 0) {
+        useToastStore
+          .getState()
+          .show("Yeterli veri yok — birkaç şarkıya oy vererek başla", "info");
+        set({ discovering: false, status: "idle" });
+        return;
+      }
+      rememberRecs(recs);
+      // Çeşitlilik: arka arkaya aynı sanatçı gelmesin.
+      const items: QueueItem[] = spreadByArtist(recs).map((r) =>
+        toRecItem(r, DISCOVERY_ID)
+      );
+      const first = items[0];
+      set({
+        queue: items,
+        queueIndex: 0,
+        current: first,
+        status: "loading",
+        positionMs: 0,
+        durationMs: first.durationMs,
+        radioActive: true,
+        radioPlaylistId: DISCOVERY_ID,
+        shuffleMode: "smart",
+        discovering: false,
+        error: null,
+        discoverySeedArtists: seedArtistsOf(recs),
       });
-      // Önerileri kuyruktaki konumlarından BAĞIMSIZ olarak hemen prefetch et
-      // (prefetchNext yalnızca 3 önden bakar; öneri daha geride olabilir).
-      // Böylece sıra geldiğinde çözümleme/indirme zaten tamamlanmış olur.
-      if (isTauri() && s.prefetchEnabled) {
-        for (const r of recs) {
+      scheduleLoad(first);
+      // Sıradaki TÜM önerileri önden hazırla (backend eşzamanlılık sınırı sırayla
+      // indirir; hızlı geçişte gecikme olmaz).
+      if (isTauri()) {
+        for (const it of items.slice(1)) {
           invoke("prefetch_audio", {
-            sourceId: r.sourceId,
+            sourceId: it.sourceId,
             cookiesBrowser: s.cookiesBrowser,
           }).catch(() => {});
         }
       }
+      // Sıra panelini aç — kullanıcı gelecek önerileri görsün.
+      useAppStore.setState({ queueOpen: true, lyricsOpen: false });
+      // Sonraki sefer için yeni parti hazırla (arka planda).
+      void prewarmDiscovery();
     } catch (e) {
-      console.error("[resonance] radyo önerileri alınamadı:", e);
+      console.error("[resonance] keşif başlatılamadı:", e);
+      set({ discovering: false, status: "idle" });
+    }
+  },
+
+  // "Bu tarzı beğenmedim" → sırayı at, BAŞKA sanatçıların radyolarından yeni
+  // parti kur. Şu anki partiyi getiren seed sanatçıları dışlanır, böylece gelen
+  // tarz gerçekten değişir (yoksa aynı güçlü sinyaller aynı radyoları açardı).
+  rerollDiscovery: async () => {
+    if (get().discovering) return; // arka arkaya basışları yut
+    const s = useSettingsStore.getState();
+    set({ discovering: true });
+    try {
+      // Mevcut partiyi getiren seed sanatçılar + kuyruktaki parçalar dışlanır.
+      const prevSeeds = new Set(get().discoverySeedArtists);
+      const recs = await getRecommendations({
+        playlistId: DISCOVERY_ID,
+        excludeIds: new Set<string>([
+          ...get().skippedRecIds,
+          ...recommendedThisSession,
+        ]),
+        excludeCores: buildExcludeCores(),
+        excludeSeedArtists: prevSeeds,
+        limit: TARGET_QUEUE_AHEAD,
+        useYouTube: s.recYouTube,
+        useLibrary: s.recLibrary,
+        halfLifeDays: s.karmaHalfLifeDays,
+      });
+      if (recs.length === 0) {
+        useToastStore
+          .getState()
+          .show("Başka tarz bulunamadı — daha fazla şarkıya oy ver", "info");
+        set({ discovering: false });
+        return;
+      }
+      rememberRecs(recs);
+      const items: QueueItem[] = spreadByArtist(recs).map((r) =>
+        toRecItem(r, DISCOVERY_ID)
+      );
+      const first = items[0];
+      set({
+        queue: items,
+        queueIndex: 0,
+        current: first,
+        status: "loading",
+        positionMs: 0,
+        durationMs: first.durationMs,
+        radioActive: true,
+        radioPlaylistId: DISCOVERY_ID,
+        shuffleMode: "smart",
+        discovering: false,
+        error: null,
+        discoverySeedArtists: seedArtistsOf(recs),
+      });
+      scheduleLoad(first);
+      if (isTauri()) {
+        for (const it of items.slice(1)) {
+          invoke("prefetch_audio", {
+            sourceId: it.sourceId,
+            cookiesBrowser: s.cookiesBrowser,
+          }).catch(() => {});
+        }
+      }
+      const styles = seedArtistsOf(recs);
+      useToastStore
+        .getState()
+        .show(
+          styles.length > 0
+            ? `Yeni tarz: ${styles.join(", ")}`
+            : "Yeni keşif partisi hazır",
+          "info"
+        );
+    } catch (e) {
+      console.error("[resonance] reroll başarısız:", e);
+      set({ discovering: false });
     }
   },
 
@@ -423,7 +749,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   next: () => {
     recordOutgoing(get());
-    const { queue, queueIndex, shuffle, repeat, radioActive } = get();
+    const { queue, queueIndex, shuffleMode, repeat, radioActive } = get();
     if (queue.length === 0) return;
 
     if (repeat === "one") {
@@ -434,7 +760,9 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
 
     let nextIdx: number;
-    if (shuffle && !radioActive) {
+    // "shuffle" modunda rastgele sonraki; "smart" modunda (radyo aktif) öneriler
+    // zaten serpiştirilmiş olduğundan SIRALI ilerle + refill devam etsin.
+    if (shuffleMode === "shuffle" && !radioActive) {
       nextIdx =
         queue.length === 1
           ? queueIndex
@@ -448,7 +776,12 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       nextIdx = queueIndex + 1;
       if (nextIdx >= queue.length) {
         if (repeat === "all") nextIdx = 0;
-        else {
+        else if (radioActive) {
+          // Radyo/keşif: kuyruk bitti → besle ve ilk yeni öneriye otomatik geç.
+          set({ status: "loading", positionMs: 0 });
+          refillRadio(true);
+          return;
+        } else {
           if (isTauri()) invoke("audio_stop").catch(() => {});
           set({ status: "idle", positionMs: 0 });
           return;
@@ -464,8 +797,11 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       durationMs: item.durationMs,
     });
     scheduleLoad(item);
-    // Radyoda kuyruğun sonuna yaklaşıldıysa arka planda yeni öneri çek (sonsuz radyo).
-    if (radioActive && nextIdx >= queue.length - 3) refillRadio();
+    // Radyo/keşifte sıradaki şarkı sayısı hedefin (20) altına düşünce hemen
+    // tamamla — sırada hep ~20 yüklü şarkı dursun.
+    if (radioActive && queue.length - nextIdx - 1 < TARGET_QUEUE_AHEAD) {
+      refillRadio();
+    }
   },
 
   prev: () => {
@@ -557,7 +893,43 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       );
   },
 
-  toggleShuffle: () => set((s) => ({ shuffle: !s.shuffle })),
+  // Karışık modunu döndür: off → shuffle → smart → off.
+  cycleShuffle: () => {
+    const { shuffleMode } = get();
+    if (shuffleMode === "off") {
+      set({ shuffleMode: "shuffle" });
+    } else if (shuffleMode === "shuffle") {
+      // shuffle → smart: o anki kuyruk bağlamında öneri serpiştirmeyi başlat.
+      const playlistId = get().current?.playlistId;
+      set({ shuffleMode: "smart" });
+      if (playlistId) {
+        set({ radioActive: true, radioPlaylistId: playlistId });
+        fetchAndInterleave(playlistId);
+      } else {
+        // Kuyruk bir listeye bağlı değil → serpiştirilecek bağlam yok, öneri gelmez.
+        useToastStore
+          .getState()
+          .show("Akıllı karışık için bir listeden çal", "info");
+      }
+    } else {
+      // smart → off: radyoyu kapat; kuyrukta queueIndex SONRASI, henüz ÇALINMAMIŞ
+      // önerileri kuyruktan çıkar (kalan asıl parçalar korunur).
+      const { queue, queueIndex, current } = get();
+      const filtered = queue.filter(
+        (item, idx) => !(idx > queueIndex && item.isRecommendation)
+      );
+      const newIndex = current
+        ? filtered.findIndex((i) => i.uid === current.uid)
+        : queueIndex;
+      set({
+        queue: filtered,
+        queueIndex: newIndex >= 0 ? newIndex : queueIndex,
+        radioActive: false,
+        radioPlaylistId: null,
+        shuffleMode: "off",
+      });
+    }
+  },
   cycleRepeat: () => {
     const cur = get().repeat;
     const idx = repeatOrder.indexOf(cur);
@@ -567,6 +939,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
 // Ses thread'inden gelen olayları dinle (uygulama açılışında bir kez).
 let initialized = false;
+// Arka plan modunda pozisyon güncellemesini kısmak için son uygulanan tick zamanı.
+let lastTickApplied = 0;
 export async function initPlayer() {
   if (initialized || !isTauri()) return;
   initialized = true;
@@ -576,7 +950,16 @@ export async function initPlayer() {
     (e) => {
       const { position_ms, duration_ms, playing } = e.payload;
       const s = usePlayerStore.getState();
-      const patch: Partial<PlayerState> = { positionMs: position_ms };
+      const patch: Partial<PlayerState> = {};
+      // Arka plandayken (odak yok) pozisyon güncellemesini en fazla saniyede 1
+      // yap → gereksiz re-render'ları kes, GPU/CPU tasarrufu. playing/status ve
+      // süre güncellemeleri her zaman geçer.
+      const bg = useAppStore.getState().backgrounded;
+      const nowMs = Date.now();
+      if (!bg || nowMs - lastTickApplied >= 1000) {
+        patch.positionMs = position_ms;
+        lastTickApplied = nowMs;
+      }
       if (duration_ms > 0) patch.durationMs = duration_ms;
       if (playing) {
         patch.status = "playing";
@@ -612,6 +995,44 @@ export async function initPlayer() {
       usePlayerStore.setState({ status: "idle", error: e.payload });
     }
   });
+
+  // Medya tuşları (kulaklık / klavye oynat-duraklat-geç). Uygulama arka planda
+  // olsa bile çalışır. macOS bazı tuşları sisteme ayırabilir; Windows'ta sağlam.
+  const mediaKeys: [string, () => void][] = [
+    ["MediaPlayPause", () => usePlayerStore.getState().toggle()],
+    ["MediaTrackNext", () => usePlayerStore.getState().next()],
+    ["MediaTrackPrevious", () => usePlayerStore.getState().prev()],
+  ];
+  for (const [key, fn] of mediaKeys) {
+    try {
+      await register(key, (e) => {
+        if (e.state === "Pressed") fn();
+      });
+    } catch (err) {
+      console.error(`[resonance] '${key}' kaydedilemedi:`, err);
+    }
+  }
+
+  // macOS'ta bazı klavyelerde F7/F8/F9 fiziksel medya tuşlarıdır (önceki/oynat/
+  // sonraki). Ek olarak bunları da kaydetmeyi DENE. DÜRÜST NOT: macOS bu tuşları
+  // çoğu zaman sistem medya kontrolüne ayırır ve global kayıt başarısız olabilir
+  // veya hiç tetiklenmeyebilir; o yüzden hatayı sessizce yut (kritik değil).
+  const isMac = /Mac/i.test(navigator.userAgent);
+  if (isMac) {
+    const macKeys: [string, () => void][] = [
+      ["F7", () => usePlayerStore.getState().prev()],
+      ["F9", () => usePlayerStore.getState().next()],
+    ];
+    for (const [key, fn] of macKeys) {
+      try {
+        await register(key, (e) => {
+          if (e.state === "Pressed") fn();
+        });
+      } catch (err) {
+        console.error(`[resonance] '${key}' (macOS) kaydedilemedi:`, err);
+      }
+    }
+  }
 }
 
 // Art arda çalma hatası sayacı (otomatik atlamada sonsuz döngüyü önler).

@@ -1,6 +1,14 @@
 import { useState } from "react";
-import { X, Music2, Sparkles, GripVertical, ListMusic } from "lucide-react";
-import { usePlayerStore } from "../store/usePlayerStore";
+import {
+  X,
+  Music2,
+  Sparkles,
+  GripVertical,
+  ListMusic,
+  Dice5,
+  Loader2,
+} from "lucide-react";
+import { usePlayerStore, DISCOVERY_ID } from "../store/usePlayerStore";
 import { useAppStore } from "../store/useAppStore";
 import { formatMs } from "../lib/format";
 
@@ -15,6 +23,12 @@ export default function QueuePanel() {
   const removeFromQueue = usePlayerStore((s) => s.removeFromQueue);
   const moveInQueue = usePlayerStore((s) => s.moveInQueue);
   const toggleQueue = useAppStore((s) => s.toggleQueue);
+  // Keşif modundaysa "başka tarz" (reroll) butonu göster.
+  const radioPlaylistId = usePlayerStore((s) => s.radioPlaylistId);
+  const rerollDiscovery = usePlayerStore((s) => s.rerollDiscovery);
+  const discovering = usePlayerStore((s) => s.discovering);
+  const seedArtists = usePlayerStore((s) => s.discoverySeedArtists);
+  const inDiscovery = radioPlaylistId === DISCOVERY_ID;
 
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [overIdx, setOverIdx] = useState<number | null>(null);
@@ -38,14 +52,38 @@ export default function QueuePanel() {
           <span className="text-sm text-faint">
             {upcoming.length} sıradaki
           </span>
+          {/* Keşifte: sıranın hangi tarzlardan geldiğini göster. */}
+          {inDiscovery && seedArtists.length > 0 && (
+            <span className="hidden truncate text-sm text-faint sm:inline">
+              · {seedArtists.join(", ")} tarzı
+            </span>
+          )}
         </div>
-        <button
-          onClick={toggleQueue}
-          title="Kapat"
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-md text-muted hover:bg-surface hover:text-text"
-        >
-          <X size={18} />
-        </button>
+        <div className="flex items-center gap-1">
+          {/* Tarzı beğenmediysen: başka sanatçıların radyolarından yeni parti. */}
+          {inDiscovery && (
+            <button
+              onClick={() => void rerollDiscovery()}
+              disabled={discovering}
+              title="Bu tarzı beğenmedim — başka tarz getir"
+              className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-muted hover:bg-surface hover:text-text disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {discovering ? (
+                <Loader2 size={15} className="animate-spin" />
+              ) : (
+                <Dice5 size={15} />
+              )}
+              Başka tarz
+            </button>
+          )}
+          <button
+            onClick={toggleQueue}
+            title="Kapat"
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-md text-muted hover:bg-surface hover:text-text"
+          >
+            <X size={18} />
+          </button>
+        </div>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-16 pt-2">

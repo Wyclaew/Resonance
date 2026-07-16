@@ -1,5 +1,7 @@
+import { Fragment } from "react";
 import {
   Sparkles,
+  Clock,
   Search,
   Library,
   Settings,
@@ -9,9 +11,11 @@ import {
   ListMusic,
   PanelLeftClose,
   PanelLeftOpen,
+  Loader2,
 } from "lucide-react";
 import { useAppStore } from "../store/useAppStore";
 import { usePlaylistStore } from "../store/usePlaylistStore";
+import { usePlayerStore } from "../store/usePlayerStore";
 import type { ViewId } from "../types";
 
 interface NavItemProps {
@@ -58,6 +62,13 @@ export default function Sidebar() {
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
   const playlists = usePlaylistStore((s) => s.playlists);
   const createPlaylist = usePlaylistStore((s) => s.create);
+  const discovering = usePlayerStore((s) => s.discovering);
+
+  // "Keşfet" bir aksiyon (görünüm değil): keşif çalmasını başlatır ve "Şu An"a gider.
+  function handleDiscover() {
+    navigate("now");
+    usePlayerStore.getState().startDiscovery();
+  }
 
   async function handleCreatePlaylist() {
     const p = await createPlaylist("Yeni Liste");
@@ -67,7 +78,7 @@ export default function Sidebar() {
   const ICON = 18;
 
   const nav: { id: ViewId; icon: React.ReactNode; label: string }[] = [
-    { id: "now", icon: <Sparkles size={ICON} />, label: "Şu An" },
+    { id: "now", icon: <Clock size={ICON} />, label: "Şu An" },
     { id: "search", icon: <Search size={ICON} />, label: "Ara" },
     { id: "library", icon: <Library size={ICON} />, label: "Kütüphane" },
     {
@@ -120,14 +131,39 @@ export default function Sidebar() {
 
       <nav className="flex flex-col gap-0.5 px-2 py-2">
         {nav.map((n) => (
-          <NavItem
-            key={n.id}
-            icon={n.icon}
-            label={n.label}
-            active={view === n.id}
-            collapsed={collapsed}
-            onClick={() => navigate(n.id)}
-          />
+          <Fragment key={n.id}>
+            <NavItem
+              icon={n.icon}
+              label={n.label}
+              active={view === n.id}
+              collapsed={collapsed}
+              onClick={() => navigate(n.id)}
+            />
+            {/* "Şu An"dan hemen sonra: Keşfet (aksiyon — keşif çalmasını başlatır). */}
+            {n.id === "now" && (
+              <button
+                onClick={handleDiscover}
+                disabled={discovering}
+                title={collapsed ? (discovering ? "Hazırlanıyor…" : "Keşfet") : undefined}
+                className={`group relative flex w-full items-center rounded-md text-sm text-accent transition-all hover:bg-accent/10 disabled:opacity-70 ${
+                  collapsed ? "justify-center px-0 py-2.5" : "gap-3 px-3 py-2"
+                }`}
+              >
+                <span className="transition-colors">
+                  {discovering ? (
+                    <Loader2 size={ICON} className="animate-spin" />
+                  ) : (
+                    <Sparkles size={ICON} />
+                  )}
+                </span>
+                {!collapsed && (
+                  <span className="truncate">
+                    {discovering ? "Hazırlanıyor…" : "Keşfet"}
+                  </span>
+                )}
+              </button>
+            )}
+          </Fragment>
         ))}
       </nav>
 

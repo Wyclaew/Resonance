@@ -87,12 +87,8 @@ export default function ImportView() {
       return;
     }
     if (detected === "spotify") {
-      if (!spotifyClientId || !spotifyClientSecret) {
-        setError(
-          "Spotify için önce Ayarlar → Entegrasyonlar'dan ücretsiz Client ID ve Secret gir."
-        );
-        return;
-      }
+      // Anahtar GEREKMİYOR: anahtarsız (embed) yol ≤100 şarkıyı doğrudan okur.
+      // Anahtar girilmişse backend tam listeyi (100+) API'den çeker.
       setStatus("loading");
       setPhase("matching");
       const unlisten = await listen<{ done: number; total: number }>(
@@ -250,10 +246,16 @@ export default function ImportView() {
             aktarılır. Paylaşım kodu (RSNC1:…) ile bir arkadaşının listesini
             uygulamana kopyalayabilirsin. Ses YouTube'dan çalar.
           </p>
+          <p className="mt-2">
+            <b className="text-text">Spotify de anahtarsız</b> — herkese açık bir
+            listenin linkini yapıştırman yeterli. Spotify'ın sesi alınamadığı için
+            şarkılar YouTube'da eşleştirilip oradan çalar.
+          </p>
           <p className="mt-2 text-faint">
-            Spotify için sonraki sürümde Ayarlar'dan tek seferlik ücretsiz bir API
-            anahtarı gerekecek; Spotify'ın sesi alınamadığı için şarkılar
-            YouTube'da eşleştirilir.
+            Not: Anahtarsız yol bir listeden en fazla <b className="text-text">100
+            şarkı</b> okur. Daha uzun listelerin tamamı için Ayarlar →
+            Entegrasyonlar'dan tek seferlik ücretsiz Spotify anahtarı girebilirsin
+            (opsiyonel).
           </p>
         </div>
       </div>

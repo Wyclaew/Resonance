@@ -14,9 +14,7 @@ import {
   Download,
   Upload,
   Check,
-  Bug,
   RefreshCw,
-  Copy,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
@@ -40,7 +38,6 @@ const categories = [
   { id: "appearance", label: "Görünüm", icon: Palette },
   { id: "algorithm", label: "Resonance Önerisi", icon: Brain },
   { id: "data", label: "Veri & Yedek", icon: Database },
-  { id: "errorlog", label: "Hata Günlüğü", icon: Bug },
   { id: "about", label: "Hakkında", icon: Info },
 ] as const;
 
@@ -264,8 +261,14 @@ function IntegrationsSettings() {
       <p className="mb-4 text-sm leading-relaxed text-muted">
         Spotify'ın sesi alınamaz; bir Spotify listesini içe aktarınca şarkı
         adları okunur ve <b className="text-text">YouTube'da eşleştirilip</b>{" "}
-        oradan çalınır. Bunun için tek seferlik <b className="text-text">ücretsiz</b>{" "}
-        bir Spotify API anahtarı gerekir:{" "}
+        oradan çalınır. <b className="text-text">Anahtar gerekmez</b> — İçe
+        Aktar'a herkese açık listenin linkini yapıştırman yeterli.
+      </p>
+      <p className="mb-4 text-sm leading-relaxed text-muted">
+        Aşağıdaki alanlar <b className="text-text">opsiyonel</b>: anahtarsız yol
+        bir listeden en fazla <b className="text-text">100 şarkı</b> okur. Daha
+        uzun listelerin tamamını almak istersen tek seferlik{" "}
+        <b className="text-text">ücretsiz</b> bir anahtar gir:{" "}
         <span className="text-accent">developer.spotify.com</span> → Dashboard →
         Create app → Client ID ve Client Secret'ı buraya yapıştır (Redirect URI
         zorunlu değil). Anahtarlar cihazında kalır.
@@ -471,6 +474,7 @@ const SHORTCUTS: [string, string][] = [
   ["M", "Sessize al"],
   ["⌘/Ctrl + K", "Komut paleti (hızlı gezinme)"],
   ["⌘/Ctrl + B", "Yan paneli aç/kapat"],
+  ["Medya tuşları", "Kulaklık/klavye oynat-duraklat-geç (uygulama arka plandayken de)"],
 ];
 function ShortcutsSettings() {
   return (
@@ -516,6 +520,13 @@ function AppearanceSettings() {
   const accentColor = useSettingsStore((s) => s.accentColor);
   const screensaverSeconds = useSettingsStore((s) => s.screensaverSeconds);
   const update = useSettingsStore((s) => s.update);
+
+  const presetValues = SCREENSAVER_OPTS.map((o) => o.v);
+  const isCustomValue =
+    screensaverSeconds > 0 && !presetValues.includes(screensaverSeconds);
+  const [customMode, setCustomMode] = useState(isCustomValue);
+  const selectVal = customMode ? "custom" : String(screensaverSeconds);
+
   return (
     <div className="max-w-2xl">
       <SettingRow
@@ -540,24 +551,50 @@ function AppearanceSettings() {
         label="Ambiyans ekranı"
         description="Bu kadar süre etkileşim olmazsa ekran yalnızca çalan şarkıyı gösterir (dinlenme/ambiyans modu). Hareket edince kapanır."
       >
-        <div className="relative">
-          <select
-            value={screensaverSeconds}
-            onChange={(e) =>
-              update("screensaverSeconds", Number(e.target.value))
-            }
-            className="w-40 cursor-pointer appearance-none rounded-md border border-border bg-surface py-1.5 pl-3 pr-9 text-sm text-text outline-none transition-colors hover:border-border-strong focus:border-border-strong"
-          >
-            {SCREENSAVER_OPTS.map((o) => (
-              <option key={o.v} value={o.v}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-          <ChevronDown
-            size={15}
-            className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted"
-          />
+        <div className="flex items-center gap-2">
+          {customMode && (
+            <input
+              type="number"
+              min={0.25}
+              step={0.25}
+              value={+(screensaverSeconds / 60).toFixed(2)}
+              onChange={(e) => {
+                const mins = Math.max(0, Number(e.target.value) || 0);
+                update("screensaverSeconds", Math.round(mins * 60));
+              }}
+              title="Dakika"
+              className="w-20 rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-text outline-none focus:border-border-strong"
+            />
+          )}
+          {customMode && <span className="text-xs text-muted">dk</span>}
+          <div className="relative">
+            <select
+              value={selectVal}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "custom") {
+                  setCustomMode(true);
+                  // Bir presete denk gelmiyorsa makul bir başlangıç ver.
+                  if (!isCustomValue) update("screensaverSeconds", 120);
+                } else {
+                  setCustomMode(false);
+                  update("screensaverSeconds", Number(v));
+                }
+              }}
+              className="w-40 cursor-pointer appearance-none rounded-md border border-border bg-surface py-1.5 pl-3 pr-9 text-sm text-text outline-none transition-colors hover:border-border-strong focus:border-border-strong"
+            >
+              {SCREENSAVER_OPTS.map((o) => (
+                <option key={o.v} value={o.v}>
+                  {o.label}
+                </option>
+              ))}
+              <option value="custom">Özel…</option>
+            </select>
+            <ChevronDown
+              size={15}
+              className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-muted"
+            />
+          </div>
         </div>
       </SettingRow>
       <p className="mt-3 text-xs text-faint">
@@ -791,74 +828,6 @@ function DataSettings() {
   );
 }
 
-function ErrorLogSettings() {
-  const [log, setLog] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-
-  async function refresh() {
-    if (!isTauri()) {
-      setErr("Günlük yalnızca uygulama içinde okunabilir.");
-      return;
-    }
-    setLoading(true);
-    setErr(null);
-    try {
-      setLog(await invoke<string>("read_log", { lines: 500 }));
-    } catch (e) {
-      setErr(String(e));
-      setLog("");
-    } finally {
-      setLoading(false);
-    }
-  }
-  useEffect(() => {
-    refresh();
-  }, []);
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(log);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* yoksay */
-    }
-  }
-
-  return (
-    <div className="max-w-3xl">
-      <p className="mb-4 text-sm leading-relaxed text-muted">
-        Uygulama günlüğü — indirme/çalma dahil tüm hataların ham hali. Bir sorun
-        yaşarsan buradaki metni <b className="text-text">kopyalayıp paylaş</b>;
-        kök neden hızlıca bulunur. (En son olaylar en altta.)
-      </p>
-      <div className="mb-3 flex gap-2">
-        <button
-          onClick={refresh}
-          disabled={loading}
-          className="flex items-center gap-2 rounded-md bg-surface-2 px-3 py-1.5 text-sm font-medium text-text hover:bg-surface-3 disabled:opacity-40"
-        >
-          <RefreshCw size={14} className={loading ? "animate-spin" : ""} /> Yenile
-        </button>
-        <button
-          onClick={copy}
-          disabled={!log}
-          className="flex items-center gap-2 rounded-md bg-surface-2 px-3 py-1.5 text-sm font-medium text-text hover:bg-surface-3 disabled:opacity-40"
-        >
-          {copied ? <Check size={14} className="text-up" /> : <Copy size={14} />}
-          {copied ? "Kopyalandı" : "Tümünü kopyala"}
-        </button>
-      </div>
-      {err && <p className="mb-2 text-xs text-down">{err}</p>}
-      <pre className="max-h-[58vh] overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-surface p-3 font-mono text-[11px] leading-relaxed text-muted">
-        {loading ? "Yükleniyor…" : log || "Günlük boş."}
-      </pre>
-    </div>
-  );
-}
-
 function AboutSettings() {
   const [version, setVersion] = useState("");
   useEffect(() => {
@@ -939,8 +908,6 @@ export default function SettingsView() {
             <AlgorithmSettings />
           ) : active === "data" ? (
             <DataSettings />
-          ) : active === "errorlog" ? (
-            <ErrorLogSettings />
           ) : (
             <AboutSettings />
           )}

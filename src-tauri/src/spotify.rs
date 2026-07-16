@@ -26,6 +26,72 @@ pub fn playlist_id_from_url(url: &str) -> Option<String> {
     }
 }
 
+/// ANAHTARSIZ içe aktarma: public bir listeyi API anahtarı OLMADAN okur.
+/// open.spotify.com/embed/playlist/<id> sayfası, gömülü `__NEXT_DATA__` JSON'unda
+/// liste adını ve şarkı listesini taşır (title + subtitle=sanatçı).
+/// SINIR: embed en fazla ~100 şarkı verir; daha uzun listeler için Ayarlar'dan
+/// client_id/secret girilip API yolu (get_token + fetch_playlist) kullanılır.
+pub fn fetch_playlist_public(playlist_id: &str) -> anyhow::Result<(String, Vec<SpTrack>)> {
+    let client = Client::builder()
+        .user_agent("Mozilla/5.0 (Resonance)")
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?;
+    let url = format!("https://open.spotify.com/embed/playlist/{playlist_id}");
+    let html = client.get(&url).send()?.error_for_status()?.text()?;
+
+    // <script id="__NEXT_DATA__" type="application/json">{...}</script>
+    let start_marker = r#"<script id="__NEXT_DATA__" type="application/json">"#;
+    let start = html
+        .find(start_marker)
+        .ok_or_else(|| anyhow::anyhow!("Liste okunamadı (Spotify sayfa yapısı değişmiş olabilir). Listenin herkese açık olduğundan emin ol."))?
+        + start_marker.len();
+    let rest = &html[start..];
+    let end = rest
+        .find("</script>")
+        .ok_or_else(|| anyhow::anyhow!("Liste verisi ayrıştırılamadı."))?;
+    let v: serde_json::Value = serde_json::from_str(&rest[..end])?;
+
+    let entity = v
+        .pointer("/props/pageProps/state/data/entity")
+        .ok_or_else(|| anyhow::anyhow!("Liste verisi bulunamadı (liste herkese açık mı?)"))?;
+    let name = entity
+        .get("name")
+        .and_then(|x| x.as_str())
+        .unwrap_or("Spotify Listesi")
+        .to_string();
+
+    let mut tracks = Vec::new();
+    if let Some(arr) = entity.get("trackList").and_then(|x| x.as_array()) {
+        for t in arr {
+            let title = t.get("title").and_then(|x| x.as_str()).unwrap_or("").trim();
+            if title.is_empty() {
+                continue;
+            }
+            // subtitle: "Sanatçı1, Sanatçı2" (ayraç normal boşluk değil \u{a0} olabilir).
+            let artist = t
+                .get("subtitle")
+                .and_then(|x| x.as_str())
+                .unwrap_or("")
+                .replace('\u{a0}', " ");
+            // YouTube eşleşmesi için ilk sanatçı yeterli ve daha isabetli.
+            let artist = artist
+                .split(',')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            tracks.push(SpTrack {
+                title: title.to_string(),
+                artist,
+            });
+        }
+    }
+    if tracks.is_empty() {
+        anyhow::bail!("Bu listede şarkı bulunamadı (liste herkese açık mı?)");
+    }
+    Ok((name, tracks))
+}
+
 /// Client Credentials ile erişim token'ı alır.
 pub fn get_token(client_id: &str, client_secret: &str) -> anyhow::Result<String> {
     if client_id.trim().is_empty() || client_secret.trim().is_empty() {

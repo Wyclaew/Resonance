@@ -47,6 +47,12 @@ export interface QueueItem extends Track {
 
 export type RepeatMode = "off" | "all" | "one";
 
+// Karışık çalma modu:
+//  • "off"     → kuyruk sırasıyla
+//  • "shuffle" → rastgele sonraki (klasik karışık)
+//  • "smart"   → karışık + Resonance önerileri araya serpiştirilir (akıllı karışık)
+export type ShuffleMode = "off" | "shuffle" | "smart";
+
 export type PlaybackStatus = "idle" | "loading" | "playing" | "paused";
 
 // Sol menüdeki ana görünümler

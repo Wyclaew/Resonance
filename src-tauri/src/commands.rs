@@ -40,6 +40,20 @@ pub async fn search_youtube(
     .map_err(|e| e.to_string())
 }
 
+/// YouTube Music radyosu: bir video id'sinden benzer ŞARKILAR (bkz. ytdlp::music_radio).
+/// Öneri motorunun YouTube kaynağı budur — metin araması değil.
+#[tauri::command]
+pub async fn music_radio(
+    video_id: String,
+    limit: Option<u32>,
+) -> Result<Vec<SearchResult>, String> {
+    let limit = limit.unwrap_or(50);
+    tauri::async_runtime::spawn_blocking(move || ytdlp::music_radio(&video_id, limit))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
 /// YouTube / YouTube Music çalma listesi URL'inden başlık + şarkıları çıkarır.
 #[tauri::command]
 pub async fn import_playlist(
@@ -76,8 +90,26 @@ pub async fn import_spotify(
     tauri::async_runtime::spawn_blocking(move || -> anyhow::Result<SpotifyImport> {
         let pid = spotify::playlist_id_from_url(&url)
             .ok_or_else(|| anyhow::anyhow!("Geçersiz Spotify çalma listesi linki"))?;
-        let token = spotify::get_token(&client_id, &client_secret)?;
-        let (name, sp_tracks) = spotify::fetch_playlist(&token, &pid)?;
+
+        // Anahtar GİRİLMEMİŞSE: anahtarsız (embed) yolu — kullanıcı yalnızca linki
+        // yapıştırır, hesap/uygulama açmasına gerek kalmaz (≤100 şarkı).
+        // Anahtar girilmişse: API yolu — tam liste (100+ sayfalı).
+        let has_keys =
+            !client_id.trim().is_empty() && !client_secret.trim().is_empty();
+        let (name, sp_tracks) = if has_keys {
+            match spotify::get_token(&client_id, &client_secret)
+                .and_then(|token| spotify::fetch_playlist(&token, &pid))
+            {
+                Ok(v) => v,
+                Err(e) => {
+                    // Anahtar hatalıysa kullanıcıyı çıkmaza sokma: anahtarsız dene.
+                    log::warn!("Spotify API başarısız, anahtarsız deneniyor: {e}");
+                    spotify::fetch_playlist_public(&pid)?
+                }
+            }
+        } else {
+            spotify::fetch_playlist_public(&pid)?
+        };
         let total = sp_tracks.len();
         let _ = app2.emit("spotify-progress", serde_json::json!({"done": 0, "total": total}));
 
@@ -218,6 +250,20 @@ pub async fn get_lyrics(
     .map_err(|e| e.to_string())
 }
 
+// Her play_track çağrısına artan bir nesil no'su verilir. İndirme bitene kadar
+// kullanıcı başka şarkı seçtiyse (nesil değiştiyse) o eski indirmenin sesi ses
+// motoruna GÖNDERİLMEZ. Böylece hızlı geçişte "arayüz başka, çalan başka şarkı"
+// yarışı olmaz. (İndirilen dosya cache'te kalır, boşa gitmez.)
+static PLAY_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+// Arka plan indirme (prefetch + toplu indirme) eşzamanlılık sınırı. Çok sayıda
+// yt-dlp'yi aynı anda çalıştırmak YouTube throttle'ına (HTTP 403/416) yol
+// açıyordu. play_track bu sınıra TABİ DEĞİL (çalma her zaman öncelikli).
+fn dl_semaphore() -> &'static tokio::sync::Semaphore {
+    static SEM: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    SEM.get_or_init(|| tokio::sync::Semaphore::new(2))
+}
+
 #[tauri::command]
 pub async fn play_track(
     app: AppHandle,
@@ -225,6 +271,7 @@ pub async fn play_track(
     input: PlayInput,
     cookies_browser: Option<String>,
 ) -> Result<(), String> {
+    let my_gen = PLAY_GEN.fetch_add(1, Ordering::SeqCst) + 1;
     let _ = app.emit("playback-loading", &input.track_id);
 
     let cache = audio_cache_dir(&app).map_err(|e| e.to_string())?;
@@ -235,6 +282,11 @@ pub async fn play_track(
     .await
     .map_err(|e| e.to_string())?
     .map_err(|e| e.to_string())?;
+
+    // İndirme sürerken daha yeni bir şarkı seçildiyse bu Load'u atla.
+    if PLAY_GEN.load(Ordering::SeqCst) != my_gen {
+        return Ok(());
+    }
 
     audio.send(AudioCmd::Load {
         path,
@@ -261,6 +313,7 @@ pub async fn download_audio(
     source_id: String,
     cookies_browser: Option<String>,
 ) -> Result<DownloadResult, String> {
+    let _permit = dl_semaphore().acquire().await; // eşzamanlılık sınırı
     let cache = audio_cache_dir(&app).map_err(|e| e.to_string())?;
     let sid = source_id.clone();
     let path = tauri::async_runtime::spawn_blocking(move || {
@@ -290,6 +343,7 @@ pub async fn prefetch_audio(
     source_id: String,
     cookies_browser: Option<String>,
 ) -> Result<(), String> {
+    let _permit = dl_semaphore().acquire().await; // eşzamanlılık sınırı
     let cache = audio_cache_dir(&app).map_err(|e| e.to_string())?;
     let _ = tauri::async_runtime::spawn_blocking(move || {
         ytdlp::ensure_audio(&cache, &source_id, cookies_browser.as_deref())

@@ -8,7 +8,11 @@ import CommandPalette from "./components/CommandPalette";
 import Screensaver from "./components/Screensaver";
 import Toasts from "./components/Toasts";
 import { getDb, isTauri } from "./lib/db";
-import { initPlayer, usePlayerStore } from "./store/usePlayerStore";
+import {
+  initPlayer,
+  usePlayerStore,
+  prewarmDiscovery,
+} from "./store/usePlayerStore";
 import HomeView from "./views/HomeView";
 import SearchView from "./views/SearchView";
 import LibraryView from "./views/LibraryView";
@@ -55,9 +59,11 @@ export default function App() {
   const screensaverSeconds = useSettingsStore((s) => s.screensaverSeconds);
   const idle = useAppStore((s) => s.idle);
   const setIdle = useAppStore((s) => s.setIdle);
+  const setBackgrounded = useAppStore((s) => s.setBackgrounded);
 
   // Ambiyans/ekran koruyucu: belirlenen süre etkileşim olmazsa devreye girer,
-  // herhangi bir hareket/tuş/tıkla kapanır. 0 = kapalı.
+  // herhangi bir hareket/tuş/tıkla kapanır. 0 = kapalı. Pencere arka plandayken
+  // (odak yok) tetiklenmez — ikinci ekranda dururken gereksiz animasyon çalmasın.
   useEffect(() => {
     if (!screensaverSeconds || screensaverSeconds <= 0) {
       setIdle(false);
@@ -67,7 +73,9 @@ export default function App() {
     const arm = () => {
       setIdle(false);
       clearTimeout(timer);
-      timer = setTimeout(() => setIdle(true), screensaverSeconds * 1000);
+      timer = setTimeout(() => {
+        if (!useAppStore.getState().backgrounded) setIdle(true);
+      }, screensaverSeconds * 1000);
     };
     const events = ["mousemove", "mousedown", "keydown", "wheel", "touchstart"];
     events.forEach((e) => window.addEventListener(e, arm, { passive: true }));
@@ -77,6 +85,25 @@ export default function App() {
       events.forEach((e) => window.removeEventListener(e, arm));
     };
   }, [screensaverSeconds]);
+
+  // Arka plan FPS modu: pencere odağı kaybedince (ör. ikinci ekranda, üstte başka
+  // uygulama) animasyon/geçişleri durdur ve tick sıklığını kıs → GPU/CPU tasarrufu.
+  useEffect(() => {
+    const onBlur = () => {
+      setBackgrounded(true);
+      document.documentElement.classList.add("bg-throttle");
+    };
+    const onFocus = () => {
+      setBackgrounded(false);
+      document.documentElement.classList.remove("bg-throttle");
+    };
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
 
   // DB'yi açılışta başlat (migration'ları tetikler). Tauri dışında atlanır.
   useEffect(() => {
@@ -105,6 +132,8 @@ export default function App() {
                 /* bozuk resume state — yoksay */
               }
             }
+            // Keşif önerilerini arka planda hazırla → Keşfet'e basınca anında başlasın.
+            void prewarmDiscovery();
           });
         // Veri varsa otomatik yedek al (kazara kayba karşı güvenlik ağı).
         const hasData =
