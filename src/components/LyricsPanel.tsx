@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { X, Loader2, Music4 } from "lucide-react";
 import { usePlayerStore } from "../store/usePlayerStore";
+import { useT } from "../lib/i18n";
 import { useAppStore } from "../store/useAppStore";
 import { fetchLyrics, type LrcLine } from "../lib/lyrics";
 
@@ -14,6 +15,7 @@ function findActive(lines: LrcLine[], posMs: number): number {
 }
 
 export default function LyricsPanel() {
+  const t = useT();
   const current = usePlayerStore((s) => s.current);
   const positionMs = usePlayerStore((s) => s.positionMs);
   const seek = usePlayerStore((s) => s.seek);
@@ -58,13 +60,13 @@ export default function LyricsPanel() {
       <header className="flex items-start justify-between px-8 pb-3 pt-6">
         <div className="min-w-0">
           <h2 className="truncate text-lg font-semibold">
-            {current?.title ?? "Sözler"}
+            {current?.title ?? t("lyrics.title")}
           </h2>
           <p className="truncate text-sm text-muted">{current?.artist}</p>
         </div>
         <button
           onClick={toggleLyrics}
-          title="Kapat"
+          title={t("common.close")}
           className="grid h-9 w-9 shrink-0 place-items-center rounded-md text-muted hover:bg-surface hover:text-text"
         >
           <X size={18} />
@@ -75,7 +77,7 @@ export default function LyricsPanel() {
         {loading ? (
           <div className="flex flex-col items-center gap-3 py-24 text-faint">
             <Loader2 size={28} className="animate-spin text-accent" />
-            <span className="text-sm">Sözler aranıyor…</span>
+            <span className="text-sm">{t("lyrics.loading")}</span>
           </div>
         ) : synced ? (
           <div className="mx-auto max-w-2xl text-center">
@@ -103,8 +105,8 @@ export default function LyricsPanel() {
             <Music4 size={32} strokeWidth={1.5} />
             <p className="text-sm">
               {current
-                ? "Bu şarkı için söz bulunamadı."
-                : "Çalan bir şarkı yok."}
+                ? t("lyrics.notFound")
+                : t("lyrics.noTrack")}
             </p>
           </div>
         )}

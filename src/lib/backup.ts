@@ -1,4 +1,5 @@
 import { getDb } from "./db";
+import { t } from "./i18n";
 
 // Dışa aktarılan JSON yedeğini içe aktarma (birleştirme).
 // Dışa aktarma SettingsView.exportData'da üretilir: tüm tabloların ham satırları.
@@ -39,10 +40,10 @@ export async function importBackup(json: string): Promise<ImportResult> {
   try {
     data = JSON.parse(json) as Backup;
   } catch {
-    throw new Error("Dosya okunamadı — geçerli bir Resonance yedeği değil.");
+    throw new Error(t("backup.readFailed"));
   }
   if (!data || data.version !== 1 || !Array.isArray(data.tracks)) {
-    throw new Error("Desteklenmeyen veya bozuk yedek dosyası.");
+    throw new Error(t("backup.invalid"));
   }
 
   const db = await getDb();
@@ -85,7 +86,7 @@ export async function importBackup(json: string): Promise<ImportResult> {
          source=excluded.source, source_url=excluded.source_url`,
       [
         asStr(p.id),
-        asStr(p.name) || "İçe aktarılan liste",
+        asStr(p.name) || t("backup.importedList"),
         p.description ?? null,
         asStr(p.source) || "local",
         p.source_url ?? null,

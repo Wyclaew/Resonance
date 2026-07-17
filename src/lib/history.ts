@@ -1,5 +1,6 @@
 import type { Track } from "../types";
 import { getDb, isTauri } from "./db";
+import { ensureTrack } from "./playlists";
 
 // Son çalınan benzersiz parçalar (en yeni önce) — "Şu An" ekranı için.
 export async function getRecentTracks(limit = 12): Promise<Track[]> {
@@ -45,20 +46,29 @@ export async function getRecentTracks(limit = 12): Promise<Track[]> {
   }
 }
 
-// Oynatma geçmişi: ne zaman ne kadar dinlendi (M4 bağlamsal öğrenme +
+// Oynatma geçmişi: ne zaman ne kadar dinlendi (bağlamsal öğrenme +
 // öneri geçme/tamamlama sinyali için).
-export async function recordPlay(
-  trackId: string,
-  msPlayed: number
-): Promise<void> {
+//
+// ⚠️ ÖNCE `ensureTrack` — yoksa KAYIT ALGORİTMAYA ULAŞMAZ. recommender.ts
+// geçmişi `play_history h JOIN tracks t` (INNER) ile okur. Keşfet/radyo parçası
+// hiçbir listede olmadığı için `tracks`'te de yoktu → JOIN kaydı düşürüyordu.
+// Ölçüldü: 375 kaydın 104'ü YETİMDİ ve bunlar EN UZUN dinlemelerdi (440sn'ye
+// kadar) — yani kullanıcının gerçekten sevdiği şarkılar öğrenmeye hiç
+// katılmıyordu; algoritma yalnız atlanan şarkıları görüp "hiçbir şeyi
+// tamamlamıyor" sanıyordu. (Aynı hata oylamada da vardı, bkz. CLAUDE.md #13.)
+//
+// Bu bir listeye EKLEME değildir: İndirilenler `cache.downloaded=1` ister,
+// Kütüphane playlist'leri gösterir → parça yalnız öğrenme sinyali olarak sayılır.
+export async function recordPlay(track: Track, msPlayed: number): Promise<void> {
   if (!isTauri() || msPlayed < 1000) return;
   try {
+    await ensureTrack(track);
     const db = await getDb();
     const d = new Date();
     await db.execute(
       `INSERT INTO play_history (track_id, played_at, ms_played, hour, dow)
        VALUES ($1, $2, $3, $4, $5)`,
-      [trackId, d.getTime(), Math.floor(msPlayed), d.getHours(), d.getDay()]
+      [track.id, d.getTime(), Math.floor(msPlayed), d.getHours(), d.getDay()]
     );
   } catch (e) {
     console.error("[resonance] geçmiş kaydedilemedi:", e);

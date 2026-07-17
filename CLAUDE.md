@@ -4,8 +4,9 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.1.0** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.2.0** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
+v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 
 > Ayrıntılı geçmiş + kararlar otomatik bellekte (`memory/resonance-project.md`).
 > Mobil planı `docs/MOBILE.md`, senkron protokolü `docs/SYNC.md`, sürüm rehberi `docs/RELEASE.md`.
@@ -61,7 +62,19 @@ Uygulama logu: macOS `~/Library/Logs/com.resonance.app/`, Windows `%APPDATA%\com
 
 ## Öneri motoru (`src/lib/recommender.ts`) — nasıl çalışır
 Tüm sinyaller tek skorda birleşir:
-- **Oylar** (`votes`): değer × zaman-decay × bağlam (saat/gün benzerliği) → `artistAffinity` + `trackKarma`.
+- **⭐ İKİ AYRI HARİTA — bu ayrım kritik, bozma:**
+  - `artistAffinity` = "KİMİ seviyorum" → hangi radyoları açacağımızı seçer → o tarzda YENİ şarkılar.
+    Kaynaklar: oylar + dinleme + **playlist üyeliği**.
+  - `trackKarma` = "HANGİ PARÇAYI seviyorum" → yalnız **favori dönüşünde** kullanılır.
+    **Playlist üyeliği burayı BESLEMEZ** — beslerse listendeki her şarkı "favori" sayılıp Keşfet
+    kuyruğunu kendi şarkıların doldurur (kullanıcı bunu açıkça istemedi).
+- **Oylar** (`votes`): değer × zaman-decay × bağlam (saat/gün benzerliği) → her iki haritayı besler.
+- **⭐ PLAYLIST ÜYELİĞİ** (`playlist_tracks`, v1.2.0): "listeme ekledim" = beğeni beyanı.
+  Ağırlık 0.6 (oydan düşük), yarı ömür **4× uzun** (liste tercihi kalıcıdır), **bağlam çarpanı YOK**
+  (kimi sevdiğini söyler, ne zaman'ı değil). YALNIZ `artistAffinity`'yi besler.
+  **Neden kritik:** bu sinyal olmadan algoritma zevkin yalnız oy verdiğin kısmını görüyordu —
+  ölçüm: **8 sanatçı**. Playlist'lerde **183** sanatçı var → havuz **23 katına** çıktı.
+  "Hep aynı tarzı öneriyor" şikâyetinin KÖK sebebi buydu.
 - **Dinleme davranışı** (`play_history`): <5sn −0.35, oran <%15 −0.25, >%40 +0.15, >%70 +0.4
   (aynı decay/bağlam çarpanıyla). Yani sadece upvote'lananlar değil, gerçekten dinlenenler de sayılır.
 - **Kaynaklar:** (a) kütüphane — yalnızca **BAŞKA** bir playlist'te olan parçalar (o an çalan listeden
@@ -74,7 +87,7 @@ Tüm sinyaller tek skorda birleşir:
   hiçbir anahtar kelime yanlış-eleme yapmadan yakalayamaz). Radyo yapısı gereği yalnız şarkı döner.
   - **Seed = VİDEO ID** (sanatçı adı değil) → seed'ler en güçlü sinyalli **parçalar**
     (`trackKarma + artistAffinity`).
-  - **⚠️ SANATÇI BAŞINA EN İYİ TEK PARÇA** → en güçlü 12 SANATÇI → karıştır → **3 radyo paralel**.
+  - **⚠️ SANATÇI BAŞINA EN İYİ TEK PARÇA** → **ağırlıklı rastgele** 12 SANATÇI → **3 radyo paralel**.
     Eskiden "en iyi 12 PARÇA" alınıyordu: son oylar tek sanatçıda toplanınca 12'nin çoğu o sanatçı
     oluyordu (ölçüm: 200 denemenin **200'ünde** aynı sanatçıdan >1 seed) → tüm radyolar aynı tarz →
     "hep rap öneriyor" bug'ı. Sanatçı başına tek parça ile bu oran **%0**.
@@ -83,7 +96,14 @@ Tüm sinyaller tek skorda birleşir:
   - **Reroll** (`rerollDiscovery`, Sıra panelinde "Başka tarz"): `excludeSeedArtists` ile mevcut partinin
     seed sanatçıları dışlanır → gelen tarz gerçekten değişir. `Recommendation.seedArtist` bunu taşır;
     store `discoverySeedArtists`'te tutar, panel başlığında "… tarzı" diye gösterir.
-  - **Sınır:** seed çeşitliliği sinyalli sanatçı sayısıyla sınırlı (oy/dinleme geçmişi darsa az tarz).
+  - **⭐ AĞIRLIKLI RASTGELE ÖRNEKLEME** (v1.2.0, katı "en iyi 12" DEĞİL): playlist sinyali havuzu
+    8 → 184 sanatçıya çıkardı, ama KATI sıralamada oy verilen 8 sanatçı yine ilk 12'yi kapıyordu →
+    havuz büyüse de aynı tarz geliyordu. Gumbel hilesi (`key = -ln(rastgele)/ağırlık`, küçükten sırala)
+    ile her sanatçının seçilme ŞANSI yakınlığıyla orantılı: çok sevdiklerin sık, listendekiler seyrek
+    ama DÜZENLİ gelir (keşif/sömürü dengesi).
+    Ölçüm: 300 denemede seçilen farklı sanatçı **10 → 165**, en baskın sanatçının payı **%37 → %15**.
+  - **Sınır:** seed çeşitliliği sinyalli sanatçı sayısıyla sınırlı — ama artık playlist üyeliği de
+    saydığı için havuz geniş (kullanıcıda 184 sanatçı).
   - Ölçüm: seed başına **~2.9sn / 50 sonuç / 15-46 farklı sanatçı / süresi eksik 0**.
     (Limitsiz çekilirse 1000+ sonuç ama ~20sn → `--playlist-end 50` şart.)
   - Radyo sonuçları **karıştırılır** (hep ilk parçalar gelmesin) + **sanatçı başına 2 sınırı**:
@@ -94,6 +114,17 @@ Tüm sinyaller tek skorda birleşir:
 - **Filtreler:** `isLikelySong` (süre + başlık/kanal deseni — aşağıda ayrı not), `normKey` (başlık+sanatçı),
   **`songCore`** (sanatçıdan BAĞIMSIZ şarkı-adı çekirdeği → aynı şarkının cover / sped-up / slowed+reverb /
   "official video" versiyonlarını eler), kalıcı geçmiş (son 45 gün, `recommendation_history`).
+- **⭐ FAVORİ DÖNÜŞÜ** (v1.2.0, `FAVORITE_SHARE=0.15`): "geçen hafta bu saatte sevdiğim şarkı yine
+  gelsin". İKİ SIKI ŞART: (1) `trackKarma > 0` — parçaya AÇIKÇA oy verilmiş ya da >%70 dinlenmiş
+  olmalı (sadece listede olmak YETMEZ); (2) `contextMatch >= 0.35` — parça ŞU ANKİ gün/saat moduna
+  ait olmalı. Kuyruğun en fazla **%15'i** (20'de 3) → Keşfet keşif olarak kalır.
+  **Favoriler 45-gün `recommendation_history` engelinden MUAFTIR** (`recentlyRecommended` ayrı küme
+  tutulur, `taken`'a karıştırılmaz) — yoksa sevdiğin şarkı 45 gün geri gelemezdi.
+  Kullanıcının kararı: "sevdiklerim dönsün, keşifler dönmesin".
+- **⭐ CONTEXT_FLOOR = 0.25** (v1.2.0): `contextWeight` eskiden saf çarpımdı; 12 saat uzaktaki oy
+  `exp(-12/3)=0.018` ile SIFIRLANIYORDU → gece 3'te uygulamayı açınca havuz boşalıyordu.
+  Artık: taban (%25 genel zevkin) + %75 bağlam uyumu. `contextMatch` ise TABANSIZ (0..1) —
+  favori dönüşünde kullanılır, orada taban istemeyiz.
 - **Kapsam kritiği:** `excludeIds` (ID) TEK BAŞINA YETMEZ — aynı şarkının farklı kaydının ID'si farklıdır.
   Bu yüzden `excludeCores` (songCore kümesi) de her çağrıya geçirilir; store'da oturum boyu tutulur
   (`recommendedCoresThisSession`).
@@ -150,12 +181,17 @@ Tüm sinyaller tek skorda birleşir:
     DİKKAT: "requested format is not available" **geçicidir**, buraya ASLA ekleme.
 12. **`tracks`'e ASLA `INSERT OR REPLACE` YAPMA** → satırı silip ekler, `ON DELETE CASCADE` şarkıyı TÜM
     listelerden uçurur. `ensureTrack` (`src/lib/playlists.ts`) `ON CONFLICT(id) DO UPDATE` kullanır; onu çağır.
-13. **Oy vermeden ÖNCE `ensureTrack` çağır — yoksa OY SAYILMAZ.** `recommender.ts` oyları
+13. **Oy verirken VE dinleme kaydederken ÖNCE `ensureTrack` çağır — yoksa SİNYAL SAYILMAZ.** `recommender.ts` oyları
     `votes v JOIN tracks t ON t.id = v.track_id` (INNER) ile okur. Keşfet/radyo önerisi hiçbir listede
     olmadığı için `tracks`'te de yoktu → JOIN oyu düşürüyordu, Keşfet'te oy vermek öğrenmeye HİÇ etki
     etmiyordu (ölçüldü: 15 oyun yalnız 11'i görülüyordu). `NowPlayingBar.handleVote` artık önce
     `ensureTrack` yapıyor. Bu bir listeye EKLEME değildir: İndirilenler `cache.downloaded=1` ister,
     Kütüphane playlist'leri gösterir → parça yalnız öğrenme sinyali olarak sayılır.
+    **AYNI HATA `play_history`'de de vardı** (v1.2.0'da bulundu): `recordPlay` ensureTrack yapmıyordu →
+    375 kaydın **104'ü YETİMDİ** ve bunlar EN UZUN dinlemelerdi (440sn'ye kadar) — yani Keşfet'te
+    gerçekten sevip sonuna kadar dinlediğin şarkılar öğrenmeye HİÇ katılmıyor, algoritma yalnız
+    atlananları görüp "hiçbir şeyi tamamlamıyor" sanıyordu. `lib/history.ts` artık ensureTrack yapıyor.
+    (DB'deki eski 104 yetim kayıt kurtarılmadı — metadata'ları yok.)
 14. **Spotify sesi alınamaz** → sadece metadata → YouTube'da eşleştirilir.
 15. **`audio.rs` hata dalları**: hata verirken `ended_emitted = true` yap; yoksa hem `playback-error` hem
     `track-ended` gidip **çift atlama** olur.
@@ -166,7 +202,7 @@ Tüm sinyaller tek skorda birleşir:
 18. **Veri güvenliği:** açılışta veri varsa otomatik DB yedeği (son 12, `backups/`), tek-örnek koruması TÜM
     build'lerde. Geçmişte iki-instance yarışından şüphelenilen bir veri kaybı yaşandı; önlemler o yüzden.
 
-## Özellikler (v1.1.0 — hepsi canlı)
+## Özellikler (v1.2.0 — hepsi canlı)
 **Temel:** çalma/kuyruk, canlı arama (debounce), playlist CRUD + paylaşım kodu (`RSNC1:…`), karma
 (biriken oy + saatlik cooldown + decay), sözler, uyku zamanlayıcı, toplu indirme, .dmg + .exe CI
 (`.github/workflows/release.yml`), yedek/geri yükle, veri içe/dışa aktarma (JSON, birleştirmeli).
@@ -196,6 +232,23 @@ Tüm sinyaller tek skorda birleşir:
   **sidebar aç/kapa** (⌘/Ctrl+B), **yt-dlp runtime güncelleme** (app_data/bin'e; ilk açılışta otomatik +
   Ayarlar'da buton).
 
+**v1.2.0 — yeni:**
+- **Dil: TR / EN** (`src/lib/i18n.ts`, Ayarlar → Görünüm). Anında değişir, yeniden başlatma yok.
+  **Tip-güvenli:** `en` sözlüğü `Record<TrKey,string>` → eksik anahtar **derleme hatası**, gözle arama yok.
+  React dışı için `t()` (store/recommender/toast), bileşenler için `useT()` (dil değişince re-render).
+  Denetim: **`python3 scripts/i18n-check.py`** → UI'da kalan düz metni bulur (3 katman: UI öznitelikleri
+  + JSX metni + Türkçe literaller; DİLDEN BAĞIMSIZ — "Sonraki"/"Tekrar"da Türkçe harf yok, dil tespiti
+  bu yüzden güvenilmez). Çıktıdaki `Promise<>`/`else`/`finally`/`Türkçe`/`English`/`Wyclaew` yanlış pozitif.
+- **Açık tema** (`:root[data-theme="light"]`, index.css). Koyu/açık/sistem; "sistem" OS'u CANLI izler.
+  ⚠️ **Vurgu rengi açık temada koyulaştırılır** (`darken(accent, 0.62)`, App.tsx): kehribar beyazda
+  ~1.9:1 kontrast veriyordu. Inline style stylesheet'i ezdiği için CSS'teki override'a güvenilemez.
+  ⚠️ `isLight`'ı DOM'dan (`data-theme`) OKUMA — vurgu efekti tema efektinden ÖNCE çalışır, ilk
+  render'da öznitelik yazılmamış olur. Doğrudan `theme` ayarından hesapla.
+- **İlk açılış rehberi** (`src/components/Onboarding.tsx`): 6 adım, atlanabilir,
+  `settings.onboardingDone` ile bir kez. Test için: `DELETE FROM settings WHERE key='app.onboardingDone';`
+- **İmza:** Ayarlar → Hakkında'da "YAPAN **Wyclaew**". Ayrıca `package.json` `author` +
+  `Cargo.toml` `authors`.
+
 **İçe aktarma:**
 - YouTube / YouTube Music: anahtarsız. Kimliksiz ~100 öğe sınırı var → tam liste için Ayarlar →
   Entegrasyonlar'dan tarayıcı seçilir (`--cookies-from-browser`).
@@ -207,6 +260,9 @@ Tüm sinyaller tek skorda birleşir:
 
 ## Sırada / ertelenenler
 - **Mobil + senkron** → `docs/MOBILE.md` (detaylı plan; ayrı sohbette yapılacak) + `docs/SYNC.md`.
+  **Platform kararı: ANDROID** (kullanıcı netleştirdi; iOS kapsam dışı).
+- **Yetim `play_history` kayıtları (104)**: `tracks`'te olmadıkları için öğrenmeye katılmıyorlar.
+  yt-dlp ile metadata çekilip kurtarılabilir. Uygulama KAPALIYKEN + yedek alarak yapılmalı.
 - Gerçek **streaming** (ffmpeg PCM pipe → rodio): kullanıcı şimdilik istemedi.
 - **Equalizer** (rodio'da DSP gerektirir — en zoru), mini/menubar player.
 - Öneri havuzu darsa (az oy/az geçmiş) 20 hedefine ulaşamayabilir; sinyal çeşitliliğine bağlı.

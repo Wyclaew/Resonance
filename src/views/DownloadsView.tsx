@@ -3,9 +3,11 @@ import { HardDriveDownload } from "lucide-react";
 import ViewHeader from "../components/ViewHeader";
 import TrackRow from "../components/TrackRow";
 import { useLibraryStore } from "../store/useLibraryStore";
+import { useT } from "../lib/i18n";
 import { usePlayerStore } from "../store/usePlayerStore";
 
 export default function DownloadsView() {
+  const t = useT();
   const downloads = useLibraryStore((s) => s.downloads);
   const refresh = useLibraryStore((s) => s.refresh);
 
@@ -20,11 +22,11 @@ export default function DownloadsView() {
   return (
     <div className="flex h-full flex-col">
       <ViewHeader
-        title="İndirilenler"
+        title={t("downloads.title")}
         subtitle={
           downloads.length > 0
-            ? `${downloads.length} şarkı çevrimdışı kullanıma hazır`
-            : "İnternet olmadan da çalabileceğin şarkılar"
+            ? t("downloads.count", { count: downloads.length })
+            : t("downloads.subtitle")
         }
       />
 
@@ -33,8 +35,7 @@ export default function DownloadsView() {
           <div className="flex flex-col items-center justify-center gap-3 py-24 text-faint">
             <HardDriveDownload size={40} strokeWidth={1.5} />
             <p className="max-w-sm text-center text-sm leading-relaxed">
-              Henüz indirilmiş şarkın yok. Arama sonuçlarında veya çalma
-              listelerinde indir ikonuna basınca şarkılar burada birikir.
+              {t("downloads.emptyState")}
             </p>
           </div>
         ) : (

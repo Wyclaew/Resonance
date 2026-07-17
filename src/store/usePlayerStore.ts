@@ -20,6 +20,7 @@ import { recordPlay } from "../lib/history";
 import { useSettingsStore } from "./useSettingsStore";
 import { useToastStore } from "./useToastStore";
 import { useAppStore } from "./useAppStore";
+import { t } from "../lib/i18n";
 
 // Oynatıcı durumu — Rust ses motoruna (rodio) Tauri komutlarıyla bağlı.
 // Pozisyon/durum, ses thread'inden gelen "playback-tick" olayıyla güncellenir.
@@ -215,7 +216,7 @@ function loadAndPlay(item: QueueItem, startMs = 0) {
       st.queue.length > 1 &&
       st.queueIndex < st.queue.length - 1
     ) {
-      useToastStore.getState().show("Şarkı yüklenemedi, atlanıyor", "error");
+      useToastStore.getState().show(t("player.loadFailed"), "error");
       st.next();
     } else {
       useToastStore.getState().show(`Şarkı yüklenemedi — ${String(e)}`, "error");
@@ -301,7 +302,7 @@ function prefetchNext() {
 // Çıkan parçayı geçmişe yaz + erken geçilen öneriye yumuşak ceza.
 function recordOutgoing(s: PlayerState) {
   if (!s.current) return;
-  recordPlay(s.current.id, s.positionMs);
+  recordPlay(s.current, s.positionMs);
   if (
     s.current.isRecommendation &&
     s.positionMs < Math.min(20_000, s.durationMs * 0.3)
@@ -425,7 +426,7 @@ async function refillRadio(playAfter = false) {
         usePlayerStore.setState({ status: "idle" });
         useToastStore
           .getState()
-          .show("Şimdilik yeni öneri kalmadı — biraz sonra tekrar dene", "info");
+          .show(t("rec.exhausted"), "info");
       }
       return;
     }
@@ -566,7 +567,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     if (!s.recEnabled || (!s.recYouTube && !s.recLibrary)) {
       useToastStore
         .getState()
-        .show("Öneriler kapalı — Ayarlar → Resonance Önerisi", "info");
+        .show(t("common.recsOff"), "info");
       return;
     }
     set({ discovering: true, status: "loading" });
@@ -594,7 +595,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       if (recs.length === 0) {
         useToastStore
           .getState()
-          .show("Yeterli veri yok — birkaç şarkıya oy vererek başla", "info");
+          .show(t("home.noData"), "info");
         set({ discovering: false, status: "idle" });
         return;
       }
@@ -665,7 +666,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       if (recs.length === 0) {
         useToastStore
           .getState()
-          .show("Başka tarz bulunamadı — daha fazla şarkıya oy ver", "info");
+          .show(t("queue.noOtherStyle"), "info");
         set({ discovering: false });
         return;
       }
@@ -702,8 +703,8 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         .getState()
         .show(
           styles.length > 0
-            ? `Yeni tarz: ${styles.join(", ")}`
-            : "Yeni keşif partisi hazır",
+            ? t("queue.newStyle", { artists: styles.join(", ") })
+            : t("queue.newBatch"),
           "info"
         );
     } catch (e) {
@@ -909,7 +910,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         // Kuyruk bir listeye bağlı değil → serpiştirilecek bağlam yok, öneri gelmez.
         useToastStore
           .getState()
-          .show("Akıllı karışık için bir listeden çal", "info");
+          .show(t("player.smartShuffleNeedsList"), "info");
       }
     } else {
       // smart → off: radyoyu kapat; kuyrukta queueIndex SONRASI, henüz ÇALINMAMIŞ
@@ -986,12 +987,12 @@ export async function initPlayer() {
     // Bozuk/çalınamayan şarkıyı atla (kuyruk takılmasın); art arda 3 hatadan
     // sonra dur ki sonsuz döngü olmasın.
     if (consecutiveErrors <= 3 && s.queue.length > 1) {
-      useToastStore.getState().show("Şarkı çalınamadı, atlanıyor", "error");
+      useToastStore.getState().show(t("player.trackFailed"), "error");
       s.next();
     } else {
       useToastStore
         .getState()
-        .show("Şarkı çalınamadı" + (e.payload ? `: ${e.payload}` : ""), "error");
+        .show(t("player.playFailed") + (e.payload ? `: ${e.payload}` : ""), "error");
       usePlayerStore.setState({ status: "idle", error: e.payload });
     }
   });

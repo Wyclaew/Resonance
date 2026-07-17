@@ -16,6 +16,7 @@ import {
 import { useAppStore } from "../store/useAppStore";
 import { usePlaylistStore } from "../store/usePlaylistStore";
 import { usePlayerStore } from "../store/usePlayerStore";
+import { useT } from "../lib/i18n";
 import type { ViewId } from "../types";
 
 interface NavItemProps {
@@ -55,6 +56,7 @@ function NavItem({ icon, label, active, collapsed, onClick }: NavItemProps) {
 }
 
 export default function Sidebar() {
+  const t = useT();
   const view = useAppStore((s) => s.view);
   const activePlaylistId = useAppStore((s) => s.activePlaylistId);
   const navigate = useAppStore((s) => s.navigate);
@@ -71,22 +73,22 @@ export default function Sidebar() {
   }
 
   async function handleCreatePlaylist() {
-    const p = await createPlaylist("Yeni Liste");
+    const p = await createPlaylist(t("nav.newPlaylist"));
     if (p) navigate("playlist", p.id);
   }
 
   const ICON = 18;
 
   const nav: { id: ViewId; icon: React.ReactNode; label: string }[] = [
-    { id: "now", icon: <Clock size={ICON} />, label: "Şu An" },
-    { id: "search", icon: <Search size={ICON} />, label: "Ara" },
-    { id: "library", icon: <Library size={ICON} />, label: "Kütüphane" },
+    { id: "now", icon: <Clock size={ICON} />, label: t("nav.now") },
+    { id: "search", icon: <Search size={ICON} />, label: t("nav.search") },
+    { id: "library", icon: <Library size={ICON} />, label: t("nav.library") },
     {
       id: "downloads",
       icon: <HardDriveDownload size={ICON} />,
-      label: "İndirilenler",
+      label: t("nav.downloads"),
     },
-    { id: "import", icon: <Link2 size={ICON} />, label: "İçe Aktar" },
+    { id: "import", icon: <Link2 size={ICON} />, label: t("nav.import") },
   ];
 
   return (
@@ -118,7 +120,7 @@ export default function Sidebar() {
         )}
         <button
           onClick={toggleSidebar}
-          title={collapsed ? "Genişlet" : "Daralt"}
+          title={collapsed ? t("nav.expand") : t("nav.collapse")}
           className="text-faint hover:text-text"
         >
           {collapsed ? (
@@ -144,7 +146,7 @@ export default function Sidebar() {
               <button
                 onClick={handleDiscover}
                 disabled={discovering}
-                title={collapsed ? (discovering ? "Hazırlanıyor…" : "Keşfet") : undefined}
+                title={collapsed ? (discovering ? t("nav.preparing") : t("nav.discover")) : undefined}
                 className={`group relative flex w-full items-center rounded-md text-sm text-accent transition-all hover:bg-accent/10 disabled:opacity-70 ${
                   collapsed ? "justify-center px-0 py-2.5" : "gap-3 px-3 py-2"
                 }`}
@@ -158,7 +160,7 @@ export default function Sidebar() {
                 </span>
                 {!collapsed && (
                   <span className="truncate">
-                    {discovering ? "Hazırlanıyor…" : "Keşfet"}
+                    {discovering ? t("nav.preparing") : t("nav.discover")}
                   </span>
                 )}
               </button>
@@ -171,13 +173,13 @@ export default function Sidebar() {
       {!collapsed && (
         <div className="mt-2 flex items-center justify-between px-4 pb-1 pt-2">
           <span className="text-[11px] font-semibold uppercase tracking-wider text-faint">
-            Çalma Listeleri
+            {t("nav.playlists")}
           </span>
           <button
             onClick={handleCreatePlaylist}
             className="text-faint hover:text-text"
-            title="Yeni çalma listesi"
-            aria-label="Yeni çalma listesi"
+            title={t("nav.newPlaylist")}
+            aria-label={t("nav.newPlaylist")}
           >
             <Plus size={15} />
           </button>
@@ -188,8 +190,7 @@ export default function Sidebar() {
         {playlists.length === 0
           ? !collapsed && (
               <p className="px-3 py-2 text-xs leading-relaxed text-faint">
-                Henüz çalma listen yok. Bir tane oluştur veya Spotify/YouTube
-                Music'ten içe aktar.
+                {t("nav.noPlaylists")}
               </p>
             )
           : playlists.map((pl) => (
@@ -214,7 +215,7 @@ export default function Sidebar() {
       <div className="border-t border-border px-2 py-2">
         <NavItem
           icon={<Settings size={ICON} />}
-          label="Ayarlar"
+          label={t("nav.settings")}
           active={view === "settings"}
           collapsed={collapsed}
           onClick={() => navigate("settings")}

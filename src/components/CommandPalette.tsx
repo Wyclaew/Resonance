@@ -12,6 +12,7 @@ import {
 import type { ViewId } from "../types";
 import { useAppStore } from "../store/useAppStore";
 import { usePlaylistStore } from "../store/usePlaylistStore";
+import { useT, type TrKey } from "../lib/i18n";
 
 // Komut paleti (Cmd/Ctrl+K) — görünümler ve çalma listeleri arasında klavyeyle
 // hızlı gezinme. Yaz → filtrele, ok tuşları → seç, Enter → git, Esc → kapat.
@@ -23,16 +24,18 @@ interface Cmd {
   run: () => void;
 }
 
-const VIEWS: { view: ViewId; label: string; icon: typeof Search }[] = [
-  { view: "now", label: "Şu An", icon: Sparkles },
-  { view: "search", label: "Ara", icon: Search },
-  { view: "library", label: "Kütüphane", icon: Library },
-  { view: "downloads", label: "İndirilenler", icon: Download },
-  { view: "import", label: "İçe Aktar", icon: Import },
-  { view: "settings", label: "Ayarlar", icon: Settings },
+// label çeviri ANAHTARI (metin değil) — dil değişince paletteki adlar da değişsin.
+const VIEWS: { view: ViewId; labelKey: TrKey; icon: typeof Search }[] = [
+  { view: "now", labelKey: "nav.now", icon: Sparkles },
+  { view: "search", labelKey: "nav.search", icon: Search },
+  { view: "library", labelKey: "nav.library", icon: Library },
+  { view: "downloads", labelKey: "nav.downloads", icon: Download },
+  { view: "import", labelKey: "nav.import", icon: Import },
+  { view: "settings", labelKey: "nav.settings", icon: Settings },
 ];
 
 export default function CommandPalette() {
+  const t = useT();
   const navigate = useAppStore((s) => s.navigate);
   const setCommand = useAppStore((s) => s.setCommand);
   const playlists = usePlaylistStore((s) => s.playlists);
@@ -48,20 +51,20 @@ export default function CommandPalette() {
   const commands: Cmd[] = useMemo(() => {
     const views: Cmd[] = VIEWS.map((v) => ({
       id: `view:${v.view}`,
-      label: v.label,
-      hint: "Görünüm",
+      label: t(v.labelKey),
+      hint: t("palette.view"),
       icon: v.icon,
       run: () => navigate(v.view),
     }));
     const pls: Cmd[] = playlists.map((p) => ({
       id: `pl:${p.id}`,
       label: p.name,
-      hint: "Çalma listesi",
+      hint: t("palette.playlist"),
       icon: ListMusic,
       run: () => navigate("playlist", p.id),
     }));
     return [...views, ...pls];
-  }, [playlists, navigate]);
+  }, [playlists, navigate, t]);
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -114,7 +117,7 @@ export default function CommandPalette() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={onKey}
-            placeholder="Git… (görünüm veya çalma listesi ara)"
+            placeholder={t("palette.placeholder")}
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-faint"
           />
           <kbd className="rounded border border-border px-1.5 py-0.5 text-[10px] text-faint">
@@ -125,7 +128,7 @@ export default function CommandPalette() {
         <div ref={listRef} className="max-h-80 overflow-y-auto p-1.5">
           {filtered.length === 0 ? (
             <p className="px-3 py-6 text-center text-sm text-faint">
-              Eşleşme yok.
+              {t("palette.noResults")}
             </p>
           ) : (
             filtered.map((c, i) => {

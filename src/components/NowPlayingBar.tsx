@@ -24,6 +24,7 @@ import { useToastStore } from "../store/useToastStore";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { formatMs } from "../lib/format";
 import { isTauri } from "../lib/db";
+import { useT } from "../lib/i18n";
 import { getTrackKarma, voteTrack, undoVote, ensureTrack } from "../lib/playlists";
 import AddToPlaylistButton from "./AddToPlaylistButton";
 import KarmaControl from "./KarmaControl";
@@ -36,6 +37,7 @@ function VolumeIcon({ volume, muted }: { volume: number; muted: boolean }) {
 }
 
 export default function NowPlayingBar() {
+  const t = useT();
   const {
     status,
     current,
@@ -111,7 +113,7 @@ export default function NowPlayingBar() {
       const res = await voteTrack(playlistId, current.id, dir);
       if (!res.ok) {
         const mins = Math.ceil(res.cooldownRemainingMs / 60_000);
-        showToast(`Bu şarkı için ${mins} dk sonra tekrar oy verebilirsin`, "info");
+        showToast(t("player.voteCooldown", { mins }), "info");
         return;
       }
       const k = await getTrackKarma(playlistId, current.id);
@@ -119,8 +121,8 @@ export default function NowPlayingBar() {
       // "Geri al" — yanlış oy düzeltme.
       const pid = playlistId;
       const tid = current.id;
-      showToast(dir > 0 ? "Beğenildi" : "Beğenilmedi", "info", {
-        label: "Geri al",
+      showToast(dir > 0 ? t("player.liked") : t("player.disliked"), "info", {
+        label: t("player.undo"),
         fn: async () => {
           await undoVote(pid, tid);
           const k2 = await getTrackKarma(pid, tid);
@@ -147,7 +149,7 @@ export default function NowPlayingBar() {
               current.playlistId
             )
           }
-          title={current ? "Çalan yere git" : undefined}
+          title={current ? t("player.goToPlaying") : undefined}
           className={`grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-lg bg-surface-3 text-faint shadow-lg shadow-black/30 ring-1 ring-white/5 transition-transform hover:scale-[1.03] ${
             current ? "cursor-pointer" : ""
           }`}
@@ -170,16 +172,16 @@ export default function NowPlayingBar() {
             >
               <Sparkles size={11} />
               <span className="truncate">
-                Resonance önerisi
+                {t("rec.badge")}
                 {current.recReason ? ` · ${current.recReason}` : ""}
               </span>
             </div>
           )}
           <div className="truncate text-sm font-medium">
-            {current?.title ?? "Çalmıyor"}
+            {current?.title ?? t("player.notPlaying")}
           </div>
           <div className="truncate text-xs text-muted">
-            {current?.artist ?? "Bir şarkı ara ve oynat"}
+            {current?.artist ?? t("player.searchAndPlay")}
           </div>
         </div>
         {current?.isRecommendation && (
@@ -201,10 +203,10 @@ export default function NowPlayingBar() {
             onClick={cycleShuffle}
             title={
               shuffleMode === "off"
-                ? "Karışık kapalı"
+                ? t("player.shuffleOff")
                 : shuffleMode === "shuffle"
-                ? "Karışık"
-                : "Akıllı karışık — Resonance önerileriyle"
+                ? t("player.shuffleOn")
+                : t("player.shuffleSmart")
             }
             className={`relative ${
               shuffleMode === "off"
@@ -223,7 +225,7 @@ export default function NowPlayingBar() {
           </button>
           <button
             onClick={prev}
-            title="Önceki"
+            title={t("player.previous")}
             className="text-muted hover:text-text"
           >
             <SkipBack size={19} />
@@ -232,7 +234,7 @@ export default function NowPlayingBar() {
             onClick={toggle}
             disabled={!current}
             className="grid h-9 w-9 place-items-center rounded-full bg-text text-bg transition-transform hover:scale-105 disabled:opacity-40 disabled:hover:scale-100"
-            title={isPlaying ? "Duraklat" : "Oynat"}
+            title={isPlaying ? t("player.pause") : t("player.play")}
           >
             {isPlaying ? (
               <Pause size={18} fill="currentColor" />
@@ -242,14 +244,20 @@ export default function NowPlayingBar() {
           </button>
           <button
             onClick={next}
-            title="Sonraki"
+            title={t("player.next")}
             className="text-muted hover:text-text"
           >
             <SkipForward size={19} />
           </button>
           <button
             onClick={cycleRepeat}
-            title="Tekrar"
+            title={
+              repeat === "off"
+                ? t("player.repeatOff")
+                : repeat === "all"
+                ? t("player.repeatAll")
+                : t("player.repeatOne")
+            }
             className={repeat !== "off" ? "text-accent" : "text-muted hover:text-text"}
           >
             {repeat === "one" ? <Repeat1 size={16} /> : <Repeat size={16} />}
@@ -289,10 +297,10 @@ export default function NowPlayingBar() {
             }
             title={
               downloading
-                ? "İndiriliyor…"
+                ? t("player.downloading")
                 : downloaded
-                ? "İndirildi — kaldır"
-                : "İndir"
+                ? t("player.downloaded")
+                : t("player.download")
             }
             className={
               downloaded
@@ -313,14 +321,14 @@ export default function NowPlayingBar() {
         )}
         <button
           onClick={toggleQueue}
-          title="Sıra"
+          title={t("player.queue")}
           className={queueOpen ? "text-accent" : "text-muted hover:text-text"}
         >
           <ListMusic size={16} />
         </button>
         <button
           onClick={toggleLyrics}
-          title="Sözler"
+          title={t("player.lyrics")}
           className={lyricsOpen ? "text-accent" : "text-muted hover:text-text"}
         >
           <ScrollText size={16} />
@@ -329,7 +337,7 @@ export default function NowPlayingBar() {
         <button
           onClick={toggleMute}
           className="text-muted hover:text-text"
-          title="Sessize al"
+          title={muted ? t("player.unmute") : t("player.mute")}
         >
           <VolumeIcon volume={volume} muted={muted} />
         </button>

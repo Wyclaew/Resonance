@@ -21,7 +21,8 @@ import { getVersion } from "@tauri-apps/api/app";
 import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
 import ViewHeader from "../components/ViewHeader";
 import Toggle from "../components/Toggle";
-import { useSettingsStore } from "../store/useSettingsStore";
+import { useSettingsStore, type Theme } from "../store/useSettingsStore";
+import { useT, type TrKey, type Lang } from "../lib/i18n";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { usePlaylistStore } from "../store/usePlaylistStore";
 import { getDeviceId } from "../lib/device";
@@ -29,17 +30,18 @@ import { getDb, isTauri } from "../lib/db";
 import { formatBytes } from "../lib/format";
 import { importBackup, type ImportResult } from "../lib/backup";
 
+// label yerine çeviri ANAHTARI — dil değişince kategori adları da değişsin.
 const categories = [
-  { id: "account", label: "Hesap & Senkron", icon: Cloud },
-  { id: "playback", label: "Oynatma", icon: Play },
-  { id: "storage", label: "Depolama & Önbellek", icon: HardDrive },
-  { id: "shortcuts", label: "Kısayollar", icon: Keyboard },
-  { id: "integrations", label: "Entegrasyonlar", icon: Plug },
-  { id: "appearance", label: "Görünüm", icon: Palette },
-  { id: "algorithm", label: "Resonance Önerisi", icon: Brain },
-  { id: "data", label: "Veri & Yedek", icon: Database },
-  { id: "about", label: "Hakkında", icon: Info },
-] as const;
+  { id: "account", labelKey: "settings.catAccount", icon: Cloud },
+  { id: "playback", labelKey: "settings.catPlayback", icon: Play },
+  { id: "storage", labelKey: "settings.catStorage", icon: HardDrive },
+  { id: "shortcuts", labelKey: "settings.catShortcuts", icon: Keyboard },
+  { id: "integrations", labelKey: "settings.catIntegrations", icon: Plug },
+  { id: "appearance", labelKey: "settings.catAppearance", icon: Palette },
+  { id: "algorithm", labelKey: "settings.catRecommendation", icon: Brain },
+  { id: "data", labelKey: "settings.catData", icon: Database },
+  { id: "about", labelKey: "settings.catAbout", icon: Info },
+] as const satisfies readonly { id: string; labelKey: TrKey; icon: unknown }[];
 
 type CatId = (typeof categories)[number]["id"];
 
@@ -74,20 +76,19 @@ function SettingRow({
 }
 
 function AlgorithmSettings() {
+  const t = useT();
   const s = useSettingsStore();
   const noSource = !s.recYouTube && !s.recLibrary;
 
   return (
     <div className="max-w-2xl">
       <p className="mb-4 text-sm leading-relaxed text-muted">
-        Resonance, hangi gün ve saatte hangi şarkıya upvote/downvote verdiğini
-        öğrenir ve çalma listesi dinlerken araya sana uygun şarkılar ekler.
-        Bu öneriler "✦ Resonance" rozetiyle işaretlenir; dilersen geçersin.
+        {t("settings.recIntro")}
       </p>
 
       <SettingRow
-        label="Resonance önerileri"
-        description="Çalma listesi dinlerken araya önerilen şarkılar eklensin."
+        label={t("settings.recTitle")}
+        description={t("settings.recDesc")}
       >
         <Toggle
           checked={s.recEnabled}
@@ -96,12 +97,12 @@ function AlgorithmSettings() {
       </SettingRow>
 
       <div className="mt-6 mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">
-        Öneriler nereden gelsin?
+        {t("settings.recSourcesHeader")}
       </div>
 
       <SettingRow
-        label="YouTube'dan benzer"
-        description="Upvote'ladığın şarkı ve sanatçılara göre YouTube'da benzerlerini bulur. Yeni keşif."
+        label={t("settings.recYouTube")}
+        description={t("settings.recYouTubeDesc")}
         disabled={!s.recEnabled}
       >
         <Toggle
@@ -112,8 +113,8 @@ function AlgorithmSettings() {
       </SettingRow>
 
       <SettingRow
-        label="Kendi playlistlerim"
-        description="Diğer çalma listelerin ve indirdiklerin arasından o anki bağlama uyanları önerir."
+        label={t("settings.recLibrary")}
+        description={t("settings.recLibraryDesc")}
         disabled={!s.recEnabled}
       >
         <Toggle
@@ -125,16 +126,16 @@ function AlgorithmSettings() {
 
       {s.recEnabled && noSource && (
         <p className="mt-3 text-xs text-down">
-          En az bir kaynak açık olmalı, yoksa öneri gelmez.
+          {t("settings.recNoSource")}
         </p>
       )}
 
       <div className="mt-6 mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">
-        Karma
+        {t("settings.karmaHeader")}
       </div>
       <SettingRow
-        label="Karma yarı ömrü"
-        description="Oyların ne kadar sürede yarı değere düşeceği (gün). Düşük = daha hızlı unutur."
+        label={t("settings.karmaHalfLife")}
+        description={t("settings.karmaHalfLifeDesc")}
       >
         <div className="flex items-center gap-2">
           <input
@@ -150,7 +151,7 @@ function AlgorithmSettings() {
             }
             className="w-16 rounded-md border border-border bg-surface px-2 py-1 text-right text-sm outline-none focus:border-border-strong"
           />
-          <span className="text-xs text-muted">gün</span>
+          <span className="text-xs text-muted">{t("settings.days")}</span>
         </div>
       </SettingRow>
     </div>
@@ -163,8 +164,8 @@ function AlgorithmSettings() {
 const IS_MAC =
   typeof navigator !== "undefined" && /Mac/i.test(navigator.userAgent);
 
+// NOT: modül seviyesi → t() burada çağrılamaz. "Kapalı" seçeneği render'da eklenir.
 const BROWSERS = [
-  { v: "", label: "Kapalı" },
   ...(IS_MAC ? [{ v: "safari", label: "Safari" }] : []),
   { v: "chrome", label: "Chrome" },
   { v: "brave", label: "Brave" },
@@ -176,6 +177,7 @@ const BROWSERS = [
 ];
 
 function IntegrationsSettings() {
+  const t = useT();
   const cookiesBrowser = useSettingsStore((s) => s.cookiesBrowser);
   const spotifyClientId = useSettingsStore((s) => s.spotifyClientId);
   const spotifyClientSecret = useSettingsStore((s) => s.spotifyClientSecret);
@@ -203,15 +205,11 @@ function IntegrationsSettings() {
         YouTube
       </div>
       <p className="mb-4 text-sm leading-relaxed text-muted">
-        YouTube, giriş yapılmadan bir çalma listesinin en fazla ~100 şarkısını
-        verir ve özel listelere izin vermez. Tarayıcını seçersen uygulama, o
-        tarayıcıdaki YouTube oturumunu (çerezleri) kullanır: <b className="text-text">tüm
-        şarkılar (100+)</b>, özel listelerin ve daha az bot engeli. Çerezler
-        cihazında kalır, hiçbir yere gönderilmez.
+        {t("settings.ytCookiesIntro")}
       </p>
       <SettingRow
-        label="Hesap için tarayıcı"
-        description="Hangi tarayıcıdaki YouTube oturumun kullanılsın? O tarayıcıda YouTube'a giriş yapmış olmalısın."
+        label={t("settings.cookiesBrowser")}
+        description={t("settings.cookiesBrowserDesc")}
       >
         <div className="relative">
           <select
@@ -219,6 +217,7 @@ function IntegrationsSettings() {
             onChange={(e) => update("cookiesBrowser", e.target.value)}
             className="w-44 cursor-pointer appearance-none rounded-md border border-border bg-surface py-1.5 pl-3 pr-9 text-sm text-text outline-none transition-colors hover:border-border-strong focus:border-border-strong"
           >
+            <option value="">{t("settings.off")}</option>
             {BROWSERS.map((b) => (
               <option key={b.v} value={b.v}>
                 {b.label}
@@ -233,8 +232,8 @@ function IntegrationsSettings() {
       </SettingRow>
 
       <SettingRow
-        label="İndirme aracını güncelle"
-        description="Şarkı indirilemiyor/çalmıyorsa genelde yt-dlp eskimiştir (YouTube sık değişir). Bu, en güncel sürümü indirir. İlk açılışta otomatik de denenir."
+        label={t("settings.updateYtdlp")}
+        description={t("settings.updateYtdlpDesc")}
       >
         <button
           onClick={updateYtdlp}
@@ -242,7 +241,7 @@ function IntegrationsSettings() {
           className="flex items-center gap-2 rounded-md bg-surface-2 px-3 py-1.5 text-sm font-medium text-text hover:bg-surface-3 disabled:opacity-40"
         >
           <RefreshCw size={14} className={updating ? "animate-spin" : ""} />
-          {updating ? "Güncelleniyor…" : "Güncelle"}
+          {updating ? t("settings.updating") : t("settings.update")}
         </button>
       </SettingRow>
       {ytdlpMsg && (
@@ -259,16 +258,10 @@ function IntegrationsSettings() {
         Spotify
       </div>
       <p className="mb-4 text-sm leading-relaxed text-muted">
-        Spotify'ın sesi alınamaz; bir Spotify listesini içe aktarınca şarkı
-        adları okunur ve <b className="text-text">YouTube'da eşleştirilip</b>{" "}
-        oradan çalınır. <b className="text-text">Anahtar gerekmez</b> — İçe
-        Aktar'a herkese açık listenin linkini yapıştırman yeterli.
+        {t("settings.spotifyIntro")}
       </p>
       <p className="mb-4 text-sm leading-relaxed text-muted">
-        Aşağıdaki alanlar <b className="text-text">opsiyonel</b>: anahtarsız yol
-        bir listeden en fazla <b className="text-text">100 şarkı</b> okur. Daha
-        uzun listelerin tamamını almak istersen tek seferlik{" "}
-        <b className="text-text">ücretsiz</b> bir anahtar gir:{" "}
+        {t("settings.spotifyOptional")}{" "}
         <span className="text-accent">developer.spotify.com</span> → Dashboard →
         Create app → Client ID ve Client Secret'ı buraya yapıştır (Redirect URI
         zorunlu değil). Anahtarlar cihazında kalır.
@@ -277,11 +270,11 @@ function IntegrationsSettings() {
         <input
           value={spotifyClientId}
           onChange={(e) => update("spotifyClientId", e.target.value.trim())}
-          placeholder="örn. 4a1b…"
+          placeholder={t("settings.spotifyIdPlaceholder")}
           className="w-56 rounded-md border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:border-border-strong"
         />
       </SettingRow>
-      <SettingRow label="Client Secret" description="Gizli tut; kimseyle paylaşma.">
+      <SettingRow label="Client Secret" description={t("settings.spotifySecretHint")}>
         <input
           type="password"
           value={spotifyClientSecret}
@@ -295,47 +288,41 @@ function IntegrationsSettings() {
 }
 
 function AccountSettings() {
+  const t = useT();
   const deviceId = getDeviceId();
   return (
     <div className="max-w-2xl">
       <div className="rounded-lg border border-accent/30 bg-accent/5 p-5">
         <div className="flex items-center gap-2 text-accent">
           <Cloud size={18} />
-          <span className="text-sm font-semibold">Bulut senkronu — yakında</span>
+          <span className="text-sm font-semibold">{t("account.soonTitle")}</span>
         </div>
         <p className="mt-2 text-sm leading-relaxed text-muted">
-          Yakında bir hesapla giriş yapıp çalma listelerin, oyların/karman ve
-          ayarların <b className="text-text">masaüstü, telefon ve web</b> arasında
-          otomatik senkronlanacak. Ses her cihazda yerel kalır; buluta yalnızca
-          metadata gider. Şu an her şey <b className="text-text">tamamen yerel ve
-          gizli</b> — senkron açıldığında bile isteğe bağlı (opt-in) olacak.
+          {t("account.soonBody")}
         </p>
         <button
           disabled
           className="mt-4 cursor-default rounded-md bg-surface-2 px-4 py-2 text-sm font-medium text-faint"
         >
-          Giriş yap (yakında)
+          {t("account.signInSoon")}
         </button>
       </div>
 
       <div className="mt-5 border-b border-border py-4">
-        <div className="text-sm font-medium">Bu cihaz</div>
+        <div className="text-sm font-medium">{t("account.thisDevice")}</div>
         <div className="mt-1 font-mono text-xs text-faint">{deviceId}</div>
-        <div className="mt-1 text-xs text-muted">
-          Senkron açıldığında bu cihazı tanımak için kullanılacak kimlik.
-        </div>
+        <div className="mt-1 text-xs text-muted">{t("account.deviceDesc")}</div>
       </div>
 
       <p className="mt-4 text-xs leading-relaxed text-faint">
-        Planın tamamı depoda <span className="text-muted">docs/SYNC.md</span>{" "}
-        dosyasında: Supabase tabanlı hesap + delta senkron, web'de YouTube IFrame
-        Player (yt-dlp tarayıcıda çalışmadığı için), mobil için Tauri/Android.
+        {t("account.planNote")}
       </p>
     </div>
   );
 }
 
 function PlaybackSettings() {
+  const t = useT();
   const s = useSettingsStore();
   const [autostart, setAutostart] = useState(false);
   useEffect(() => {
@@ -356,8 +343,8 @@ function PlaybackSettings() {
   return (
     <div className="max-w-2xl">
       <SettingRow
-        label="Ses düzeyini hatırla"
-        description="Uygulama en son ses düzeyiyle açılır."
+        label={t("settings.rememberVolume")}
+        description={t("settings.rememberVolumeDesc")}
       >
         <Toggle
           checked={s.rememberVolume}
@@ -365,8 +352,8 @@ function PlaybackSettings() {
         />
       </SettingRow>
       <SettingRow
-        label="Sıradakini önceden indir"
-        description="Bir sonraki şarkıyı arka planda hazırlar → geçiş anlık olur. Biraz daha veri kullanır."
+        label={t("settings.prefetch")}
+        description={t("settings.prefetchDesc")}
       >
         <Toggle
           checked={s.prefetchEnabled}
@@ -374,8 +361,8 @@ function PlaybackSettings() {
         />
       </SettingRow>
       <SettingRow
-        label="Bilgisayar açılışında başlat"
-        description="Windows/macOS oturumu açıldığında Resonance otomatik çalışsın."
+        label={t("settings.autostart")}
+        description={t("settings.autostartDesc")}
       >
         <Toggle checked={autostart} onChange={toggleAutostart} />
       </SettingRow>
@@ -384,6 +371,7 @@ function PlaybackSettings() {
 }
 
 function StorageSettings() {
+  const t = useT();
   const downloadedIds = useLibraryStore((st) => st.downloadedIds);
   const refreshLibrary = useLibraryStore((st) => st.refresh);
   const [files, setFiles] = useState<{ sourceId: string; bytes: number }[]>([]);
@@ -433,19 +421,21 @@ function StorageSettings() {
   return (
     <div className="max-w-2xl">
       <SettingRow
-        label="Geçici önbellek"
-        description="Çaldığın ama indirmediğin şarkılar. Silmek güvenli; gerekince yeniden alınır."
+        label={t("settings.tempCache")}
+        description={t("settings.tempCacheDesc")}
       >
         <span className="tnum text-sm text-muted">
-          {formatBytes(cacheBytes)} · {cacheCount} şarkı
+          {formatBytes(cacheBytes)} ·{" "}
+          {t("playlist.trackCount", { count: cacheCount })}
         </span>
       </SettingRow>
       <SettingRow
-        label="İndirilenler"
-        description="Çevrimdışı için kalıcı tuttukların. Önbellek temizlemede silinmez."
+        label={t("settings.downloadsKept")}
+        description={t("settings.downloadsKeptDesc")}
       >
         <span className="tnum text-sm text-muted">
-          {formatBytes(dlBytes)} · {dlCount} şarkı
+          {formatBytes(dlBytes)} ·{" "}
+          {t("playlist.trackCount", { count: dlCount })}
         </span>
       </SettingRow>
       <div className="mt-4 flex items-center gap-3">
@@ -454,7 +444,7 @@ function StorageSettings() {
           disabled={clearing || cacheCount === 0}
           className="flex items-center gap-2 rounded-md bg-surface-2 px-3 py-2 text-sm font-medium text-text hover:bg-surface-3 disabled:opacity-40"
         >
-          <Trash2 size={15} /> Önbelleği temizle
+          <Trash2 size={15} /> {t("settings.clearCache")}
         </button>
         {cleared && (
           <span className="flex items-center gap-1 text-xs text-up">
@@ -466,58 +456,59 @@ function StorageSettings() {
   );
 }
 
-const SHORTCUTS: [string, string][] = [
-  ["Boşluk", "Oynat / Duraklat"],
-  ["→ / ←", "5 sn ileri / geri"],
-  ["Shift + → / ←", "Sonraki / Önceki şarkı"],
-  ["↑ / ↓", "Ses +/−"],
-  ["M", "Sessize al"],
-  ["⌘/Ctrl + K", "Komut paleti (hızlı gezinme)"],
-  ["⌘/Ctrl + B", "Yan paneli aç/kapat"],
-  ["Medya tuşları", "Kulaklık/klavye oynat-duraklat-geç (uygulama arka plandayken de)"],
+// [tuş anahtarı | düz tuş, açıklama anahtarı]
+const SHORTCUTS: [TrKey | { raw: string }, TrKey][] = [
+  ["settings.scSpace", "settings.scPlayPause"],
+  [{ raw: "→ / ←" }, "settings.scSeek"],
+  [{ raw: "Shift + → / ←" }, "settings.scNextPrev"],
+  [{ raw: "↑ / ↓" }, "settings.scVolume"],
+  [{ raw: "M" }, "settings.scMute"],
+  [{ raw: "⌘/Ctrl + K" }, "settings.scPalette"],
+  [{ raw: "⌘/Ctrl + B" }, "settings.scSidebar"],
+  ["settings.scMediaKeys", "settings.scMediaKeysDesc"],
 ];
 function ShortcutsSettings() {
+  const t = useT();
   return (
     <div className="max-w-2xl">
-      <p className="mb-4 text-sm text-muted">
-        Uygulama açıkken (yazı kutuları hariç) geçerli kısayollar:
-      </p>
+      <p className="mb-4 text-sm text-muted">{t("settings.scIntro")}</p>
       {SHORTCUTS.map(([k, d]) => (
         <div
-          key={k}
+          key={d}
           className="flex items-center justify-between border-b border-border py-3 text-sm"
         >
-          <span className="text-muted">{d}</span>
+          <span className="text-muted">{t(d)}</span>
           <kbd className="rounded border border-border bg-surface px-2 py-0.5 font-mono text-xs text-text">
-            {k}
+            {typeof k === "string" ? t(k) : k.raw}
           </kbd>
         </div>
       ))}
-      <p className="mt-4 text-xs text-faint">
-        Global kısayollar (uygulama arka plandayken) sonraki sürümde.
-      </p>
+      <p className="mt-4 text-xs text-faint">{t("settings.scNote")}</p>
     </div>
   );
 }
 
-const ACCENTS = [
-  { v: "#e0a33c", label: "Kehribar" },
-  { v: "#5fb87f", label: "Yeşil" },
-  { v: "#4f9bd9", label: "Mavi" },
-  { v: "#d4634e", label: "Mercan" },
-  { v: "#b07ad9", label: "Mor" },
-  { v: "#e0667f", label: "Pembe" },
+const ACCENTS: { v: string; labelKey: TrKey }[] = [
+  { v: "#e0a33c", labelKey: "settings.amber" },
+  { v: "#5fb87f", labelKey: "settings.green" },
+  { v: "#4f9bd9", labelKey: "settings.blue" },
+  { v: "#d4634e", labelKey: "settings.red" },
+  { v: "#b07ad9", labelKey: "settings.purple" },
+  { v: "#e0667f", labelKey: "settings.pink" },
 ];
-const SCREENSAVER_OPTS = [
-  { v: 0, label: "Kapalı" },
-  { v: 30, label: "30 saniye" },
-  { v: 60, label: "1 dakika" },
-  { v: 90, label: "1.5 dakika" },
-  { v: 180, label: "3 dakika" },
-  { v: 300, label: "5 dakika" },
+const SCREENSAVER_OPTS: { v: number; labelKey: TrKey }[] = [
+  { v: 0, labelKey: "settings.off" },
+  { v: 30, labelKey: "settings.sec30" },
+  { v: 60, labelKey: "settings.min1" },
+  { v: 90, labelKey: "settings.min15" },
+  { v: 180, labelKey: "settings.min3" },
+  { v: 300, labelKey: "settings.min5" },
 ];
 function AppearanceSettings() {
+  const t = useT();
   const accentColor = useSettingsStore((s) => s.accentColor);
+  const theme = useSettingsStore((s) => s.theme);
+  const language = useSettingsStore((s) => s.language);
   const screensaverSeconds = useSettingsStore((s) => s.screensaverSeconds);
   const update = useSettingsStore((s) => s.update);
 
@@ -530,14 +521,14 @@ function AppearanceSettings() {
   return (
     <div className="max-w-2xl">
       <SettingRow
-        label="Vurgu rengi"
-        description="Butonlar ve etkin öğelerdeki vurgu rengi."
+        label={t("settings.accentColor")}
+        description={t("settings.accentColorDesc")}
       >
         <div className="flex items-center gap-2">
           {ACCENTS.map((a) => (
             <button
               key={a.v}
-              title={a.label}
+              title={t(a.labelKey)}
               onClick={() => update("accentColor", a.v)}
               className={`h-7 w-7 rounded-full border-2 transition-transform hover:scale-110 ${
                 accentColor === a.v ? "border-text" : "border-transparent"
@@ -548,8 +539,8 @@ function AppearanceSettings() {
         </div>
       </SettingRow>
       <SettingRow
-        label="Ambiyans ekranı"
-        description="Bu kadar süre etkileşim olmazsa ekran yalnızca çalan şarkıyı gösterir (dinlenme/ambiyans modu). Hareket edince kapanır."
+        label={t("settings.screensaver")}
+        description={t("settings.screensaverDesc")}
       >
         <div className="flex items-center gap-2">
           {customMode && (
@@ -562,7 +553,7 @@ function AppearanceSettings() {
                 const mins = Math.max(0, Number(e.target.value) || 0);
                 update("screensaverSeconds", Math.round(mins * 60));
               }}
-              title="Dakika"
+              title={t("settings.minutes")}
               className="w-20 rounded-md border border-border bg-surface px-2 py-1.5 text-sm text-text outline-none focus:border-border-strong"
             />
           )}
@@ -585,10 +576,10 @@ function AppearanceSettings() {
             >
               {SCREENSAVER_OPTS.map((o) => (
                 <option key={o.v} value={o.v}>
-                  {o.label}
+                  {t(o.labelKey)}
                 </option>
               ))}
-              <option value="custom">Özel…</option>
+              <option value="custom">{t("settings.custom")}</option>
             </select>
             <ChevronDown
               size={15}
@@ -597,9 +588,28 @@ function AppearanceSettings() {
           </div>
         </div>
       </SettingRow>
-      <p className="mt-3 text-xs text-faint">
-        Tema koyu; açık tema sonraki sürümde.
-      </p>
+      {/* Tema — açık tema v1.2.0'da eklendi (token'lar :root[data-theme] ile). */}
+      <SettingRow label={t("settings.theme")} description={t("settings.themeDesc")}>
+        <select
+          value={theme}
+          onChange={(e) => update("theme", e.target.value as Theme)}
+          className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text outline-none focus:border-border-strong"
+        >
+          <option value="dark">{t("settings.themeDark")}</option>
+          <option value="light">{t("settings.themeLight")}</option>
+          <option value="system">{t("settings.themeSystem")}</option>
+        </select>
+      </SettingRow>
+      <SettingRow label={t("settings.language")} description={t("settings.languageDesc")}>
+        <select
+          value={language}
+          onChange={(e) => update("language", e.target.value as Lang)}
+          className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text outline-none focus:border-border-strong"
+        >
+          <option value="tr">Türkçe</option>
+          <option value="en">English</option>
+        </select>
+      </SettingRow>
     </div>
   );
 }
@@ -612,6 +622,10 @@ interface BackupInfo {
 }
 
 function DataSettings() {
+  const t = useT();
+  const lang = useSettingsStore((s) => s.language);
+  // Tarih biçimi dil ayarını izlesin (eskiden "tr-TR"e sabitti).
+  const locale = lang === "tr" ? "tr-TR" : "en-US";
   const [exporting, setExporting] = useState(false);
   const [savedPath, setSavedPath] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -704,27 +718,21 @@ function DataSettings() {
 
   return (
     <div className="max-w-2xl">
-      <p className="mb-4 text-sm leading-relaxed text-muted">
-        Çalma listelerin, oyların/karman bir JSON dosyasına yedeklenir
-        (İndirilenler klasörüne). Bu dosyayı başka bir cihazda ya da bir
-        arkadaşınla <b className="text-text">içe aktararak</b> tüm listeleri
-        paylaşabilirsin. Ses dosyaları dahil değildir — şarkılar her cihazda ilk
-        çalmada otomatik indirilir. (Ayarlar/gizli anahtarlar paylaşılmaz.)
-      </p>
+      <p className="mb-4 text-sm leading-relaxed text-muted">{t("data.intro")}</p>
       <div className="flex flex-wrap items-center gap-2">
         <button
           onClick={exportData}
           disabled={exporting}
           className="flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-medium text-bg disabled:opacity-40"
         >
-          <Download size={15} /> Yedeği dışa aktar
+          <Download size={15} /> {t("data.exportBackup")}
         </button>
         <button
           onClick={() => fileRef.current?.click()}
           disabled={importing}
           className="flex items-center gap-2 rounded-md bg-surface-2 px-4 py-2 text-sm font-medium text-text hover:bg-surface-3 disabled:opacity-40"
         >
-          <Upload size={15} /> {importing ? "İçe aktarılıyor…" : "İçe aktar"}
+          <Upload size={15} /> {importing ? t("data.importing") : t("data.importBtn")}
         </button>
         <input
           ref={fileRef}
@@ -735,33 +743,35 @@ function DataSettings() {
         />
       </div>
       {savedPath && (
-        <p className="mt-3 break-all text-xs text-up">Kaydedildi: {savedPath}</p>
+        <p className="mt-3 break-all text-xs text-up">{t("data.saved", { path: savedPath })}</p>
       )}
       {importResult && (
         <p className="mt-3 text-xs text-up">
-          İçe aktarıldı: {importResult.playlists} liste, {importResult.tracks}{" "}
-          şarkı, {importResult.votes} oy.
+          {t("data.imported", {
+            playlists: importResult.playlists,
+            tracks: importResult.tracks,
+            votes: importResult.votes,
+          })}
         </p>
       )}
       {err && <p className="mt-3 text-xs text-down">{err}</p>}
 
       <div className="mt-8 mb-2 flex items-center justify-between">
         <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">
-          Otomatik yedekler
+          {t("data.autoBackups")}
         </div>
         <button
           onClick={backupNow}
           className="rounded-md bg-surface-2 px-2.5 py-1 text-xs font-medium text-text hover:bg-surface-3"
         >
-          Şimdi yedekle
+          {t("data.backupNow")}
         </button>
       </div>
       <p className="mb-3 text-xs leading-relaxed text-muted">
-        Veri varken her açılışta otomatik yedek alınır (son 12 tutulur). Bir
-        sorun olursa buradan geri yükleyebilirsin.
+        {t("data.autoBackupsDesc")}
       </p>
       {backups.length === 0 ? (
-        <p className="text-xs text-faint">Henüz yedek yok.</p>
+        <p className="text-xs text-faint">{t("data.noBackups")}</p>
       ) : (
         <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
           {backups.map((b) => (
@@ -771,7 +781,7 @@ function DataSettings() {
             >
               <div>
                 <div className="text-sm text-text">
-                  {new Date(b.modifiedMs).toLocaleString("tr-TR")}
+                  {new Date(b.modifiedMs).toLocaleString(locale)}
                 </div>
                 <div className="tnum text-xs text-faint">
                   {formatBytes(b.bytes)}
@@ -781,7 +791,7 @@ function DataSettings() {
                 onClick={() => setConfirmRestore(b)}
                 className="rounded-md px-2.5 py-1 text-xs font-medium text-muted hover:bg-surface hover:text-text"
               >
-                Geri yükle
+                {t("data.restore")}
               </button>
             </div>
           ))}
@@ -797,18 +807,18 @@ function DataSettings() {
             className="w-96 animate-pop-in rounded-lg border border-border bg-surface-2 p-5 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-base font-semibold">Yedeği geri yükle?</h3>
+            <h3 className="text-base font-semibold">{t("data.restoreTitle")}</h3>
             <p className="mt-1 text-sm leading-relaxed text-muted">
-              {new Date(confirmRestore.modifiedMs).toLocaleString("tr-TR")}{" "}
-              tarihli yedek geri yüklenecek. Mevcut durumun da ayrıca yedeklenir.
-              Uygulama yeniden başlar.
+              {t("data.restoreBody", {
+                date: new Date(confirmRestore.modifiedMs).toLocaleString(locale),
+              })}
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <button
                 onClick={() => setConfirmRestore(null)}
                 className="rounded-md px-3 py-1.5 text-sm text-muted hover:bg-surface hover:text-text"
               >
-                Vazgeç
+                {t("common.cancel")}
               </button>
               <button
                 onClick={() =>
@@ -818,7 +828,7 @@ function DataSettings() {
                 }
                 className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-bg hover:opacity-90"
               >
-                Geri yükle & yeniden başlat
+                {t("data.restoreAndRestart")}
               </button>
             </div>
           </div>
@@ -829,6 +839,7 @@ function DataSettings() {
 }
 
 function AboutSettings() {
+  const t = useT();
   const [version, setVersion] = useState("");
   useEffect(() => {
     if (!isTauri()) return;
@@ -844,31 +855,36 @@ function AboutSettings() {
         </div>
         <div>
           <div className="text-base font-semibold text-text">Resonance</div>
-          <div className="text-xs text-faint">Sürüm {version || "—"}</div>
+          <div className="text-xs text-faint">
+            {t("settings.version")} {version || "—"}
+          </div>
         </div>
       </div>
-      <p className="mt-4">
-        Hafif, karma tabanlı kişisel müzik oynatıcı. Ses YouTube'dan (yt-dlp)
-        gelir; Spotify / YouTube Music listeleri içe aktarılır.
-      </p>
-      <p className="mt-3 text-faint">
-        Kişisel kullanım içindir. YouTube'dan ses çekmek YouTube Hizmet
-        Şartları'na aykırı olabilir; bu uygulamayı kendi sorumluluğunda kullan.
-      </p>
-      <p className="mt-3 text-faint">
-        Tauri · React · rodio · yt-dlp · ffmpeg ile yapıldı.
-      </p>
+      <p className="mt-4">{t("about.tagline")}</p>
+      <p className="mt-3 text-faint">{t("about.disclaimer")}</p>
+      <p className="mt-3 text-faint">{t("about.builtWith")}</p>
+
+      {/* İmza — yapanın adı. Sürümün hemen altında, sakin ama görünür. */}
+      <div className="mt-6 flex items-center gap-2 border-t border-border pt-4">
+        <span className="text-xs uppercase tracking-wider text-faint">
+          {t("about.madeBy")}
+        </span>
+        <span className="font-mono text-sm font-medium tracking-tight text-accent">
+          Wyclaew
+        </span>
+      </div>
     </div>
   );
 }
 
 export default function SettingsView() {
+  const t = useT();
   const [active, setActive] = useState<CatId>("account");
   const current = categories.find((c) => c.id === active)!;
 
   return (
     <div className="flex h-full flex-col">
-      <ViewHeader title="Ayarlar" />
+      <ViewHeader title={t("settings.title")} />
       <div className="flex min-h-0 flex-1">
         <nav className="w-56 shrink-0 overflow-y-auto px-4 py-1">
           {categories.map((c) => {
@@ -884,14 +900,14 @@ export default function SettingsView() {
                 }`}
               >
                 <Icon size={16} className={active === c.id ? "text-accent" : ""} />
-                {c.label}
+                {t(c.labelKey)}
               </button>
             );
           })}
         </nav>
 
         <div className="min-w-0 flex-1 overflow-y-auto px-8 py-2">
-          <h2 className="mb-4 text-lg font-semibold">{current.label}</h2>
+          <h2 className="mb-4 text-lg font-semibold">{t(current.labelKey)}</h2>
           {active === "account" ? (
             <AccountSettings />
           ) : active === "playback" ? (

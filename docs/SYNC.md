@@ -1,6 +1,6 @@
 # Resonance — Hesap & Senkron Planı
 
-Amaç: Masaüstü (var, v1.1.0), **mobil** (`docs/MOBILE.md`) ve ileride web sürümlerini bir
+Amaç: Masaüstü (var, v1.2.0), **mobil (Android)** (`docs/MOBILE.md`) ve ileride web sürümlerini bir
 **hesap** üzerinden bağlamak; çalma listeleri, oylar/karma, dinleme geçmişi ve ayarlar tüm
 cihazlarda takip etsin. (Playlist **paylaşımı** zaten `RSNC1:` kodu ile çalışıyor — bu ondan
 ayrı: kişinin **kendi** verisinin cihazlar arası senkronu.)
@@ -15,7 +15,7 @@ Uygulanan tek hazırlık: cihaz kimliği (`src/lib/device.ts`).
 | Platform | Ses nasıl çalar? |
 | --- | --- |
 | **Masaüstü** (var) | yt-dlp → m4a indir → ADTS remux → Rust/rodio çalar |
-| **Mobil** (planlanan) | Cihazda `youtubei.js` çıkarımı → ExoPlayer/AVPlayer. **yt-dlp gömülemez.** Alternatifler: `docs/MOBILE.md` §2 |
+| **Mobil** (planlanan, **Android**) | Cihazda `youtubei.js` çıkarımı → ExoPlayer. **yt-dlp gömülemez.** Alternatifler: `docs/MOBILE.md` §2 |
 | **Web** (kapsam dışı) | **yt-dlp ÇALIŞAMAZ** (tarayıcı sandbox). Tek gerçekçi yol: **YouTube IFrame Player API** — resmi ve ToS'a uygun |
 
 **Sonuç:** Ortak katman = **hesap + veri senkronu** (playlist, oy, geçmiş, ayar).
@@ -25,7 +25,7 @@ Uygulanan tek hazırlık: cihaz kimliği (`src/lib/device.ts`).
 
 ## Stack: Supabase
 
-- **Auth**: e-posta/şifre veya Google/Apple.
+- **Auth**: e-posta/şifre veya Google.
 - **Postgres**: senkronlanan tabloların bulut aynası + **RLS** (`user_id = auth.uid()`).
 - **Realtime** (opsiyonel): açık cihazlar arasında anlık senkron.
 - **Sunucu kodu YOK** — her uygulama Supabase istemcisiyle doğrudan konuşur.
@@ -40,7 +40,13 @@ Uygulanan tek hazırlık: cihaz kimliği (`src/lib/device.ts`).
 | `votes` (append-only olay günlüğü) | Cihaza özel ayarlar: ses seviyesi, ambiyans süresi, autostart, arka plan FPS modu |
 | `play_history` (öneri motorunu cihazlar arası eğitir) | |
 | `recommendation_history` (telefonda göreni PC'de tekrar görme) | |
-| Genel ayarlar (tema, öneri ağırlıkları) | |
+| Genel ayarlar (tema, dil, öneri ağırlıkları) | |
+
+> ⭐ **v1.2.0 notu — senkron artık DAHA kritik.** Öğrenme sinyalleri genişledi:
+> `playlist_tracks` artık **sanatçı yakınlığının ana kaynağı** (8 → 184 sanatçı),
+> `votes` + `play_history` ise zaman-bağlam profilini besliyor. Bu üçü senkronlanmazsa
+> telefon ve PC **farklı zevk öğrenir** ve öneriler cihazlar arası tutarsız olur.
+> (Ayrıntı: `CLAUDE.md` → Öneri motoru.)
 
 ## Senkron modeli: local-first + delta sync
 

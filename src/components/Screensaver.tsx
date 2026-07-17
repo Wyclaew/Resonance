@@ -1,4 +1,5 @@
 import { Music2 } from "lucide-react";
+import { useT } from "../lib/i18n";
 import { usePlayerStore } from "../store/usePlayerStore";
 import { formatMs } from "../lib/format";
 
@@ -6,6 +7,7 @@ import { formatMs } from "../lib/format";
 // Yalnızca çalan şarkıyı sade biçimde gösterir; herhangi bir hareket/tuş ile
 // kapanır (kapatma App.tsx'teki idle dinleyicisinde yapılır).
 export default function Screensaver() {
+  const t = useT();
   const current = usePlayerStore((s) => s.current);
   const positionMs = usePlayerStore((s) => s.positionMs);
   const durationMs = usePlayerStore((s) => s.durationMs);
@@ -56,7 +58,7 @@ export default function Screensaver() {
         </div>
       )}
       <div className="absolute bottom-10 text-xs text-faint">
-        Devam etmek için hareket et
+        {t("screensaver.hint")}
       </div>
     </div>
   );

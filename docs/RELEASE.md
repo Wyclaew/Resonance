@@ -24,7 +24,7 @@ otomatik derler — sen sadece bir **etiket (tag)** push edersin.
 
 ## Her sürüm çıkarışında
 
-1. Sürüm numarasını **üç dosyada birden** artır (ör. `1.1.0` → `1.1.1`):
+1. Sürüm numarasını **üç dosyada birden** artır (ör. `1.2.0` → `1.2.1`):
    - `package.json` → `"version"`
    - `src-tauri/tauri.conf.json` → `"version"`  ← Hakkında ekranı bunu gösterir
    - `src-tauri/Cargo.toml` → `version`
@@ -40,12 +40,12 @@ otomatik derler — sen sadece bir **etiket (tag)** push edersin.
 4. Commit'le, sonra bir **sürüm etiketi** push et:
 
    ```bash
-   git add -A && git commit -m "v1.1.0"
-   git tag v1.1.0
+   git add -A && git commit -m "v1.2.0"
+   git tag v1.2.0
    git push origin main --tags
    ```
 
-   > Etiket zaten varsa: `git tag -d v1.1.0 && git push origin :refs/tags/v1.1.0` ile sil, sonra tekrar at.
+   > Etiket zaten varsa: `git tag -d v1.2.0 && git push origin :refs/tags/v1.2.0` ile sil, sonra tekrar at.
 
 5. Etiket push'lanınca **GitHub Actions** otomatik başlar:
    - macOS runner → `.dmg` üretir

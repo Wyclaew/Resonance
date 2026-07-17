@@ -39,6 +39,36 @@
   color-scheme: dark;
 }
 
+/* AÇIK TEMA — @theme token'larının üzerine yazar.
+   Tüm bileşenler semantik token kullandığı için (bg/surface/text/muted…)
+   tek yer değiştirmek yeterli; bileşenlerde hardcoded renk YOK.
+   data-theme'i App.tsx yazar ("system" ise OS tercihini izler). */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --color-bg: #faf9f7;
+  --color-surface: #ffffff;
+  --color-surface-2: #f1efec;
+  --color-surface-3: #e6e3de;
+  --color-border: #e2dfd9;
+  --color-border-strong: #cdc8c0;
+
+  --color-text: #1c1b19;
+  --color-muted: #6b6862;
+  --color-faint: #97938c;
+
+  /* Vurgu açık zeminde koyulaşır (kehribar beyazda okunmuyor).
+     App.tsx kullanıcının seçtiği rengi --color-accent'e yazar; burada yalnız
+     varsayılan ve türevleri ayarlanır. */
+  --color-accent: #b9842f;
+  --color-accent-dim: #8f6524;
+
+  --color-up: #2f7d4f;
+  --color-up-dim: #245e3c;
+  --color-down: #b8422c;
+  --color-down-dim: #8c3221;
+}
+
 * {
   box-sizing: border-box;
 }

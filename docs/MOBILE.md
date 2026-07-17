@@ -8,14 +8,17 @@ Masaüstünün mimarisi ve tuzakları için önce **`CLAUDE.md`**'yi oku; senkro
 (playlist, oy/karma, dinleme geçmişi, ayarlar). Ses yine YouTube'dan.
 **Kişisel kullanım, mağazaya çıkmayacak, repo private.**
 
+## ⭐ KARAR: ANDROID — iOS KAPSAM DIŞI
+Kullanıcı netleştirdi: telefon **Android**. iOS'a hiç girme ("çok uğraştırır" —
+haklı: App Store'a çıkamaz, sideload'da 7 günde bir yeniden imzalama gerekir).
+Bu dokümanda iOS'a dair her şey silindi; tek hedef **Android**.
+
 ---
 
-## 0. Önce kararlaştırılacak iki şey (Faz 0'da netleşmeli)
+## 0. Önce kararlaştırılacak tek şey (Faz 0'da netleşmeli)
 
-1. **Telefon Android mi iPhone mı?** Bu plan **Android-öncelikli**. iOS gerçeği aşağıda
-   (§2.4) — App Store'a çıkamaz, sideload + 7 günde bir yeniden imzalama gerekir.
-2. **Ses yolu** (§2) — projenin en riskli kararı. Faz 0'daki spike bunu doğrulamadan
-   arayüz kodu yazmaya başlama.
+**Ses yolu** (§2) — projenin en riskli kararı. Faz 0'daki spike bunu doğrulamadan
+arayüz kodu yazmaya başlama. (Platform sorusu kapandı: Android.)
 
 ---
 
@@ -24,8 +27,8 @@ Masaüstünün mimarisi ve tuzakları için önce **`CLAUDE.md`**'yi oku; senkro
 | Konu | Masaüstü (mevcut) | Mobil (gerçek) |
 | --- | --- | --- |
 | Çıkarım aracı | `yt-dlp` (Python binary) | **Çalışmaz** — Android'de app içine gömülemez (Termux ayrı bir şey) |
-| Ses motoru | Rust `rodio` + symphonia | Platform oynatıcı (ExoPlayer/AVPlayer) — arka plan + kilit ekranı için ŞART |
-| Arka plan çalma | Bedava (masaüstü) | **Foreground Service + MediaSession** (Android) / audio background mode (iOS) gerekir |
+| Ses motoru | Rust `rodio` + symphonia | Platform oynatıcı (**ExoPlayer**) — arka plan + kilit ekranı için ŞART |
+| Arka plan çalma | Bedava (masaüstü) | **Foreground Service + MediaSession** gerekir |
 | Depolama | Sınırsız sayılır | Sınırlı → indirme kotası + LRU temizlik gerekir |
 | Ağ | Sabit | Mobil veri / offline → **offline-first ŞART**, indirme kotası mobil veride kapalı |
 | Süreç ömrü | Uygulama açık kalır | OS istediğinde öldürür → durumu sık kaydet |
@@ -39,13 +42,14 @@ Masaüstünün mimarisi ve tuzakları için önce **`CLAUDE.md`**'yi oku; senkro
 | # | Yol | Nasıl | Artı | Eksi |
 | --- | --- | --- | --- | --- |
 | **A** | **Cihazda çıkarım (JS)** — `youtubei.js` (YouTube.js, NewPipe muadili, saf TS) ile stream URL'i al, `react-native-track-player` (ExoPlayer) ile çal | Telefon kendi başına yeter | PC gerekmez, tam bağımsız, arka plan/kilit ekranı hazır gelir | RN'de **imza çözme (signature decipher)** JS-motoru gerektirir; Hermes'te tökezleyebilir. **DOĞRULANMADI** → Faz 0 spike şart |
-| **B** | **Cihazda çıkarım (native)** — NewPipeExtractor (Java) native modül | Olgun, Android'de savaşta test edilmiş | PC gerekmez, en sağlam çıkarım | Kotlin/Java köprüsü yazmak gerek; iOS'ta yok |
+| **B** | **Cihazda çıkarım (native)** — NewPipeExtractor (Java) native modül | Olgun, Android'de savaşta test edilmiş | PC gerekmez, en sağlam çıkarım; **Android'de A'nın doğal yedeği** | Kotlin/Java köprüsü yazmak gerek |
 | **C** | **PC köprüsü** — masaüstü Resonance küçük bir HTTP sunucu açar, telefon ondan çalar/indirir (LAN veya Tailscale) | Mevcut yt-dlp bilgisi %100 yeniden kullanılır | En hızlı yol, tüm tuzaklar zaten çözülmüş | **PC açık olmalı** → dışarıda çalışmaz (indirilmişler hariç) |
 | **D** | **YouTube IFrame** gizli webview | ToS'a uygun tek yol | — | Mobilde arka planda çalmaz, gizlemek zaten ToS ihlali → **kullanma** |
 
 ### 2.2 Önerilen: **A, C'ye düşerek** (hibrit)
 
 - **Ana yol A**: telefon `youtubei.js` ile stream URL'i çıkarır → track-player çalar.
+  (Android'de B, A'nın birebir yedeği — iOS kısıtı olmadığı için native modül serbest.)
 - **Yedek C**: A çıkaramazsa (imza değişikliği, throttle) ve PC erişilebilirse (Tailscale/LAN),
   masaüstünden çek. PC yoksa hata → sıradakine geç (masaüstündeki davranışın aynısı).
 - **B'ye geçiş kriteri**: Faz 0 spike'ında A çalışmazsa doğrudan B'ye geç, A ile uğraşma.
@@ -57,12 +61,6 @@ Masaüstünün ADTS zorunluluğu (**rodio m4a'da panikliyor** — `CLAUDE.md` go
 ExoPlayer m4a/webm'i sorunsuz çalar → **ffmpeg remux'a gerek yok**. `itag 140` (m4a, 128k) doğrudan çalınır.
 > Sonuç: indirilen dosyalar iki platformda **farklı formatta** olabilir. Bu sorun değil —
 > `cache` tablosu zaten senkronlanmıyor (§4).
-
-### 2.4 iOS gerçeği (yumuşatmadan)
-- App Store'a **çıkamaz** (YouTube'dan ses çıkarma → reddedilir).
-- Sideload: ücretsiz Apple hesabıyla **7 günde bir yeniden imzalama**; ücretli hesap (99$/yıl) ile 1 yıl.
-- AltStore/SideStore otomatik yeniler ama kurulum zahmetli.
-- **Karar:** Android varsa oradan başla. iPhone ise bunu baştan kabul et.
 
 ---
 
@@ -237,12 +235,12 @@ ambiyans ekranı, veri/pil ayarları.
    **yeni build**. → Yedek yol C (PC köprüsü) bu yüzden değerli.
 2. **Faz 0 başarısızlığı (orta).** youtubei.js + Hermes imza çözme sorunu bilinen bir konu.
    Plan B (NewPipeExtractor native modül) hazır ama Kotlin iş yükü ekler.
-3. **iOS (yüksek, eğer iPhone'sa).** 7 günlük imza döngüsü.
-4. **Senkron veri kaybı (orta ama pahalı).** Geçmişte iki-instance yarışından veri kaybı yaşandı.
+3. **Senkron veri kaybı (orta ama pahalı).** Geçmişte iki-instance yarışından veri kaybı yaşandı.
    Senkron bunu **çok daha kolay** hale getirir. → Faz 3'te önce salt-okunur pull ile test, yedekle.
-5. **Pil/veri (düşük).** Prefetch agresifliği ayarlanabilir olmalı.
+4. **Pil/veri (düşük).** Prefetch agresifliği ayarlanabilir olmalı.
 
 ## 10. Bilerek yapılmayanlar
+- **iOS** — kullanıcının kararı (Android kullanıyor; iOS'un imza/mağaza yükü değmez).
 - Web sürümü (`docs/SYNC.md`'de var, şimdilik kapsam dışı).
 - Mağaza dağıtımı (ToS).
 - Masaüstünün ses mimarisini mobile uydurmak (ADTS zorunluluğu mobilde anlamsız).

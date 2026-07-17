@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import { Moon } from "lucide-react";
 import { usePlayerStore } from "../store/usePlayerStore";
+import { useT } from "../lib/i18n";
 
 const OPTIONS = [15, 30, 45, 60, 90];
 
 export default function SleepTimerButton() {
+  const t = useT();
   const sleepEndsAt = usePlayerStore((s) => s.sleepTimerEndsAt);
   const setSleepTimer = usePlayerStore((s) => s.setSleepTimer);
   const [open, setOpen] = useState(false);
@@ -35,7 +37,7 @@ export default function SleepTimerButton() {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((o) => !o)}
-        title="Uyku zamanlayıcı"
+        title={t("sleep.title")}
         className={`flex items-center gap-1 ${
           active ? "text-accent" : "text-muted hover:text-text"
         }`}
@@ -54,8 +56,8 @@ export default function SleepTimerButton() {
               }}
               className="flex w-full items-center justify-between rounded px-2.5 py-1.5 text-left text-sm text-muted hover:bg-surface-3"
             >
-              <span>{remainingMin} dk kaldı</span>
-              <span className="text-down">İptal</span>
+              <span>{t("sleep.remaining", { n: remainingMin })}</span>
+              <span className="text-down">{t("common.cancel")}</span>
             </button>
           )}
           {active && <div className="my-1 h-px bg-border" />}
@@ -68,7 +70,7 @@ export default function SleepTimerButton() {
               }}
               className="block w-full rounded px-2.5 py-1.5 text-left text-sm text-muted hover:bg-surface-3 hover:text-text"
             >
-              {m} dakika
+              {t("sleep.minutes", { n: m })}
             </button>
           ))}
         </div>

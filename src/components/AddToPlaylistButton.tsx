@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { ListPlus, Plus, ListMusic } from "lucide-react";
 import type { Track } from "../types";
 import { usePlaylistStore } from "../store/usePlaylistStore";
+import { useT } from "../lib/i18n";
 
 // Şarkıyı bir çalma listesine ekleyen küçük açılır menü.
 export default function AddToPlaylistButton({
@@ -13,6 +14,7 @@ export default function AddToPlaylistButton({
   always?: boolean;
   openUp?: boolean;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const playlists = usePlaylistStore((s) => s.playlists);
@@ -45,7 +47,7 @@ export default function AddToPlaylistButton({
           e.stopPropagation();
           setOpen((o) => !o);
         }}
-        title="Çalma listesine ekle"
+        title={t("addTo.title")}
         className={`grid h-7 w-7 place-items-center transition-colors hover:text-text ${
           open
             ? "text-text"
@@ -69,7 +71,7 @@ export default function AddToPlaylistButton({
             className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm text-text hover:bg-surface-3"
           >
             <Plus size={15} className="text-accent" />
-            Yeni liste oluştur
+            {t("addTo.newList")}
           </button>
 
           {playlists.length > 0 && <div className="my-1 h-px bg-border" />}

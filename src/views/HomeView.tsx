@@ -8,22 +8,24 @@ import { getPlaylistTracks } from "../lib/playlists";
 import { usePlayerStore } from "../store/usePlayerStore";
 import { usePlaylistStore } from "../store/usePlaylistStore";
 import { useAppStore } from "../store/useAppStore";
-
-const DAYS = ["Pazar", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"];
+import { useT, dayNameOf } from "../lib/i18n";
+import { useSettingsStore } from "../store/useSettingsStore";
 
 // "Şu An" — açılış ekranı. O anki bağlama göre son çalınanlar + çalma
 // listelerine hızlı erişim + tek tıkla Resonance Radyosu (M4).
 export default function HomeView() {
+  const t = useT();
+  const lang = useSettingsStore((s) => s.language);
   const now = new Date();
   const hour = now.getHours();
   const greeting =
     hour < 6
-      ? "İyi geceler"
+      ? t("home.goodNight")
       : hour < 12
-      ? "Günaydın"
+      ? t("home.goodMorning")
       : hour < 18
-      ? "İyi günler"
-      : "İyi akşamlar";
+      ? t("home.goodDay")
+      : t("home.goodEvening");
 
   const playlists = usePlaylistStore((s) => s.playlists);
   const navigate = useAppStore((s) => s.navigate);
@@ -66,7 +68,7 @@ export default function HomeView() {
     <div className="flex h-full flex-col overflow-y-auto">
       <ViewHeader
         title={greeting}
-        subtitle="Gün ve saate göre, kaldığın yerden devam et."
+        subtitle={t("home.subtitle")}
       />
 
       <div className="px-8 pb-10">
@@ -74,13 +76,12 @@ export default function HomeView() {
         <div className="flex items-center gap-3 rounded-lg border border-border bg-surface/60 px-5 py-3.5">
           <Clock size={18} className="shrink-0 text-accent" />
           <p className="text-sm text-muted">
-            Şu an{" "}
-            <span className="tnum text-text">
-              {String(hour).padStart(2, "0")}:
-              {String(now.getMinutes()).padStart(2, "0")}
-            </span>{" "}
-            · {DAYS[now.getDay()]}. Oy verdikçe öneriler bu bağlama göre
-            keskinleşir.
+            {t("home.contextHint", {
+              time: `${String(hour).padStart(2, "0")}:${String(
+                now.getMinutes()
+              ).padStart(2, "0")}`,
+              day: dayNameOf(lang, now.getDay()),
+            })}
           </p>
         </div>
 
@@ -95,10 +96,10 @@ export default function HomeView() {
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-base font-semibold text-text">
-              {discovering ? "Keşif hazırlanıyor…" : "Resonance Keşfi"}
+              {discovering ? t("home.discoveryPreparing") : t("home.discoveryTitle")}
             </div>
             <div className="text-sm text-muted">
-              Zevkini öğrenen algoritma, sana göre yeni şarkılar çalsın — sonsuz keşif.
+              {t("home.discoveryDesc")}
             </div>
           </div>
           <Radio
@@ -111,7 +112,7 @@ export default function HomeView() {
         {recent.length > 0 && (
           <section className="mt-8">
             <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-faint">
-              <History size={13} /> Son çalınanlar
+              <History size={13} /> {t("home.recent")}
             </div>
             <div>
               {recent.map((t, i) => (
@@ -133,7 +134,7 @@ export default function HomeView() {
         {playlists.length > 0 && (
           <section className="mt-8">
             <div className="mb-3 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-faint">
-              <ListMusic size={13} /> Çalma listelerin
+              <ListMusic size={13} /> {t("home.yourPlaylists")}
             </div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {playlists.map((p) => (
@@ -150,7 +151,7 @@ export default function HomeView() {
                       {p.name}
                     </div>
                     <div className="text-xs text-muted">
-                      {p.trackCount} şarkı
+                      {t("playlist.trackCount", { count: p.trackCount ?? 0 })}
                     </div>
                   </div>
                   <button
@@ -158,7 +159,7 @@ export default function HomeView() {
                       e.stopPropagation();
                       if (loadingRadio !== p.id) radioFrom(p);
                     }}
-                    title="Bu listeden akıllı karışık başlat (öneriler serpiştirilir)"
+                    title={t("home.smartShuffleHint")}
                     className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-muted opacity-0 transition-all hover:bg-accent hover:text-bg group-hover:opacity-100"
                   >
                     <Radio
@@ -178,7 +179,7 @@ export default function HomeView() {
             onClick={() => navigate("search")}
             className="mt-8 flex items-center gap-2 text-sm text-muted transition-colors hover:text-text"
           >
-            <Play size={14} /> Yeni bir şey keşfet → Ara
+            <Play size={14} /> {t("home.discoverSomething")}
           </button>
         )}
 
@@ -187,15 +188,13 @@ export default function HomeView() {
           <div className="mt-10 flex flex-col items-center justify-center gap-3 py-16 text-faint">
             <Sparkles size={40} strokeWidth={1.5} />
             <p className="max-w-md text-center text-sm leading-relaxed">
-              Henüz veri yok. Bir şarkı arayıp çalmaya, çalma listeleri
-              oluşturup oy vermeye başla — algoritma hangi gün ve saatte neyi
-              sevdiğini öğrenip burayı sana göre dolduracak.
+              {t("home.emptyState")}
             </p>
             <button
               onClick={() => navigate("search")}
               className="mt-2 flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-medium text-bg"
             >
-              <Play size={15} /> Aramaya başla
+              <Play size={15} /> {t("home.startSearching")}
             </button>
           </div>
         )}

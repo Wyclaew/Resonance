@@ -2,6 +2,7 @@ import { Play, Pause, Music2, Loader2, Download, CircleCheck, X } from "lucide-r
 import type { Track } from "../types";
 import { formatMs } from "../lib/format";
 import { useLibraryStore } from "../store/useLibraryStore";
+import { useT } from "../lib/i18n";
 import AddToPlaylistButton from "./AddToPlaylistButton";
 
 interface TrackRowProps {
@@ -40,6 +41,7 @@ export default function TrackRow({
   onDragEnd,
   trailing,
 }: TrackRowProps) {
+  const t = useT();
   const downloaded = useLibraryStore((s) => s.downloadedIds.has(track.id));
   const downloading = useLibraryStore((s) => s.downloadingIds.has(track.id));
   const download = useLibraryStore((s) => s.download);
@@ -68,7 +70,7 @@ export default function TrackRow({
       <button
         onClick={onPlay}
         className="grid h-8 w-8 place-items-center text-muted"
-        title="Oynat"
+        title={t("player.play")}
       >
         {isLoading && isCurrent ? (
           <Loader2 size={15} className="animate-spin text-accent" />
@@ -121,10 +123,10 @@ export default function TrackRow({
           onClick={handleDownloadClick}
           title={
             downloading
-              ? "İndiriliyor…"
+              ? t("player.downloading")
               : downloaded
-              ? "İndirildi — kaldırmak için tıkla"
-              : "İndir"
+              ? t("player.downloadedClick")
+              : t("player.download")
           }
           className={`grid h-7 w-7 place-items-center transition-colors ${
             downloaded
@@ -148,7 +150,7 @@ export default function TrackRow({
               e.stopPropagation();
               onRemove();
             }}
-            title="Listeden çıkar"
+            title={t("playlist.removeFromList")}
             className="grid h-7 w-7 place-items-center text-faint opacity-0 transition-colors hover:text-down group-hover:opacity-100"
           >
             <X size={15} />

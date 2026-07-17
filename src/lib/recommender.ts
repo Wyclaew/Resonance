@@ -3,6 +3,7 @@ import type { Track } from "../types";
 import { getDb, isTauri } from "./db";
 import { decayWeight } from "./karma";
 import { useSettingsStore } from "../store/useSettingsStore";
+import { t, dayNameOf } from "./i18n";
 
 // Resonance öneri motoru (M4).
 // "Hangi gün/saat hangi şarkıya oy verdin" sinyalinden sanatçı yakınlığı
@@ -156,7 +157,15 @@ export function songCore(title: string, artist: string): string {
   return [...new Set(words)].sort().join(" ");
 }
 
-// O anki bağlama (saat/gün) yakınlık ağırlığı.
+// Zaman-bağlam ağırlığı: "hangi gün, hangi saat neyi seviyorsun".
+//
+// TABAN (CONTEXT_FLOOR) neden var: eskiden saf çarpımdı (hourW*dowW). 12 saat
+// uzaktaki bir oy exp(-12/3)=0.018 ile neredeyse SIFIRLANIYORDU → sabah 3'te
+// uygulamayı açınca öğlen verilmiş tüm oylar yok sayılıp yakınlık havuzu
+// boşalıyor, öneri kalitesi çöküyordu. Doğrusu: genel beğeni HER ZAMAN sayılsın
+// (taban), o ana denk gelen beğeni ise ÖNE ÇIKSIN (taban üstü çarpan).
+//   → skor = 0.25 (genel zevkin) + 0.75 (şu anki bağlama uyum)
+const CONTEXT_FLOOR = 0.25;
 function contextWeight(
   voteHour: number,
   voteDow: number,
@@ -168,10 +177,25 @@ function contextWeight(
   const hourW = Math.exp(-circDh / 3); // ~3 saat içinde güçlü
   const dowW =
     voteDow === curDow ? 1 : isWeekend(voteDow) === isWeekend(curDow) ? 0.6 : 0.35;
+  return CONTEXT_FLOOR + (1 - CONTEXT_FLOOR) * hourW * dowW;
+}
+
+// SAF bağlam uyumu (tabansız, 0..1): "bu parça TAM ŞU ANA mı ait?".
+// Favori dönüşünde kullanılır — orada taban İSTEMEYİZ, çünkü amaç yalnızca
+// şu anki gün/saat moduna uyan favorileri geri getirmek.
+function contextMatch(
+  hour: number,
+  dow: number,
+  curHour: number,
+  curDow: number
+): number {
+  const dh = Math.abs(hour - curHour);
+  const circDh = Math.min(dh, 24 - dh);
+  const hourW = Math.exp(-circDh / 3);
+  const dowW = dow === curDow ? 1 : isWeekend(dow) === isWeekend(curDow) ? 0.6 : 0.35;
   return hourW * dowW;
 }
 
-const dayName = ["Pazar", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"];
 
 function toTrack(r: CandidateRow): Track {
   return {
@@ -241,14 +265,28 @@ async function computeRecommendations(
   const d = new Date();
   const curHour = d.getHours();
   const curDow = d.getDay();
+  const lang = useSettingsStore.getState().language;
 
-  // 1) Oy sinyalinden bağlam-ağırlıklı sanatçı yakınlığı.
+  // --- SİNYAL KATMANLARI ---
+  // İki ayrı harita, BİLEREK farklı besleniyor (bu ayrım kritik):
+  //   • artistAffinity = "KİMİ seviyorum" → hangi radyoları açacağımızı seçer
+  //     → o tarzda YENİ şarkılar getirir. Playlist üyeliği burayı besler.
+  //   • trackKarma = "HANGİ PARÇAYI seviyorum" → yalnız favori dönüşünde kullanılır.
+  //     Playlist üyeliği burayı BESLEMEZ — yoksa listendeki her şarkı "favori"
+  //     sayılıp Keşfet kuyruğunu kendi şarkıların doldururdu (kullanıcı bunu
+  //     açıkça istemedi: "kendi playlistimdeki aynı şarkılar olacaksa olmasın").
+  const artistAffinity = new Map<string, number>();
+  const trackKarma = new Map<string, number>();
+  // Favori dönüşü için: her parçanın ŞU ANKİ gün/saate en iyi uyumu (0..1).
+  const trackContext = new Map<string, number>();
+  const bumpContext = (id: string, m: number) =>
+    trackContext.set(id, Math.max(trackContext.get(id) ?? 0, m));
+
+  // 1) Oy sinyali — en güçlü, açık beğeni.
   const votes = await db.select<VoteRow[]>(
     `SELECT v.track_id, v.value, v.created_at, v.hour, v.dow, t.artist
      FROM votes v JOIN tracks t ON t.id = v.track_id`
   );
-  const artistAffinity = new Map<string, number>();
-  const trackKarma = new Map<string, number>();
   for (const v of votes) {
     const w =
       v.value *
@@ -256,6 +294,36 @@ async function computeRecommendations(
       contextWeight(v.hour, v.dow, curHour, curDow);
     artistAffinity.set(v.artist, (artistAffinity.get(v.artist) ?? 0) + w);
     trackKarma.set(v.track_id, (trackKarma.get(v.track_id) ?? 0) + w);
+    if (v.value > 0) bumpContext(v.track_id, contextMatch(v.hour, v.dow, curHour, curDow));
+  }
+
+  // 1b) ⭐ PLAYLIST ÜYELİĞİ — "listeme ekledim" = beğeni beyanı.
+  // Bu sinyal olmadan algoritma zevkinin YALNIZ oy verdiğin kısmını görüyordu
+  // (ölçüm: 8 sanatçı). Playlist'lerde 183 sanatçı var → havuz 23 KATINA çıkar.
+  // "Hep aynı tarzı öneriyor" sorununun kök sebebi buydu.
+  //
+  // Ağırlık oydan düşük (0.6): listeye eklemek beğenidir ama upvote kadar
+  // taze/kuvvetli değil. Yarı ömür 4× uzun: liste tercihi KALICIDIR — 3 ay önce
+  // eklediğin sanatçıyı hâlâ seviyorsun (oy ise anlık moda daha duyarlı).
+  // Bağlam çarpanı YOK: liste üyeliği "kimi sevdiğini" söyler, "ne zaman"ı değil;
+  // zaman bilgisi oy ve dinleme geçmişinden gelir.
+  const PLAYLIST_SIGNAL = 0.6;
+  try {
+    const plRows = await db.select<
+      { artist: string; added_at: number }[]
+    >(
+      `SELECT t.artist, pt.added_at
+       FROM playlist_tracks pt JOIN tracks t ON t.id = pt.track_id
+       WHERE t.artist <> ''`
+    );
+    for (const p of plRows) {
+      const w =
+        PLAYLIST_SIGNAL *
+        decayWeight(now - p.added_at, opts.halfLifeDays * 4);
+      artistAffinity.set(p.artist, (artistAffinity.get(p.artist) ?? 0) + w);
+    }
+  } catch {
+    /* yoksay */
   }
 
   // Dinleme davranışı sinyali: oy vermesen bile TAMAMLADIĞIN şarkılar beğeni,
@@ -303,23 +371,34 @@ async function computeRecommendations(
         contextWeight(p.hour, p.dow, curHour, curDow);
       artistAffinity.set(p.artist, (artistAffinity.get(p.artist) ?? 0) + w);
       trackKarma.set(p.track_id, (trackKarma.get(p.track_id) ?? 0) + w);
+      // Yalnız GERÇEKTEN dinlenmişler favori dönüşüne aday olabilir (atlananlar değil).
+      if (ratio > 0.7) {
+        bumpContext(p.track_id, contextMatch(p.hour, p.dow, curHour, curDow));
+      }
     }
   } catch {
     /* play_history yoksa yoksay */
   }
 
   const recs: Recommendation[] = [];
+  // SERT dışlama: bu oturumda/kuyrukta zaten var → asla tekrar.
   const taken = new Set<string>(opts.excludeIds);
 
-  // Kalıcı geçmiş: son 45 günde önerilmiş parçaları dışla (kapat-aç sonrası
-  // aynı öneriler tekrar gelmesin). Havuz tükenirse 45 günden eskiler tekrar açılır.
+  // Kalıcı geçmiş: son 45 günde önerilmiş parçalar (kapat-aç sonrası aynı
+  // öneriler tekrar gelmesin).
+  //
+  // ⚠️ `taken`'a KARIŞTIRMA — ayrı küme: bu engel yalnız YENİ KEŞİFLERE uygulanır.
+  // Favoriler (upvote'lu / tamamlanmış) bu engelden MUAFTIR; kullanıcının kararı:
+  // "sevdiklerim dönsün, keşifler dönmesin". Sevdiğin şarkı 45 gün boyunca
+  // yasaklanırsa "geçen hafta beğendiğim şarkı bu saatte yine gelsin" olamaz.
+  const recentlyRecommended = new Set<string>();
   try {
     const RECENT_MS = 45 * 24 * 60 * 60 * 1000;
     const histRows = await db.select<{ track_id: string }[]>(
       `SELECT DISTINCT track_id FROM recommendation_history WHERE recommended_at >= $1`,
       [now - RECENT_MS]
     );
-    for (const h of histRows) taken.add(h.track_id);
+    for (const h of histRows) recentlyRecommended.add(h.track_id);
   } catch {
     /* tablo henüz yoksa yoksay */
   }
@@ -342,11 +421,21 @@ async function computeRecommendations(
     takenCores.add(songCore(r.title, r.artist));
   }
 
-  // 2) Kütüphane adayları — yalnızca BAŞKA bir çalma listesinde bulunan
-  // parçalar (sadece aranıp çalınmış, hiçbir listede olmayan şarkılar aday
-  // OLMASIN). Aday, en az bir playlist_tracks kaydında playlist_id != $1 olan
-  // bir listede yer almalı; mevcut listedekiler ise dışlanır.
+  // 2) ⭐ FAVORİ DÖNÜŞÜ — "geçen hafta bu saatte sevdiğim şarkı yine gelsin".
+  //
+  // Kullanıcının isteği: Instagram Reels gibi, hangi GÜN/SAAT ne sevdiğimi öğren
+  // ve o bağlam tekrarlayınca o şarkıyı geri getir.
+  //
+  // ⚠️ İKİ SIKI ŞART (yoksa Keşfet kuyruğunu kullanıcının kendi şarkıları doldurur —
+  // açıkça istemediği şey: "kendi playlistimdeki aynı şarkılar olacaksa olmasın"):
+  //   1. trackKarma > 0 → parçaya AÇIKÇA oy verilmiş ya da >%70 dinlenmiş olmalı.
+  //      Sadece listede olmak YETMEZ (playlist üyeliği trackKarma'yı beslemiyor).
+  //   2. contextMatch yüksek → parça ŞU ANKİ gün/saat moduna ait olmalı.
+  // Ayrıca kuyruğun en fazla ~%15'i (20'de 3) → Keşfet keşif olarak kalır.
+  const FAVORITE_SHARE = 0.15;
+  const FAVORITE_MIN_CONTEXT = 0.35; // bu saate gerçekten ait mi?
   if (opts.useLibrary) {
+    const favLimit = Math.max(1, Math.round(opts.limit * FAVORITE_SHARE));
     const cands = await db.select<CandidateRow[]>(
       `SELECT DISTINCT t.id, t.source, t.source_id, t.title, t.artist, t.album,
               t.duration_ms, t.thumbnail
@@ -357,35 +446,36 @@ async function computeRecommendations(
     );
     const scored = cands
       .map((c) => {
-        const aff = artistAffinity.get(c.artist) ?? 0;
         const tk = trackKarma.get(c.id) ?? 0;
-        return { c, score: tk * 1.5 + aff };
+        const ctx = trackContext.get(c.id) ?? 0;
+        // Sıralama zaman uyumuna göre: "şu ana ait" favoriler önce.
+        return { c, tk, ctx, score: tk * ctx };
       })
-      .filter((x) => x.score > 0.05)
+      .filter((x) => x.tk > 0 && x.ctx >= FAVORITE_MIN_CONTEXT)
       .sort((a, b) => b.score - a.score);
 
-    // Çeşitlilik: aynı sanatçıdan en fazla 2 kütüphane önerisi (YouTube tarafında
-    // seed başına zaten 2 sınırı var) → tek sanatçının önerileri tekelleştirmesin.
-    const libArtistCount = new Map<string, number>();
+    // Çeşitlilik: aynı sanatçıdan en fazla 1 favori (kontenjan zaten 3).
+    const favArtists = new Set<string>();
+    let favAdded = 0;
     for (const { c } of scored) {
+      if (favAdded >= favLimit) break;
+      // NOT: `recentlyRecommended` KASITLI olarak kontrol edilmiyor — favoriler
+      // 45-gün engelinden muaf (yukarıdaki nota bak).
       if (taken.has(c.id)) continue;
       if (playlistKeys.has(normKey(c.title, c.artist))) continue;
       if (takenCores.has(songCore(c.title, c.artist))) continue; // versiyon kopyası
       if (!isLikelySong(toTrack(c))) continue; // uzun içerik/mix ele
-      if ((libArtistCount.get(c.artist) ?? 0) >= 2) continue;
-      libArtistCount.set(c.artist, (libArtistCount.get(c.artist) ?? 0) + 1);
+      const a = c.artist.toLowerCase();
+      if (favArtists.has(a)) continue;
+      favArtists.add(a);
       takenCores.add(songCore(c.title, c.artist));
-      const aff = artistAffinity.get(c.artist) ?? 0;
       recs.push({
         ...toTrack(c),
         recSource: "library",
-        reason:
-          aff > 0
-            ? `${dayName[curDow]} bu saatlerde ${c.artist} dinliyorsun`
-            : `Kütüphanende sevdiğin bir parça`,
+        reason: t("rec.favorite", { day: dayNameOf(lang, curDow) }),
       });
       taken.add(c.id);
-      if (recs.length >= opts.limit) return recs;
+      favAdded++;
     }
   }
 
@@ -425,13 +515,24 @@ async function computeRecommendations(
       const prev = bestPerArtist.get(key);
       if (!prev || score > prev.score) bestPerArtist.set(key, { t, score });
     }
-    // En güçlü 12 SANATÇI → karıştır → her çağrı farklı radyolar (tekrar olmaz).
-    // opts.excludeSeedArtists: "reroll" ile aynı tarzın tekrar gelmesini engeller.
+    // ⭐ AĞIRLIKLI RASTGELE ÖRNEKLEME (katı "en iyi 12" DEĞİL).
+    //
+    // Neden: playlist sinyali havuzu 8 → 184 sanatçıya çıkardı, ama katı
+    // sıralamada oy verilmiş 8 sanatçı her zaman ilk 12'yi kapardı → havuz
+    // büyümesine rağmen yine aynı tarz gelirdi. Ağırlıklı örneklemede her
+    // sanatçının seçilme ŞANSI yakınlığıyla orantılı: çok sevdiklerin sık,
+    // listendeki diğerleri seyrek ama DÜZENLİ olarak gelir (keşif/sömürü dengesi).
+    //
+    // Gumbel/exponential hilesi: key = -ln(rastgele)/ağırlık → küçükten sırala
+    // = ağırlıklı, tekrarsız örnekleme.
     const seedTracks = [...bestPerArtist.values()]
       .filter((x) => !opts.excludeSeedArtists?.has(x.t.artist.toLowerCase()))
-      .sort((a, b) => b.score - a.score)
+      .map((x) => ({
+        t: x.t,
+        key: -Math.log(Math.random() || 1e-9) / Math.max(0.02, x.score),
+      }))
+      .sort((a, b) => a.key - b.key)
       .slice(0, 12)
-      .sort(() => Math.random() - 0.5)
       .map((x) => x.t);
 
     // Zaten sevilen sanatçılar — yeni sanatçı keşiflerini işaretlemek için.
@@ -479,6 +580,8 @@ async function computeRecommendations(
         while (cursors[ri] < results.length) {
           const r = results[cursors[ri]++];
           if (taken.has(r.id)) continue;
+          // Yeni keşifler 45-gün tekrar engeline TABİ (favoriler değil, bkz. yukarı).
+          if (recentlyRecommended.has(r.id)) continue;
           if (r.id === seed.id) continue; // seed'in kendisi
           if (playlistKeys.has(normKey(r.title, r.artist))) continue;
           if (takenCores.has(songCore(r.title, r.artist))) continue; // versiyon kopyası
@@ -492,8 +595,11 @@ async function computeRecommendations(
             recSource: "youtube",
             seedArtist: seed.artist,
             reason: newArtist
-              ? `${seed.artist} tarzında yeni keşif: ${r.artist}`
-              : `${dayName[curDow]} bu saatlerde ${seed.artist} seviyorsun`,
+              ? t("rec.newDiscovery", { seed: seed.artist, artist: r.artist })
+              : t("rec.contextual", {
+                  day: dayNameOf(lang, curDow),
+                  seed: seed.artist,
+                }),
           });
           taken.add(r.id);
           takenCores.add(songCore(r.title, r.artist));
@@ -511,6 +617,7 @@ async function computeRecommendations(
         taken,
         takenCores,
         playlistKeys,
+        recentlyRecommended,
       });
     }
   }
@@ -527,9 +634,10 @@ async function addSearchFallback(
     taken: Set<string>;
     takenCores: Set<string>;
     playlistKeys: Set<string>;
+    recentlyRecommended: Set<string>;
   }
 ): Promise<void> {
-  const { taken, takenCores, playlistKeys } = ctx;
+  const { taken, takenCores, playlistKeys, recentlyRecommended } = ctx;
 
   // Seed: listenin kendi sanatçıları (sinyal yok, elde başka bir şey yok).
   const plArtists = await db.select<{ artist: string; c: number }[]>(
@@ -577,13 +685,14 @@ async function addSearchFallback(
     for (const r of results) {
       if (recs.length >= opts.limit) break;
       if (taken.has(r.id) || added >= perSeed) continue;
+      if (recentlyRecommended.has(r.id)) continue;
       if (playlistKeys.has(normKey(r.title, r.artist))) continue;
       if (takenCores.has(songCore(r.title, r.artist))) continue;
       if (!isLikelySong(r)) continue;
       recs.push({
         ...r,
         recSource: "youtube",
-        reason: `${seed} listendeki sanatçılardan biri`,
+        reason: t("rec.fromPlaylist", { seed }),
       });
       taken.add(r.id);
       takenCores.add(songCore(r.title, r.artist));

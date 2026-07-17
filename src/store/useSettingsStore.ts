@@ -2,6 +2,9 @@ import { create } from "zustand";
 import { isTauri } from "../lib/db";
 import { loadSettings, setSetting } from "../lib/settings";
 import { DEFAULT_HALF_LIFE_DAYS } from "../lib/karma";
+import { detectLang, type Lang } from "../lib/i18n";
+
+export type Theme = "dark" | "light" | "system";
 
 // Uygulama ayarları (kalıcı). M6'da genişleyecek; şimdilik öneri + karma.
 export interface Settings {
@@ -19,6 +22,9 @@ export interface Settings {
   prefetchEnabled: boolean; // sıradakini önceden indir
   screensaverSeconds: number; // kaç sn etkileşimsizlikte ambiyans ekranı (0=kapalı)
   resumeState: string; // son çalan şarkı + pozisyon (JSON) — kaldığın yerden devam
+  language: Lang; // arayüz dili ("tr" | "en")
+  theme: Theme; // "dark" | "light" | "system"
+  onboardingDone: boolean; // ilk açılış rehberi gösterildi mi
 }
 
 const DEFAULTS: Settings = {
@@ -36,6 +42,9 @@ const DEFAULTS: Settings = {
   prefetchEnabled: true,
   screensaverSeconds: 90,
   resumeState: "",
+  language: detectLang(),
+  theme: "dark",
+  onboardingDone: false,
 };
 
 // Ayar alanı ↔ DB anahtarı eşlemesi.
@@ -54,6 +63,9 @@ const KEYS: Record<keyof Settings, string> = {
   prefetchEnabled: "playback.prefetch",
   screensaverSeconds: "appearance.screensaverSeconds",
   resumeState: "playback.resumeState",
+  language: "appearance.language",
+  theme: "appearance.theme",
+  onboardingDone: "app.onboardingDone",
 };
 
 interface SettingsState extends Settings {

@@ -10,6 +10,7 @@ import { useSettingsStore } from "../store/useSettingsStore";
 import { importTracks } from "../lib/playlists";
 import { isShareCode, decodePlaylist } from "../lib/share";
 import { isTauri } from "../lib/db";
+import { useT, type TrKey } from "../lib/i18n";
 
 type Status = "idle" | "loading" | "importing" | "done";
 type Src = "spotify" | "ytmusic" | "youtube" | "code" | null;
@@ -26,14 +27,16 @@ function detectSource(text: string): Src {
   return null;
 }
 
-const SRC_LABEL: Record<Exclude<Src, null>, string> = {
-  spotify: "Spotify çalma listesi",
-  ytmusic: "YouTube Music çalma listesi",
-  youtube: "YouTube çalma listesi",
-  code: "Resonance paylaşım kodu",
+// Çeviri ANAHTARI (metin değil) — dil değişince kaynak adı da değişsin.
+const SRC_LABEL: Record<Exclude<Src, null>, TrKey> = {
+  spotify: "import.srcSpotify",
+  ytmusic: "import.srcYtMusic",
+  youtube: "import.srcYouTube",
+  code: "import.srcCode",
 };
 
 export default function ImportView() {
+  const t = useT();
   const [url, setUrl] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [progress, setProgress] = useState({ done: 0, total: 0 });
@@ -62,7 +65,7 @@ export default function ImportView() {
     setProgress({ done: 0, total: tracks.length });
     const p = await create(name);
     if (!p) {
-      setError("Liste oluşturulamadı.");
+      setError(t("import.createFailed"));
       setStatus("idle");
       return;
     }
@@ -77,12 +80,12 @@ export default function ImportView() {
     setResult(null);
     const text = url.trim();
     if (!isTauri()) {
-      setError("İçe aktarma yalnızca uygulama içinde çalışır.");
+      setError(t("import.tauriOnly"));
       return;
     }
     if (detected === "code") {
       const decoded = decodePlaylist(text);
-      if (!decoded) return setError("Paylaşım kodu çözülemedi (bozuk olabilir).");
+      if (!decoded) return setError(t("import.codeFailed"));
       await runImport(decoded.name, decoded.tracks);
       return;
     }
@@ -132,7 +135,7 @@ export default function ImportView() {
       }
       return;
     }
-    setError("Geçerli bir çalma listesi bağlantısı veya Resonance kodu değil.");
+    setError(t("import.invalidLong"));
   }
 
   const pct =
@@ -141,8 +144,8 @@ export default function ImportView() {
   return (
     <div className="flex h-full flex-col overflow-y-auto">
       <ViewHeader
-        title="İçe Aktar"
-        subtitle="Spotify / YouTube Music çalma listesi linkini ya da Resonance paylaşım kodunu yapıştır."
+        title={t("import.title")}
+        subtitle={t("import.subtitle")}
       />
 
       <div className="mx-auto w-full max-w-2xl px-8">
@@ -165,16 +168,18 @@ export default function ImportView() {
             ) : (
               <Download size={15} />
             )}
-            İçe Aktar
+            {t("import.button")}
           </button>
         </div>
 
         {url && detected && status === "idle" && (
-          <p className="mt-2 px-1 text-xs text-muted">Algılandı: {SRC_LABEL[detected]}</p>
+          <p className="mt-2 px-1 text-xs text-muted">
+            {t("import.detected", { source: t(SRC_LABEL[detected]) })}
+          </p>
         )}
         {url && !detected && status === "idle" && (
           <p className="mt-2 px-1 text-xs text-faint">
-            Geçerli bir Spotify/YouTube Music linki veya Resonance kodu değil.
+            {t("import.invalid")}
           </p>
         )}
 
@@ -182,7 +187,7 @@ export default function ImportView() {
         {status === "loading" && (
           <div className="mt-4 flex items-center gap-2 text-sm text-muted">
             <Loader2 size={15} className="animate-spin text-accent" />
-            Çalma listesi okunuyor…
+            {t("import.reading")}
           </div>
         )}
         {status === "importing" && (
@@ -190,8 +195,8 @@ export default function ImportView() {
             <div className="mb-1.5 flex items-center justify-between text-xs text-muted">
               <span>
                 {phase === "matching"
-                  ? "YouTube'da eşleştiriliyor…"
-                  : "Şarkılar ekleniyor…"}
+                  ? t("import.matching")
+                  : t("import.adding")}
               </span>
               <span className="tnum">
                 {progress.done} / {progress.total}
@@ -210,14 +215,14 @@ export default function ImportView() {
             <div className="flex items-center gap-2 text-sm text-up">
               <CheckCircle2 size={16} />
               <span>
-                {result.count} şarkı "{result.name}" listesine eklendi.
+                {t("import.done", { count: result.count, name: result.name })}
               </span>
             </div>
             <button
               onClick={() => navigate("playlist", result.id)}
               className="shrink-0 rounded-md bg-surface-2 px-3 py-1.5 text-sm font-medium text-text hover:bg-surface-3"
             >
-              Listeyi aç
+              {t("import.openList")}
             </button>
           </div>
         )}
@@ -225,10 +230,7 @@ export default function ImportView() {
           <div className="mt-2 flex items-start gap-2 rounded-lg border border-accent/30 bg-accent/10 px-4 py-3 text-sm text-accent">
             <AlertCircle size={16} className="mt-0.5 shrink-0" />
             <span>
-              Bu listede {result.total} şarkı var ama {result.count} tanesi
-              alınabildi. YouTube giriş yapılmadan en fazla ~100 şarkı veriyor
-              (ya da liste özel). Tümünü almak için Ayarlar → Entegrasyonlar'dan
-              YouTube tarayıcını seç, sonra tekrar dene.
+              {t("import.partial", { total: result.total, count: result.count })}
             </span>
           </div>
         )}
@@ -240,23 +242,13 @@ export default function ImportView() {
         )}
 
         <div className="mt-6 rounded-lg border border-border bg-surface/50 p-5 text-sm leading-relaxed text-muted">
-          <p className="mb-2 font-medium text-text">Nasıl çalışır?</p>
-          <p>
-            YouTube / YouTube Music çalma listeleri anahtarsız, doğrudan içe
-            aktarılır. Paylaşım kodu (RSNC1:…) ile bir arkadaşının listesini
-            uygulamana kopyalayabilirsin. Ses YouTube'dan çalar.
-          </p>
+          <p className="mb-2 font-medium text-text">{t("import.howTitle")}</p>
+          <p>{t("import.howYt")}</p>
           <p className="mt-2">
-            <b className="text-text">Spotify de anahtarsız</b> — herkese açık bir
-            listenin linkini yapıştırman yeterli. Spotify'ın sesi alınamadığı için
-            şarkılar YouTube'da eşleştirilip oradan çalar.
+            <b className="text-text">{t("import.howSpotifyBold")}</b>
+            {t("import.howSpotify")}
           </p>
-          <p className="mt-2 text-faint">
-            Not: Anahtarsız yol bir listeden en fazla <b className="text-text">100
-            şarkı</b> okur. Daha uzun listelerin tamamı için Ayarlar →
-            Entegrasyonlar'dan tek seferlik ücretsiz Spotify anahtarı girebilirsin
-            (opsiyonel).
-          </p>
+          <p className="mt-2 text-faint">{t("import.howSpotifyNote")}</p>
         </div>
       </div>
     </div>

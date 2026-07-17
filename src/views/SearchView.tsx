@@ -7,6 +7,7 @@ import type { Track } from "../types";
 import { usePlayerStore } from "../store/usePlayerStore";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { isTauri } from "../lib/db";
+import { useT } from "../lib/i18n";
 
 const DEBOUNCE_MS = 150;
 const MIN_CHARS = 2;
@@ -25,6 +26,7 @@ function saveHistory(h: string[]) {
 }
 
 export default function SearchView() {
+  const t = useT();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Track[]>([]);
   const [loading, setLoading] = useState(false);
@@ -56,7 +58,7 @@ export default function SearchView() {
 
   async function runSearch(q: string, addToHistory = false) {
     if (!isTauri()) {
-      setError("Arama yalnızca uygulama içinde çalışır (web önizlemesi değil).");
+      setError(t("search.tauriOnly"));
       setSearched(true);
       return;
     }
@@ -102,8 +104,8 @@ export default function SearchView() {
   return (
     <div className="flex h-full flex-col">
       <ViewHeader
-        title="Ara"
-        subtitle="YouTube üzerinde şarkı, sanatçı veya albüm ara — yazdıkça gelir."
+        title={t("search.title")}
+        subtitle={t("search.hint")}
       />
 
       <div className="px-8">
@@ -125,7 +127,7 @@ export default function SearchView() {
                   setFocused(false);
                 }
               }}
-              placeholder="Ne dinlemek istersin?"
+              placeholder={t("search.placeholder")}
               className="flex-1 bg-transparent text-sm outline-none placeholder:text-faint"
             />
             {loading && (
@@ -137,7 +139,7 @@ export default function SearchView() {
           {showHistory && (
             <div className="absolute left-0 right-0 z-30 mt-1 overflow-hidden rounded-lg border border-border bg-surface-2 py-1 shadow-2xl">
               <div className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-faint">
-                Son aramalar
+                {t("search.recent")}
               </div>
               {history.map((h) => (
                 <button
@@ -206,7 +208,7 @@ export default function SearchView() {
         )}
 
         {!error && searched && results.length === 0 && !loading && (
-          <p className="py-24 text-center text-sm text-faint">Sonuç bulunamadı.</p>
+          <p className="py-24 text-center text-sm text-faint">{t("search.noResults")}</p>
         )}
 
         {results.map((t, i) => (

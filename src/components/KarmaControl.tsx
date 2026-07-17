@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useT } from "../lib/i18n";
 import { ArrowBigUp, ArrowBigDown } from "lucide-react";
 import { displayKarma, cooldownRemaining } from "../lib/karma";
 
@@ -10,6 +11,7 @@ interface Props {
 
 // Biriken karma oylaması: her up +1, down -1. Şarkı başına saatte 1 (cooldown).
 export default function KarmaControl({ karma, lastVoteAt, onVote }: Props) {
+  const t = useT();
   const [now, setNow] = useState(Date.now());
   const remaining = cooldownRemaining(lastVoteAt, now);
   const onCooldown = remaining > 0;
@@ -26,8 +28,8 @@ export default function KarmaControl({ karma, lastVoteAt, onVote }: Props) {
     display > 0 ? "text-up" : display < 0 ? "text-down" : "text-muted";
   const mins = Math.ceil(remaining / 60_000);
   const tip = onCooldown
-    ? `Şarkı başına saatte 1 oy — ${mins} dk sonra tekrar`
-    : "Bu listede bu şarkıyı oyla";
+    ? t("karma.cooldown", { mins })
+    : t("karma.voteHere");
 
   function vote(dir: 1 | -1, e: React.MouseEvent) {
     e.stopPropagation();

@@ -9,12 +9,14 @@ import {
   Loader2,
 } from "lucide-react";
 import { usePlayerStore, DISCOVERY_ID } from "../store/usePlayerStore";
+import { useT } from "../lib/i18n";
 import { useAppStore } from "../store/useAppStore";
 import { formatMs } from "../lib/format";
 
 // Sıra (Queue) paneli — çalan kuyruğu gör/yönet: tıkla→atla, sürükle-bırak
 // sırala, kuyruktan çıkar. Öneri serpiştirmeleri işaretlenir.
 export default function QueuePanel() {
+  const t = useT();
   const queue = usePlayerStore((s) => s.queue);
   const queueIndex = usePlayerStore((s) => s.queueIndex);
   const current = usePlayerStore((s) => s.current);
@@ -48,14 +50,14 @@ export default function QueuePanel() {
       <header className="flex items-center justify-between px-8 pb-3 pt-6">
         <div className="flex items-center gap-2">
           <ListMusic size={18} className="text-accent" />
-          <h2 className="text-lg font-semibold">Sıra</h2>
+          <h2 className="text-lg font-semibold">{t("queue.title")}</h2>
           <span className="text-sm text-faint">
-            {upcoming.length} sıradaki
+            {t("queue.upcomingCount", { count: upcoming.length })}
           </span>
           {/* Keşifte: sıranın hangi tarzlardan geldiğini göster. */}
           {inDiscovery && seedArtists.length > 0 && (
             <span className="hidden truncate text-sm text-faint sm:inline">
-              · {seedArtists.join(", ")} tarzı
+              · {t("queue.styleOf", { artists: seedArtists.join(", ") })}
             </span>
           )}
         </div>
@@ -65,7 +67,7 @@ export default function QueuePanel() {
             <button
               onClick={() => void rerollDiscovery()}
               disabled={discovering}
-              title="Bu tarzı beğenmedim — başka tarz getir"
+              title={t("queue.rerollHint")}
               className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-muted hover:bg-surface hover:text-text disabled:cursor-not-allowed disabled:opacity-40"
             >
               {discovering ? (
@@ -73,12 +75,12 @@ export default function QueuePanel() {
               ) : (
                 <Dice5 size={15} />
               )}
-              Başka tarz
+              {t("queue.reroll")}
             </button>
           )}
           <button
             onClick={toggleQueue}
-            title="Kapat"
+            title={t("common.close")}
             className="grid h-9 w-9 shrink-0 place-items-center rounded-md text-muted hover:bg-surface hover:text-text"
           >
             <X size={18} />
@@ -89,7 +91,7 @@ export default function QueuePanel() {
       <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-16 pt-2">
         {!current && (
           <p className="py-24 text-center text-sm text-faint">
-            Kuyruk boş. Bir şarkı veya çalma listesi çal.
+            {t("queue.empty")}
           </p>
         )}
 
@@ -97,7 +99,7 @@ export default function QueuePanel() {
         {current && (
           <>
             <div className="mb-1 px-2 text-[11px] font-semibold uppercase tracking-wider text-faint">
-              Şimdi çalıyor
+              {t("queue.nowPlaying")}
             </div>
             <div className="mb-4 flex items-center gap-3 rounded-md bg-surface-2 px-2 py-1.5">
               <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded bg-surface-3 text-faint">
@@ -125,10 +127,10 @@ export default function QueuePanel() {
                 }`}
               >
                 {status === "loading"
-                  ? "Yükleniyor"
+                  ? t("queue.loading")
                   : status === "playing"
-                  ? "Çalıyor"
-                  : "Duraklatıldı"}
+                  ? t("queue.playing")
+                  : t("queue.paused")}
               </span>
             </div>
           </>
@@ -137,12 +139,12 @@ export default function QueuePanel() {
         {/* Sıradakiler */}
         {upcoming.length > 0 && (
           <div className="mb-1 px-2 text-[11px] font-semibold uppercase tracking-wider text-faint">
-            Sıradakiler
+            {t("queue.upcoming")}
           </div>
         )}
         {current && upcoming.length === 0 && (
           <p className="px-2 py-6 text-sm text-faint">
-            Sırada başka şarkı yok.
+            {t("queue.noMore")}
           </p>
         )}
 
@@ -171,7 +173,7 @@ export default function QueuePanel() {
             />
             <button
               onClick={() => jumpTo(idx)}
-              title="Bu şarkıya atla"
+              title={t("queue.jumpTo")}
               className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded bg-surface-3 text-faint"
             >
               {item.thumbnail ? (
@@ -192,7 +194,7 @@ export default function QueuePanel() {
                   className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-accent"
                   title={item.recReason}
                 >
-                  <Sparkles size={10} /> Öneri
+                  <Sparkles size={10} /> {t("queue.pickBadge")}
                 </div>
               )}
               <div className="truncate text-sm text-text">{item.title}</div>
@@ -204,7 +206,7 @@ export default function QueuePanel() {
               </span>
               <button
                 onClick={() => removeFromQueue(item.uid)}
-                title="Sıradan çıkar"
+                title={t("queue.remove")}
                 className="grid h-7 w-7 place-items-center text-faint opacity-0 transition-colors hover:text-down group-hover:opacity-100"
               >
                 <X size={15} />

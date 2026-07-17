@@ -1,5 +1,6 @@
 import type { Playlist, PlaylistTrack, Track, Vote } from "../types";
 import { getDb } from "./db";
+import { t } from "./i18n";
 import { computeKarma, type VoteEvent } from "./karma";
 
 // Çalma listesi & şarkı ilişkisi için SQLite yardımcıları.
@@ -45,11 +46,11 @@ export async function createPlaylist(
   await db.execute(
     `INSERT INTO playlists (id, name, description, source, source_url, created_at)
      VALUES ($1, $2, $3, 'local', NULL, $4)`,
-    [id, name.trim() || "İsimsiz liste", description ?? null, now]
+    [id, name.trim() || t("playlist.untitled"), description ?? null, now]
   );
   return {
     id,
-    name: name.trim() || "İsimsiz liste",
+    name: name.trim() || t("playlist.untitled"),
     description,
     source: "local",
     createdAt: now,
@@ -60,7 +61,7 @@ export async function createPlaylist(
 export async function renamePlaylist(id: string, name: string): Promise<void> {
   const db = await getDb();
   await db.execute(`UPDATE playlists SET name = $1 WHERE id = $2`, [
-    name.trim() || "İsimsiz liste",
+    name.trim() || t("playlist.untitled"),
     id,
   ]);
 }

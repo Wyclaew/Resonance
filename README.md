@@ -1,15 +1,17 @@
 # Resonance
 
-Hafif, karma tabanlı kişisel müzik oynatıcı. **Mac & Windows** (mobil planlandı: `docs/MOBILE.md`).
+Hafif, karma tabanlı kişisel müzik oynatıcı. **Mac & Windows** (Android planlandı: `docs/MOBILE.md`).
 
 - **Hafif:** Tauri 2 (Rust + sistem webview). Electron değil.
 - **Kaynak:** YouTube (yt-dlp). Spotify / YouTube Music çalma listeleri link ile içe aktarılır
   (Spotify için **anahtar gerekmez**).
 - **Karma:** Çalma listelerinde Reddit tarzı upvote/downvote — zaman decay'li skor.
-- **Öğrenen öneri:** Hangi gün/saat neyi oyladığını **ve gerçekte ne kadar dinlediğini** öğrenen,
-  hafif ve açıklanabilir bir algoritma. Beğendiğin tarzda **yeni sanatçılar** da keşfeder.
+- **Öğrenen öneri:** Hangi gün/saat neyi oyladığını, **gerçekte ne kadar dinlediğini** ve
+  **çalma listelerine neleri eklediğini** öğrenen, hafif ve açıklanabilir bir algoritma.
+  Beğendiğin tarzda **yeni sanatçılar** keşfeder; sevdiğin şarkılar doğru gün/saatte geri gelir.
 - **Keşfet:** Playlist'siz, tamamen öneriyle ilerleyen sonsuz keşif modu (sıra hep önden dolu).
 - **Tamamen yerel:** sunucu yok, hesap yok, veri cihazında.
+- **Türkçe / İngilizce** arayüz, **koyu / açık** tema.
 
 > Kişisel kullanım içindir. YouTube'dan ses çekmek YouTube ToS'una aykırı olabilir;
 > depoyu özel (private) tutun.
@@ -40,7 +42,7 @@ yoksa uygulamaya gömülü sidecar devreye girer.
 
 ## Durum
 
-**v1.1.0** — masaüstü olgun ve günlük kullanımda. M0–M8 tamamlandı; Mac'te sorunsuz,
+**v1.2.0** — masaüstü olgun ve günlük kullanımda. M0–M8 tamamlandı; Mac'te sorunsuz,
 Windows'ta bilinen tüm indirme/çalma sorunları çözüldü.
 
 | Aşama | İçerik | Durum |
@@ -55,6 +57,11 @@ Windows'ta bilinen tüm indirme/çalma sorunları çözüldü.
 | M7 | Ekstralar (sözler, sleep timer, medya tuşları, komut paleti, ambiyans, autostart) | ✅ |
 | M8 | Paketleme & CI (dmg + exe) | ✅ |
 | — | Keşfet modu, akıllı karışık, kaldığın yerden devam, yedek/geri yükle | ✅ |
-| M9 | Mobil + senkron | 📋 planlandı |
+| — | TR/EN dil, açık tema, ilk açılış rehberi (v1.2.0) | ✅ |
+| M9 | Mobil (Android) + senkron | 📋 planlandı |
 
 Opsiyonel/ertelenen: equalizer (rodio'da DSP), mini/menubar player, gerçek streaming.
+
+---
+
+Yapan: **Wyclaew**

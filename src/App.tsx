@@ -6,6 +6,7 @@ import LyricsPanel from "./components/LyricsPanel";
 import QueuePanel from "./components/QueuePanel";
 import CommandPalette from "./components/CommandPalette";
 import Screensaver from "./components/Screensaver";
+import Onboarding from "./components/Onboarding";
 import Toasts from "./components/Toasts";
 import { getDb, isTauri } from "./lib/db";
 import {
@@ -49,8 +50,20 @@ function CurrentView() {
   }
 }
 
+// Hex rengi verilen oranla koyulaştırır (açık tema kontrastı için).
+function darken(hex: string, factor: number): string {
+  const m = /^#?([\da-f]{6})$/i.exec(hex.trim());
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) =>
+    Math.max(0, Math.min(255, Math.round(c * factor)))
+  );
+  return `#${ch.map((c) => c.toString(16).padStart(2, "0")).join("")}`;
+}
+
 export default function App() {
   const accentColor = useSettingsStore((s) => s.accentColor);
+  const theme = useSettingsStore((s) => s.theme);
   const lyricsOpen = useAppStore((s) => s.lyricsOpen);
   const queueOpen = useAppStore((s) => s.queueOpen);
   const commandOpen = useAppStore((s) => s.commandOpen);
@@ -146,9 +159,42 @@ export default function App() {
   }, []);
 
   // Vurgu rengini uygula (Görünüm ayarı).
+  //
+  // AÇIK TEMADA KOYULAŞTIR: kullanıcının seçtiği kehribar (#e0a33c) beyaz
+  // zeminde ~1.9:1 kontrast veriyor — okunmuyor. Inline style stylesheet'i
+  // ezdiği için :root[data-theme="light"] içindeki --color-accent'e güvenilemez;
+  // rengi burada koyulaştırıp yazıyoruz. Seçilen renk kimliğini korur (ton aynı),
+  // yalnız parlaklık düşer.
+  // DİKKAT: isLight'ı DOM'dan (data-theme) okuma — bu efekt aşağıdaki tema
+  // efektinden ÖNCE çalışır, ilk render'da öznitelik daha yazılmamış olur
+  // (açık temada vurgu koyulaşmadan kalırdı). Doğrudan ayardan hesapla.
   useEffect(() => {
-    document.documentElement.style.setProperty("--color-accent", accentColor);
-  }, [accentColor]);
+    const isLight =
+      theme === "light" ||
+      (theme === "system" &&
+        window.matchMedia("(prefers-color-scheme: light)").matches);
+    document.documentElement.style.setProperty(
+      "--color-accent",
+      isLight ? darken(accentColor, 0.62) : accentColor
+    );
+  }, [accentColor, theme]);
+
+  // Tema: koyu / açık / sistem. `data-theme` özniteliği index.css'teki
+  // :root[data-theme="light"] token override'ını tetikler.
+  // "system" seçiliyse OS tercihi CANLI izlenir (kullanıcı gece moduna
+  // geçince uygulama da geçsin — yeniden başlatma gerekmesin).
+  useEffect(() => {
+    const root = document.documentElement;
+    const mq = window.matchMedia("(prefers-color-scheme: light)");
+    const apply = () => {
+      const effective = theme === "system" ? (mq.matches ? "light" : "dark") : theme;
+      root.setAttribute("data-theme", effective);
+    };
+    apply();
+    if (theme !== "system") return;
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, [theme]);
 
   // Klavye kısayolları (input/textarea dışında).
   useEffect(() => {
@@ -221,6 +267,7 @@ export default function App() {
       <NowPlayingBar />
       {commandOpen && <CommandPalette />}
       {idle && <Screensaver />}
+      <Onboarding />
       <Toasts />
     </div>
   );

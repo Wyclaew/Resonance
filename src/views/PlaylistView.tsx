@@ -21,6 +21,7 @@ import KarmaControl from "../components/KarmaControl";
 import type { Playlist, PlaylistTrack } from "../types";
 import { encodePlaylist } from "../lib/share";
 import { useLibraryStore } from "../store/useLibraryStore";
+import { useT } from "../lib/i18n";
 import { usePlayerStore } from "../store/usePlayerStore";
 import { usePlaylistStore } from "../store/usePlaylistStore";
 import { useAppStore } from "../store/useAppStore";
@@ -29,6 +30,7 @@ import { isTauri } from "../lib/db";
 import { useToastStore } from "../store/useToastStore";
 
 export default function PlaylistView({ playlistId }: { playlistId: string | null }) {
+  const t = useT();
   const [meta, setMeta] = useState<Playlist | null>(null);
   const [tracks, setTracks] = useState<PlaylistTrack[]>([]);
   const [loading, setLoading] = useState(true);
@@ -119,10 +121,10 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
     // "Geri al" — yanlış oy düzeltme.
     const pid = playlistId;
     useToastStore.getState().show(
-      dir > 0 ? "Beğenildi" : "Beğenilmedi",
+      dir > 0 ? t("player.liked") : t("player.disliked"),
       "info",
       {
-        label: "Geri al",
+        label: t("player.undo"),
         fn: async () => {
           await pl.undoVote(pid, track.id);
           await load();
@@ -175,9 +177,9 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
   if (!playlistId) {
     return (
       <div className="flex h-full flex-col">
-        <ViewHeader title="Çalma Listesi" />
+        <ViewHeader title={t("playlist.title")} />
         <div className="flex flex-1 items-center justify-center text-faint">
-          <p className="text-sm">Bir çalma listesi seç.</p>
+          <p className="text-sm">{t("playlist.selectOne")}</p>
         </div>
       </div>
     );
@@ -201,11 +203,11 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
             />
           ) : (
             <h1 className="truncate text-2xl font-semibold tracking-tight">
-              {meta?.name ?? "Çalma Listesi"}
+              {meta?.name ?? t("playlist.title")}
             </h1>
           )}
           <p className="mt-1 text-sm text-muted">
-            {tracks.length} şarkı
+            {t("playlist.trackCount", { count: tracks.length })}
             {meta?.source && meta.source !== "local"
               ? ` · ${meta.source === "spotify" ? "Spotify" : "YouTube Music"}'ten`
               : ""}
@@ -216,18 +218,18 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
           <button
             onClick={() => tracks.length && playNow(tracks[0], tracks)}
             disabled={tracks.length === 0}
-            title="Hepsini oynat"
+            title={t("playlist.playAll")}
             className="mr-1 flex items-center gap-2 rounded-full bg-accent px-4 py-2 text-sm font-medium text-bg transition-transform hover:scale-105 disabled:opacity-30 disabled:hover:scale-100"
           >
-            <Play size={16} fill="currentColor" /> Oynat
+            <Play size={16} fill="currentColor" /> {t("player.play")}
           </button>
           <button
             onClick={downloadAll}
             disabled={tracks.length === 0 || allDownloaded || !!batch}
             title={
               allDownloaded
-                ? "Tüm şarkılar indirildi"
-                : "Tümünü çevrimdışı için indir (indirilenleri atlar)"
+                ? t("playlist.allDownloaded")
+                : t("playlist.downloadAll")
             }
             className={`mr-1 flex items-center gap-2 rounded-full px-3.5 py-2 text-sm font-medium transition-colors disabled:opacity-40 ${
               allDownloaded
@@ -242,11 +244,11 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
               </>
             ) : allDownloaded ? (
               <>
-                <CircleCheck size={16} /> İndirildi
+                <CircleCheck size={16} /> {t("playlist.downloadedAll")}
               </>
             ) : (
               <>
-                <DownloadCloud size={16} /> Tümünü indir
+                <DownloadCloud size={16} /> {t("playlist.downloadAllBtn")}
               </>
             )}
           </button>
@@ -256,8 +258,8 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
             }
             title={
               sortMode === "karma"
-                ? "Karmaya göre sıralı — elle sıraya dön"
-                : "Elle sıralı — karmaya göre sırala"
+                ? t("playlist.sortManual")
+                : t("playlist.sortByKarma")
             }
             className={`flex items-center gap-1.5 rounded-md px-2.5 py-2 text-xs font-medium transition-colors ${
               sortMode === "karma"
@@ -270,14 +272,14 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
             ) : (
               <ListOrdered size={15} />
             )}
-            {sortMode === "karma" ? "Karma" : "Sıra"}
+            {sortMode === "karma" ? t("playlist.karma") : t("playlist.order")}
           </button>
           <button
             onClick={() => {
               setNameDraft(meta?.name ?? "");
               setEditing(true);
             }}
-            title="Yeniden adlandır"
+            title={t("playlist.rename")}
             className="grid h-9 w-9 place-items-center rounded-md text-muted hover:bg-surface hover:text-text"
           >
             <Pencil size={16} />
@@ -288,14 +290,14 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
               setShareOpen(true);
             }}
             disabled={tracks.length === 0}
-            title="Paylaş"
+            title={t("playlist.share")}
             className="grid h-9 w-9 place-items-center rounded-md text-muted hover:bg-surface hover:text-text disabled:opacity-30"
           >
             <Share2 size={16} />
           </button>
           <button
             onClick={() => setConfirmDelete(true)}
-            title="Listeyi sil"
+            title={t("playlist.deleteList")}
             className="grid h-9 w-9 place-items-center rounded-md text-muted hover:bg-surface hover:text-down"
           >
             <Trash2 size={16} />
@@ -308,8 +310,9 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
           <div className="flex flex-col items-center justify-center gap-3 py-24 text-faint">
             <ListMusic size={40} strokeWidth={1.5} />
             <p className="max-w-sm text-center text-sm leading-relaxed">
-              Bu liste boş. Arama sonuçlarında veya başka bir listede şarkıların
-              yanındaki <span className="text-text">+</span> ile buraya ekle.
+              {t("playlist.emptyBefore")}
+              <span className="text-text">+</span>
+              {t("playlist.emptyAfter")}
             </p>
           </div>
         ) : (
@@ -320,14 +323,14 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Bu listede ara…"
+                  placeholder={t("playlist.searchInList")}
                   className="flex-1 bg-transparent text-sm outline-none placeholder:text-faint"
                 />
                 {query && (
                   <button
                     onClick={() => setQuery("")}
                     className="shrink-0 text-faint hover:text-text"
-                    title="Temizle"
+                    title={t("common.clear")}
                   >
                     <X size={14} />
                   </button>
@@ -336,7 +339,7 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
             )}
             {displayTracks.length === 0 ? (
               <p className="py-12 text-center text-sm text-faint">
-                "{query}" için sonuç yok.
+                {t("playlist.noMatchFor", { query })}
               </p>
             ) : (
               displayTracks.map((t, i) => (
@@ -379,16 +382,16 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
             className="w-80 rounded-lg border border-border bg-surface-2 p-5 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-base font-semibold">Listeyi sil?</h3>
+            <h3 className="text-base font-semibold">{t("playlist.deleteConfirmTitle")}</h3>
             <p className="mt-1 text-sm text-muted">
-              "{meta?.name}" kalıcı olarak silinecek. Şarkılar silinmez.
+              {t("playlist.deleteConfirmBody", { name: meta?.name ?? "" })}
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <button
                 onClick={() => setConfirmDelete(false)}
                 className="rounded-md px-3 py-1.5 text-sm text-muted hover:bg-surface hover:text-text"
               >
-                Vazgeç
+                {t("common.cancel")}
               </button>
               <button
                 onClick={doDelete}
@@ -411,14 +414,13 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
             className="w-[28rem] max-w-[90%] rounded-lg border border-border bg-surface-2 p-5 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-base font-semibold">Çalma listesini paylaş</h3>
+            <h3 className="text-base font-semibold">{t("playlist.shareTitle")}</h3>
             <p className="mt-1 text-sm text-muted">
-              Bu kodu kopyalayıp paylaş. Karşı taraf "İçe Aktar"a yapıştırıp
-              listenin kopyasını alır.
+              {t("playlist.shareDesc")}
             </p>
             <textarea
               readOnly
-              value={encodePlaylist(meta?.name ?? "Liste", tracks)}
+              value={encodePlaylist(meta?.name ?? t("playlist.untitled"), tracks)}
               onFocus={(e) => e.currentTarget.select()}
               className="mt-3 h-28 w-full resize-none rounded-md border border-border bg-surface px-3 py-2 font-mono text-xs text-muted outline-none"
             />
@@ -427,13 +429,13 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
                 onClick={() => setShareOpen(false)}
                 className="rounded-md px-3 py-1.5 text-sm text-muted hover:bg-surface hover:text-text"
               >
-                Kapat
+                {t("common.close")}
               </button>
               <button
                 onClick={async () => {
                   try {
                     await navigator.clipboard.writeText(
-                      encodePlaylist(meta?.name ?? "Liste", tracks)
+                      encodePlaylist(meta?.name ?? t("playlist.untitled"), tracks)
                     );
                     setCopied(true);
                   } catch {
@@ -442,7 +444,7 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
                 }}
                 className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-bg hover:opacity-90"
               >
-                <Copy size={15} /> {copied ? "Kopyalandı" : "Kopyala"}
+                <Copy size={15} /> {copied ? t("playlist.copied") : t("playlist.copy")}
               </button>
             </div>
           </div>
