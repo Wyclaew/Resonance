@@ -318,7 +318,13 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
         ) : (
           <>
             {tracks.length > 4 && (
-              <div className="mb-2 flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 focus-within:border-border-strong">
+              <div
+                className="sticky top-0 z-10 mb-2 flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 focus-within:border-border-strong"
+                /* sticky: uzun listede aşağı kayarken arama çubuğu görünür kalsın
+                   (en üste dönmeye gerek yok). Kaydırma kabı bir üstteki
+                   overflow-y-auto div; bg-surface şeffaf olmamalı yoksa altındaki
+                   satırlar çubuğun içinden geçer. */
+              >
                 <Search size={15} className="shrink-0 text-faint" />
                 <input
                   value={query}

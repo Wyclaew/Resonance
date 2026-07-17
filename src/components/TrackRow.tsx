@@ -62,10 +62,14 @@ export default function TrackRow({
       onDragOver={onDragOver}
       onDrop={onDrop}
       onDragEnd={onDragEnd}
-      className={`group grid grid-cols-[2rem_2.5rem_1fr_auto] items-center gap-3 rounded-md px-2 py-1.5 ${
-        isCurrent ? "bg-surface-2" : "hover:bg-surface"
+      className={`group relative grid grid-cols-[2rem_2.5rem_1fr_auto] items-center gap-3 rounded-md px-2 py-1.5 ${
+        isCurrent ? "bg-accent/10" : "hover:bg-surface"
       } ${isDragging ? "opacity-40" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
     >
+      {/* Çalan satırın sol kenarında vurgu şeridi (sidebar aktif öğe diliyle aynı). */}
+      {isCurrent && (
+        <span className="absolute left-0 top-1/2 h-6 w-[3px] -translate-y-1/2 rounded-r-full bg-accent" />
+      )}
       {/* İndeks / oynat düğmesi */}
       <button
         onClick={onPlay}

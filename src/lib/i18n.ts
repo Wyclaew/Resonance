@@ -281,6 +281,9 @@ const tr = {
   "settings.accentColorDesc": "Butonlar ve etkin öğelerdeki vurgu rengi.",
   "settings.amber": "Kehribar",
   "settings.green": "Yeşil",
+  "settings.teal": "Deniz",
+  "settings.indigo": "Çivit",
+  "settings.orange": "Turuncu",
   "settings.blue": "Mavi",
   "settings.red": "Mercan",
   "settings.purple": "Mor",
@@ -305,7 +308,7 @@ const tr = {
   "about.disclaimer":
     "Kişisel kullanım içindir. YouTube'dan ses çekmek YouTube Hizmet Şartları'na aykırı olabilir; bu uygulamayı kendi sorumluluğunda kullan.",
   "about.builtWith": "Tauri · React · rodio · yt-dlp · ffmpeg ile yapıldı.",
-  "about.madeBy": "Yapan",
+  "about.madeBy": "Yapımcı",
   // — Hesap & Senkron
   "account.soonTitle": "Bulut senkronu — yakında",
   "account.soonBody":
@@ -665,6 +668,9 @@ const en: Record<TrKey, string> = {
   "settings.accentColorDesc": "The accent color on buttons and active items.",
   "settings.amber": "Amber",
   "settings.green": "Green",
+  "settings.teal": "Teal",
+  "settings.indigo": "Indigo",
+  "settings.orange": "Orange",
   "settings.blue": "Blue",
   "settings.red": "Coral",
   "settings.purple": "Purple",

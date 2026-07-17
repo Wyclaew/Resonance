@@ -43,7 +43,7 @@ const DEFAULTS: Settings = {
   screensaverSeconds: 90,
   resumeState: "",
   language: detectLang(),
-  theme: "dark",
+  theme: "system", // sistem tercihini izle (kullanıcının isteği)
   onboardingDone: false,
 };
 

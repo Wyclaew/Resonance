@@ -4,9 +4,12 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.2.0** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.2.1** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
+v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
+medya tuşları artık çalışıyor; kilit ekranında şarkı bilgisi. Ayrıca çerçevesiz pencere,
+UI'da gerçek logo (◈ değil), Windows'a ÖZEL tam-taşan ikon.
 
 > Ayrıntılı geçmiş + kararlar otomatik bellekte (`memory/resonance-project.md`).
 > Mobil planı `docs/MOBILE.md`, senkron protokolü `docs/SYNC.md`, sürüm rehberi `docs/RELEASE.md`.
@@ -197,9 +200,45 @@ Tüm sinyaller tek skorda birleşir:
     `track-ended` gidip **çift atlama** olur.
 16. **Windows `augmented_path()`**: PATH ayracı platforma göre (`;` vs `:`) — Unix yollarını `:` ile Windows
     PATH'ine eklemek PATH'i komple bozuyordu.
-17. **Windows'ta `CREATE_NO_WINDOW`** (`no_window()`, 0x08000000): yoksa her yt-dlp/ffmpeg çağrısında konsol
+17. **⭐ MEDYA TUŞLARI = OS MEDYA OTURUMU, global hotkey DEĞİL** (`media_controls.rs`, souvlaki).
+    Global hotkey iki yerde ÇUVALLIYOR ve bu tuş listesi genişleterek çözülmez:
+    • **macOS**: F7/F9 normal tuş değil — `NX_KEYTYPE_NEXT/PREVIOUS` sistem olayı gönderirler,
+      macOS bunları doğrudan "Now Playing" uygulamasına yollar; global hotkey hiç görmez.
+      (F8 çalışıyordu çünkü `MediaPlayPause` global-shortcut ile eşleşiyor.)
+    • **Windows**: tam ekran oyun RAW INPUT alınca global hotkey tetiklenmez (video oynatıcı
+      raw input almadığı için orada çalışıyordu — kullanıcının gözlemi tam isabet).
+    Çözüm: souvlaki → macOS MPRemoteCommandCenter, Windows SMTC. `media-control` olayı
+    frontend'e düşer. Global hotkey YEDEK olarak duruyor (OS oturumu kurulamazsa).
+    Yan fayda: kilit ekranı/Control Center'da şarkı adı+sanatçı (Spotify gibi).
+18. **Windows'ta `CREATE_NO_WINDOW`** (`no_window()`, 0x08000000): yoksa her yt-dlp/ffmpeg çağrısında konsol
     penceresi fırlar.
-18. **Veri güvenliği:** açılışta veri varsa otomatik DB yedeği (son 12, `backups/`), tek-örnek koruması TÜM
+19. **⭐ ÇERÇEVESİZ PENCERE — sürükleme İZİN ister** (v1.2.1). `titleBarStyle: "Overlay"` +
+    `hiddenTitle: true` → macOS'ta başlık şeridi yok, trafik ışıkları içeriğin üstünde yüzer
+    (Spotify görünümü). AMA pencere artık YALNIZ `data-tauri-drag-region`'dan taşınır ve bu
+    **`core:window:allow-start-dragging` iznini** gerektirir — `core:default` bunu KAPSAMAZ.
+    İzin yoksa pencere hiç hareket etmez (sessizce; hata da vermez). İzin
+    `capabilities/default.json`'da. Sürükleme şeridi App.tsx'in en üstünde (h-7, sol 5rem
+    boşluk trafik ışıkları için). Windows'ta `decorations:false` + özel min/max/kapat
+    butonları gerekir — YAPILMADI, test edilemedi.
+20. **⭐ İKON: macOS ve Windows AYRI kaynaklardan üretilir.**
+    `app-icon.svg` → 1024 kanvasta 832×832 (macOS'un **%9.4 şeffaf kenar** standardı).
+    Windows taskbar'ında böyle bir konvansiyon YOK → o ikon ~%19 küçük görünüyordu.
+    Çözüm: `app-icon-windows.svg` (tam taşan, çubuklar 1024/832 ölçekli) → yalnız
+    `icons/icon.ico` ondan üretilir. **Üretim sırası (bozma):**
+    ```bash
+    cp src-tauri/icons/icon.icns /tmp/mac.icns          # macOS'unkini sakla
+    npm run tauri icon src-tauri/app-icon-windows.svg   # HER ŞEYİ üretir
+    cp /tmp/mac.icns src-tauri/icons/icon.icns          # .icns'i geri koy
+    ```
+    Doğrulama: `.ico` orta satırda ilk opak piksel x=0 (%0 boşluk), `.icns` x=24 (%9.4).
+    PNG'lerin tam-taşan olması Windows için doğru, macOS `.icns` kullandığı için zararsız.
+21. **UI logosu = `src/components/Logo.tsx`** (ikonun 7 çubuğu), `◈` karakteri DEĞİL.
+    `currentColor` kullanır → sarmalayıcının `text-accent`'ini alır.
+22. **Ambiyansta ana içerik unmount edilir** (App.tsx `{!idle && …}`): RAM'İ DÜŞÜRMEZ
+    (WebKit heap high-water mark, RSS'i geri vermez — ölçüldü, 122MB sabit). FAYDA
+    CPU/PİL: ambiyanstayken playback-tick tüm UI'yı değil yalnız Screensaver'ı
+    render eder (arka planda oyun senaryosu için değerli).
+23. **Veri güvenliği:** açılışta veri varsa otomatik DB yedeği (son 12, `backups/`), tek-örnek koruması TÜM
     build'lerde. Geçmişte iki-instance yarışından şüphelenilen bir veri kaybı yaşandı; önlemler o yüzden.
 
 ## Özellikler (v1.2.0 — hepsi canlı)

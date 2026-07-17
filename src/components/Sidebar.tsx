@@ -15,8 +15,9 @@ import {
 } from "lucide-react";
 import { useAppStore } from "../store/useAppStore";
 import { usePlaylistStore } from "../store/usePlaylistStore";
-import { usePlayerStore } from "../store/usePlayerStore";
+import { usePlayerStore, DISCOVERY_ID } from "../store/usePlayerStore";
 import { useT } from "../lib/i18n";
+import Logo from "./Logo";
 import type { ViewId } from "../types";
 
 interface NavItemProps {
@@ -65,6 +66,10 @@ export default function Sidebar() {
   const playlists = usePlaylistStore((s) => s.playlists);
   const createPlaylist = usePlaylistStore((s) => s.create);
   const discovering = usePlayerStore((s) => s.discovering);
+  // Keşif çalıyorken sidebar'da "Şu An" değil "Keşfet" vurgulansın — kullanıcı
+  // nerede olduğunu oradan okuyor.
+  const radioPlaylistId = usePlayerStore((s) => s.radioPlaylistId);
+  const discoveryActive = radioPlaylistId === DISCOVERY_ID;
 
   // "Keşfet" bir aksiyon (görünüm değil): keşif çalmasını başlatır ve "Şu An"a gider.
   function handleDiscover() {
@@ -99,14 +104,14 @@ export default function Sidebar() {
     >
       {/* Logo + daralt/genişlet */}
       <div
-        className={`flex items-center pt-5 pb-3 ${
+        className={`flex items-center pb-3 pt-1 ${
           collapsed ? "flex-col gap-3 px-2" : "justify-between px-4"
         }`}
       >
         {!collapsed && (
           <div className="flex items-center gap-2">
             <div className="grid h-7 w-7 place-items-center rounded-md bg-accent/15 text-accent">
-              <span className="text-base font-semibold">◈</span>
+              <Logo className="h-[18px] w-[18px]" />
             </div>
             <span className="text-[15px] font-semibold tracking-tight">
               Resonance
@@ -115,7 +120,7 @@ export default function Sidebar() {
         )}
         {collapsed && (
           <div className="grid h-7 w-7 place-items-center rounded-md bg-accent/15 text-accent">
-            <span className="text-base font-semibold">◈</span>
+            <Logo className="h-[18px] w-[18px]" />
           </div>
         )}
         <button
@@ -137,7 +142,7 @@ export default function Sidebar() {
             <NavItem
               icon={n.icon}
               label={n.label}
-              active={view === n.id}
+              active={view === n.id && !(n.id === "now" && discoveryActive)}
               collapsed={collapsed}
               onClick={() => navigate(n.id)}
             />
@@ -149,8 +154,12 @@ export default function Sidebar() {
                 title={collapsed ? (discovering ? t("nav.preparing") : t("nav.discover")) : undefined}
                 className={`group relative flex w-full items-center rounded-md text-sm text-accent transition-all hover:bg-accent/10 disabled:opacity-70 ${
                   collapsed ? "justify-center px-0 py-2.5" : "gap-3 px-3 py-2"
-                }`}
+                } ${discoveryActive && view === "now" ? "bg-accent/10" : ""}`}
               >
+                {/* Keşif çalıyorken sol vurgu çizgisi — NavItem'daki ile aynı dil. */}
+                {discoveryActive && view === "now" && !collapsed && (
+                  <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-accent" />
+                )}
                 <span className="transition-colors">
                   {discovering ? (
                     <Loader2 size={ICON} className="animate-spin" />

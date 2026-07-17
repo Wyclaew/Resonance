@@ -997,8 +997,43 @@ export async function initPlayer() {
     }
   });
 
-  // Medya tuşları (kulaklık / klavye oynat-duraklat-geç). Uygulama arka planda
-  // olsa bile çalışır. macOS bazı tuşları sisteme ayırabilir; Windows'ta sağlam.
+  // --- OS MEDYA OTURUMU (asıl medya tuşu yolu) ---
+  // Rust tarafı (media_controls.rs) macOS Now Playing / Windows SMTC'ye bağlanır
+  // ve tuşa basılınca "media-control" olayı yollar. Global hotkey'in AKSİNE:
+  //  • macOS'ta F7/F9 (prev/next) burada ÇALIŞIR — sistem olayları buraya düşer.
+  //  • Windows'ta tam ekran oyun raw input alsa bile ÇALIŞIR (SMTC OS seviyesi).
+  await listen<string>("media-control", (e) => {
+    const p = usePlayerStore.getState();
+    switch (e.payload) {
+      case "play":
+      case "pause":
+      case "toggle":
+        p.toggle();
+        break;
+      case "next":
+        p.next();
+        break;
+      case "previous":
+        p.prev();
+        break;
+      case "stop":
+        if (p.status === "playing") p.toggle();
+        break;
+    }
+  });
+
+  // Çalan parça / durum değişince OS'a bildir (kilit ekranı + oynat-duraklat ikonu).
+  let lastSynced = "";
+  usePlayerStore.subscribe((st) => {
+    const key = `${st.current?.id ?? ""}|${st.status}`;
+    if (key === lastSynced) return;
+    lastSynced = key;
+    syncMediaSession(st.current, st.status);
+  });
+
+  // Medya tuşları — YEDEK yol (global hotkey). OS medya oturumu kurulamazsa
+  // (ör. eski Windows, izin sorunu) yine de çalışsın diye tutuluyor. Aynı tuş
+  // iki yoldan gelirse çift tetikleme olmaz: SMTC/Now Playing tuşu tüketir.
   const mediaKeys: [string, () => void][] = [
     ["MediaPlayPause", () => usePlayerStore.getState().toggle()],
     ["MediaTrackNext", () => usePlayerStore.getState().next()],
@@ -1014,26 +1049,25 @@ export async function initPlayer() {
     }
   }
 
-  // macOS'ta bazı klavyelerde F7/F8/F9 fiziksel medya tuşlarıdır (önceki/oynat/
-  // sonraki). Ek olarak bunları da kaydetmeyi DENE. DÜRÜST NOT: macOS bu tuşları
-  // çoğu zaman sistem medya kontrolüne ayırır ve global kayıt başarısız olabilir
-  // veya hiç tetiklenmeyebilir; o yüzden hatayı sessizce yut (kritik değil).
-  const isMac = /Mac/i.test(navigator.userAgent);
-  if (isMac) {
-    const macKeys: [string, () => void][] = [
-      ["F7", () => usePlayerStore.getState().prev()],
-      ["F9", () => usePlayerStore.getState().next()],
-    ];
-    for (const [key, fn] of macKeys) {
-      try {
-        await register(key, (e) => {
-          if (e.state === "Pressed") fn();
-        });
-      } catch (err) {
-        console.error(`[resonance] '${key}' (macOS) kaydedilemedi:`, err);
-      }
-    }
+}
+
+// --- OS medya oturumu (macOS Now Playing / Windows SMTC) ---
+// Kilit ekranı/Control Center'da şarkı bilgisini gösterir ve medya tuşlarının
+// asıl kaynağıdır (bkz. src-tauri/src/media_controls.rs — global hotkey yetmiyordu).
+function syncMediaSession(item: QueueItem | null, status: PlaybackStatus) {
+  if (!isTauri()) return;
+  if (item) {
+    invoke("media_set_metadata", {
+      title: item.title,
+      artist: item.artist,
+      album: item.album ?? "",
+      artUrl: item.thumbnail ?? "",
+    }).catch(() => {});
   }
+  invoke("media_set_playback", {
+    playing: status === "playing",
+    stopped: !item || status === "idle",
+  }).catch(() => {});
 }
 
 // Art arda çalma hatası sayacı (otomatik atlamada sonsuz döngüyü önler).

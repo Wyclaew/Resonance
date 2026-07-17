@@ -21,6 +21,9 @@ import { getVersion } from "@tauri-apps/api/app";
 import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
 import ViewHeader from "../components/ViewHeader";
 import Toggle from "../components/Toggle";
+import Confetti from "../components/Confetti";
+import { CatDrawing, HeartDrawing } from "../components/SecretCat";
+import Logo from "../components/Logo";
 import { useSettingsStore, type Theme } from "../store/useSettingsStore";
 import { useT, type TrKey, type Lang } from "../lib/i18n";
 import { useLibraryStore } from "../store/useLibraryStore";
@@ -491,10 +494,13 @@ function ShortcutsSettings() {
 const ACCENTS: { v: string; labelKey: TrKey }[] = [
   { v: "#e0a33c", labelKey: "settings.amber" },
   { v: "#5fb87f", labelKey: "settings.green" },
+  { v: "#3fb0a8", labelKey: "settings.teal" },
   { v: "#4f9bd9", labelKey: "settings.blue" },
-  { v: "#d4634e", labelKey: "settings.red" },
+  { v: "#6f7de0", labelKey: "settings.indigo" },
   { v: "#b07ad9", labelKey: "settings.purple" },
   { v: "#e0667f", labelKey: "settings.pink" },
+  { v: "#d4634e", labelKey: "settings.red" },
+  { v: "#d98a4f", labelKey: "settings.orange" },
 ];
 const SCREENSAVER_OPTS: { v: number; labelKey: TrKey }[] = [
   { v: 0, labelKey: "settings.off" },
@@ -838,20 +844,41 @@ function DataSettings() {
   );
 }
 
+// İmza easter egg'i: adı 7 kez tıkla → gizli kedi + kalp ortaya çıkar.
+const CAT_CLICKS = 7;
+
 function AboutSettings() {
   const t = useT();
   const [version, setVersion] = useState("");
+  const [clicks, setClicks] = useState(0);
+  const [party, setParty] = useState(false);
+  const unlocked = clicks >= CAT_CLICKS;
+
   useEffect(() => {
     if (!isTauri()) return;
     getVersion()
       .then(setVersion)
       .catch(() => {});
   }, []);
+
+  function tapSignature() {
+    const n = clicks + 1;
+    setClicks(n);
+    // 7'de açılır; sonraki her tıklama konfetiyi tekrar patlatır.
+    if (n >= CAT_CLICKS) setParty(true);
+  }
+
   return (
-    <div className="max-w-2xl text-sm leading-relaxed text-muted">
+    // flex-col + min-h-full: kedi `mt-auto` ile en alta itilir, `justify-end`
+    // ile en sağa. ABSOLUTE KULLANMA — kaydırma kabı (overflow-y-auto) absolute
+    // konumlanan kediyi KIRPIYORDU (sadece kafası görünüyordu).
+    <div className="flex h-full min-h-full flex-col text-sm leading-relaxed text-muted">
+      {party && <Confetti onDone={() => setParty(false)} />}
+      <div className="max-w-2xl">
+
       <div className="flex items-center gap-3">
-        <div className="grid h-12 w-12 place-items-center rounded-md bg-accent/15 text-xl font-semibold text-accent">
-          ◈
+        <div className="grid h-12 w-12 place-items-center rounded-md bg-accent/15 text-accent">
+          <Logo className="h-7 w-7" />
         </div>
         <div>
           <div className="text-base font-semibold text-text">Resonance</div>
@@ -864,15 +891,31 @@ function AboutSettings() {
       <p className="mt-3 text-faint">{t("about.disclaimer")}</p>
       <p className="mt-3 text-faint">{t("about.builtWith")}</p>
 
-      {/* İmza — yapanın adı. Sürümün hemen altında, sakin ama görünür. */}
+      {/* İmza. Kedi açılana kadar HİÇBİR ipucu yok — gerçek easter egg. */}
       <div className="mt-6 flex items-center gap-2 border-t border-border pt-4">
         <span className="text-xs uppercase tracking-wider text-faint">
           {t("about.madeBy")}
         </span>
-        <span className="font-mono text-sm font-medium tracking-tight text-accent">
+        <button
+          onClick={tapSignature}
+          className="cursor-pointer font-mono text-sm font-medium tracking-tight text-accent transition-transform active:scale-95"
+        >
           Wyclaew
-        </span>
+        </button>
       </div>
+      </div>
+
+      {/* Gizli kedi + kalp — sayfanın EN SAĞ ALTI, playbar'ın hemen üstü.
+          mt-auto: aradaki tüm boşluğu yiyip kediyi dibe iter.
+          Kedi `text-text` → koyu temada beyaz, açık temada siyah. */}
+      {unlocked && (
+        <div className="mt-auto flex shrink-0 justify-end pb-2 pr-1 pt-8" aria-hidden>
+          <div className="flex animate-pop-in items-end gap-1.5">
+            <CatDrawing className="h-12 w-12 shrink-0 text-text" />
+            <HeartDrawing className="mb-1 h-4 w-4 shrink-0 text-down" />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -906,9 +949,15 @@ export default function SettingsView() {
           })}
         </nav>
 
-        <div className="min-w-0 flex-1 overflow-y-auto px-8 py-2">
-          <h2 className="mb-4 text-lg font-semibold">{t(current.labelKey)}</h2>
-          {active === "account" ? (
+        {/* flex-col: başlık sabit, içerik KALAN alanı alır. Böylece bir bölüm
+            (Hakkında) "min-h-full" deyince başlığın yüksekliği ÜSTÜNE binmez —
+            eskiden binerdi ve alta yaslanan kedi katlanmanın altında kalıyordu. */}
+        <div className="flex min-w-0 flex-1 flex-col overflow-y-auto px-8 py-2">
+          <h2 className="mb-4 shrink-0 text-lg font-semibold">
+            {t(current.labelKey)}
+          </h2>
+          <div className="flex min-h-0 flex-1 flex-col">
+            {active === "account" ? (
             <AccountSettings />
           ) : active === "playback" ? (
             <PlaybackSettings />
@@ -927,6 +976,7 @@ export default function SettingsView() {
           ) : (
             <AboutSettings />
           )}
+          </div>
         </div>
       </div>
     </div>

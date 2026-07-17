@@ -1,5 +1,7 @@
 mod audio;
 mod commands;
+#[cfg(desktop)]
+mod media_controls;
 mod spotify;
 mod ytdlp;
 
@@ -176,6 +178,10 @@ pub fn run() {
             commands::audio_set_volume,
             commands::update_ytdlp,
             commands::read_log,
+            #[cfg(desktop)]
+            media_controls::media_set_metadata,
+            #[cfg(desktop)]
+            media_controls::media_set_playback,
         ])
         .setup(|app| {
             // Log'u her build'de aç (release dahil): Windows indirme/çalma
@@ -206,6 +212,24 @@ pub fn run() {
             // Ses motorunu başlat ve yönetilen duruma ekle.
             let audio = audio::start(app.handle().clone());
             app.manage(audio);
+
+            // OS medya oturumu (macOS Now Playing / Windows SMTC).
+            // Global hotkey'in yakalayamadığı medya tuşlarını çözer + kilit
+            // ekranında şarkı bilgisi gösterir. Kurulamazsa uygulama normal çalışır.
+            #[cfg(desktop)]
+            media_controls::init(&app.handle().clone());
+
+            // ÇERÇEVESİZ PENCERE — YALNIZ WINDOWS'ta.
+            // macOS'ta tauri.conf'daki titleBarStyle:Overlay + hiddenTitle zaten
+            // çerçevesiz görünüm veriyor (trafik ışıkları içerikte yüzüyor).
+            // Windows'ta o ayarların etkisi yok → başlık çubuğu duruyordu. Burada
+            // dekorasyonu kaldırıyoruz; min/maks/kapat butonlarını frontend çiziyor
+            // (App.tsx WindowControls). GÜVENLİK AĞI: Alt+F4 dekorasyonsuz da
+            // çalışır, yani kapat butonu bozulsa bile pencere kapatılabilir.
+            #[cfg(windows)]
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_decorations(false);
+            }
             Ok(())
         })
         .run(tauri::generate_context!())

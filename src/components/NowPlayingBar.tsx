@@ -150,8 +150,10 @@ export default function NowPlayingBar() {
             )
           }
           title={current ? t("player.goToPlaying") : undefined}
-          className={`grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-lg bg-surface-3 text-faint shadow-lg shadow-black/30 ring-1 ring-white/5 transition-transform hover:scale-[1.03] ${
-            current ? "cursor-pointer" : ""
+          className={`grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-lg bg-surface-3 text-faint shadow-lg shadow-black/30 transition-transform hover:scale-[1.03] ${
+            current
+              ? "cursor-pointer ring-2 ring-accent/60"
+              : "ring-1 ring-white/5"
           }`}
         >
           {current?.thumbnail ? (

@@ -7,6 +7,7 @@ import QueuePanel from "./components/QueuePanel";
 import CommandPalette from "./components/CommandPalette";
 import Screensaver from "./components/Screensaver";
 import Onboarding from "./components/Onboarding";
+import WindowControls from "./components/WindowControls";
 import Toasts from "./components/Toasts";
 import { getDb, isTauri } from "./lib/db";
 import {
@@ -49,6 +50,10 @@ function CurrentView() {
       return <HomeView />;
   }
 }
+
+// Windows mı? (çerçevesiz pencerede sol boşluk/buton yerleşimi için)
+const isWindows =
+  typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
 
 // Hex rengi verilen oranla koyulaştırır (açık tema kontrastı için).
 function darken(hex: string, factor: number): string {
@@ -253,18 +258,44 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-bg text-text">
-      <div className="flex min-h-0 flex-1">
-        <Sidebar />
-        <main className="relative min-w-0 flex-1 overflow-hidden bg-bg">
-          {/* view (ve aktif liste) değişince yumuşak fade-in */}
-          <div key={`${view}:${activePlaylistId ?? ""}`} className="h-full animate-fade-in">
-            <CurrentView />
-          </div>
-          {lyricsOpen && <LyricsPanel />}
-          {queueOpen && <QueuePanel />}
-        </main>
+      {/* SÜRÜKLEME ŞERİDİ — başlık çubuğu gizli, pencere yalnız buradan taşınır.
+          macOS: trafik ışıkları sol tarafta yüzer → sol 5rem boşluk (aşağıdaki
+          paddingLeft) ışıklara tıklama buraya düşmesin diye. Windows: solda boşluk
+          yok, SAĞDA kendi min/maks/kapat butonlarımız (WindowControls). */}
+      <div
+        data-tauri-drag-region
+        className="flex h-7 w-full shrink-0 items-stretch justify-end bg-bg"
+        style={{ paddingLeft: isWindows ? 0 : "5rem" }}
+      >
+        <WindowControls />
       </div>
-      <NowPlayingBar />
+      {/* AMBİYANS = ANA İÇERİĞİ UNMOUNT ET (liste/sidebar/playbar).
+          ⚠️ ÖLÇÜLDÜ: bu RAM'i DÜŞÜRMEZ — WebKit heap high-water mark tutar,
+          DOM serbest bıraksan da RSS'i OS'a geri vermez (debug'da 122MB sabit).
+          FAYDASI CPU/PİL: ambiyanstayken playback-tick (250ms) tüm UI'yı değil
+          yalnız küçük Screensaver'ı yeniden render eder → arka planda oyun
+          oynarken (kullanıcının senaryosu) render yükü ciddi düşer.
+          Çalma Rust thread'inde sürdüğü için playbar sökülse de ses durmaz;
+          durum zustand'da olduğundan geri gelince kayıp olmaz. */}
+      {!idle && (
+        <>
+          <div className="flex min-h-0 flex-1">
+            <Sidebar />
+            <main className="relative min-w-0 flex-1 overflow-hidden bg-bg">
+              {/* view (ve aktif liste) değişince yumuşak fade-in */}
+              <div
+                key={`${view}:${activePlaylistId ?? ""}`}
+                className="h-full animate-fade-in"
+              >
+                <CurrentView />
+              </div>
+              {lyricsOpen && <LyricsPanel />}
+              {queueOpen && <QueuePanel />}
+            </main>
+          </div>
+          <NowPlayingBar />
+        </>
+      )}
       {commandOpen && <CommandPalette />}
       {idle && <Screensaver />}
       <Onboarding />

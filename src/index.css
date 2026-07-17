@@ -167,6 +167,19 @@ textarea:focus-visible {
     transform: scale(1);
   }
 }
+/* İmza konfetisi (Hakkında → Wyclaew'e tıkla). Bağımlılıksız: her parça
+   yukarıdan düşer, yana savrulur ve döner. --rot/--drift her parçada farklı. */
+@keyframes res-confetti {
+  from {
+    opacity: 1;
+    transform: translate3d(0, -12px, 0) rotate(var(--rot, 0deg));
+  }
+  to {
+    opacity: 0;
+    transform: translate3d(var(--drift, 0), 100vh, 0)
+      rotate(calc(var(--rot, 0deg) + 540deg));
+  }
+}
 @keyframes res-shimmer {
   0% {
     background-position: -400px 0;
@@ -184,6 +197,9 @@ textarea:focus-visible {
 }
 .animate-pop-in {
   animation: res-pop-in 0.14s ease both;
+}
+.animate-confetti {
+  animation: res-confetti linear both;
 }
 
 /* Yükleme iskeleti (skeleton) */

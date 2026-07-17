@@ -1,5 +1,6 @@
 import { Music2 } from "lucide-react";
 import { useT } from "../lib/i18n";
+import Logo from "./Logo";
 import { usePlayerStore } from "../store/usePlayerStore";
 import { formatMs } from "../lib/format";
 
@@ -53,7 +54,7 @@ export default function Screensaver() {
         </>
       ) : (
         <div className="flex flex-col items-center gap-3 text-faint">
-          <div className="text-5xl font-semibold text-accent">◈</div>
+          <Logo className="h-14 w-14 text-accent" />
           <div className="text-lg">Resonance</div>
         </div>
       )}

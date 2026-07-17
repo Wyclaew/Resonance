@@ -44,7 +44,7 @@ export default function LibraryView() {
           {/* İndirilenler kartı */}
           <button
             onClick={() => navigate("downloads")}
-            className="group flex flex-col gap-3 rounded-lg border border-border bg-surface/50 p-4 text-left transition-colors hover:border-border-strong hover:bg-surface"
+            className="group flex flex-col gap-3 rounded-lg border border-border bg-surface/50 p-4 text-left transition-colors hover:border-accent/40 hover:bg-surface"
           >
             <div className="grid h-12 w-12 place-items-center rounded-md bg-up/15 text-up">
               <HardDriveDownload size={22} />
@@ -60,7 +60,7 @@ export default function LibraryView() {
             <button
               key={pl.id}
               onClick={() => navigate("playlist", pl.id)}
-              className="group flex flex-col gap-3 rounded-lg border border-border bg-surface/50 p-4 text-left transition-colors hover:border-border-strong hover:bg-surface"
+              className="group flex flex-col gap-3 rounded-lg border border-border bg-surface/50 p-4 text-left transition-colors hover:border-accent/40 hover:bg-surface"
             >
               <div className="grid h-12 w-12 place-items-center rounded-md bg-accent/15 text-accent">
                 <ListMusic size={22} />

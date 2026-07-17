@@ -1,6 +1,7 @@
 import { Component, type ReactNode } from "react";
 // Class component → hook kullanılamaz; React-dışı t() store'dan dili okur.
 import { t } from "../lib/i18n";
+import Logo from "./Logo";
 
 interface Props {
   children: ReactNode;
@@ -26,8 +27,8 @@ export default class ErrorBoundary extends Component<Props, State> {
     if (this.state.error) {
       return (
         <div className="flex h-screen flex-col items-center justify-center gap-4 bg-bg p-8 text-center text-text">
-          <div className="grid h-12 w-12 place-items-center rounded-md bg-accent/15 text-xl text-accent">
-            ◈
+          <div className="grid h-12 w-12 place-items-center rounded-md bg-accent/15 text-accent">
+            <Logo className="h-7 w-7" />
           </div>
           <h1 className="text-lg font-semibold">{t("error.title")}</h1>
           <p className="max-w-md text-sm leading-relaxed text-muted">
