@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { ListPlus, Plus, ListMusic } from "lucide-react";
 import type { Track } from "../types";
 import { usePlaylistStore } from "../store/usePlaylistStore";
+import { useToastStore } from "../store/useToastStore";
 import { useT } from "../lib/i18n";
 
 // Şarkıyı bir çalma listesine ekleyen küçük açılır menü.
@@ -20,6 +21,7 @@ export default function AddToPlaylistButton({
   const playlists = usePlaylistStore((s) => s.playlists);
   const addTrack = usePlaylistStore((s) => s.addTrack);
   const create = usePlaylistStore((s) => s.create);
+  const toast = useToastStore((s) => s.show);
 
   useEffect(() => {
     if (!open) return;
@@ -33,10 +35,16 @@ export default function AddToPlaylistButton({
   async function addTo(playlistId: string) {
     await addTrack(playlistId, track);
     setOpen(false);
+    const pl = playlists.find((p) => p.id === playlistId);
+    toast(t("toast.addedToPlaylist", { name: pl?.name ?? "" }), "info");
   }
   async function createAndAdd() {
-    const p = await create("Yeni Liste");
-    if (p) await addTrack(p.id, track);
+    const name = t("library.newList");
+    const p = await create(name);
+    if (p) {
+      await addTrack(p.id, track);
+      toast(t("toast.playlistCreated", { name }), "info");
+    }
     setOpen(false);
   }
 

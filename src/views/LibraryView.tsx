@@ -21,7 +21,7 @@ export default function LibraryView() {
   }, [refreshPlaylists, refreshLibrary]);
 
   async function handleCreate() {
-    const p = await createPlaylist("Yeni Liste");
+    const p = await createPlaylist(t("library.newList"));
     if (p) navigate("playlist", p.id);
   }
 

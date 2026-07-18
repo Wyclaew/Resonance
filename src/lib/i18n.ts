@@ -237,6 +237,15 @@ const tr = {
   "settings.update": "Güncelle",
   "settings.spotifyIdPlaceholder": "örn. 4a1b…",
   "settings.spotifySecretHint": "Gizli tut; kimseyle paylaşma.",
+  "settings.spotifyKeysHelp":
+    "developer.spotify.com → Dashboard → Create app → Client ID ve Client Secret'ı buraya yapıştır (Redirect URI zorunlu değil). Anahtarlar cihazında kalır.",
+  "settings.clientIdDesc": "Spotify Developer Dashboard'dan",
+  "toast.addedToPlaylist": "\"{name}\" listesine eklendi",
+  "toast.playlistCreated": "\"{name}\" listesi oluşturuldu",
+  "win.minimize": "Küçült",
+  "win.maximize": "Büyüt",
+  "win.restore": "Geri yükle",
+  "win.close": "Kapat",
 
   // — Ayarlar: oynatma
   "settings.rememberVolume": "Ses düzeyini hatırla",
@@ -628,6 +637,15 @@ const en: Record<TrKey, string> = {
   "settings.update": "Update",
   "settings.spotifyIdPlaceholder": "e.g. 4a1b…",
   "settings.spotifySecretHint": "Keep it secret; don't share it with anyone.",
+  "settings.spotifyKeysHelp":
+    "developer.spotify.com → Dashboard → Create app → paste the Client ID and Client Secret here (a Redirect URI isn't required). Keys stay on your device.",
+  "settings.clientIdDesc": "From the Spotify Developer Dashboard",
+  "toast.addedToPlaylist": "Added to \"{name}\"",
+  "toast.playlistCreated": "Created playlist \"{name}\"",
+  "win.minimize": "Minimize",
+  "win.maximize": "Maximize",
+  "win.restore": "Restore",
+  "win.close": "Close",
 
   "settings.rememberVolume": "Remember volume",
   "settings.rememberVolumeDesc": "The app opens at the volume you last used.",

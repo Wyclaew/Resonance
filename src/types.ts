@@ -3,6 +3,16 @@
 
 export type TrackSource = "youtube" | "local";
 
+// Öneri gerekçesi — YAPISAL (string değil). Dil sonradan değişince metin de
+// değişsin diye anahtar+parametre olarak saklanır; render anında çevrilir
+// (recommender.ts reasonText). dow = gün sayısı (0..6), gün adı render'da üretilir.
+export interface RecReason {
+  key: "rec.newDiscovery" | "rec.contextual" | "rec.favorite" | "rec.fromPlaylist";
+  seed?: string;
+  artist?: string;
+  dow?: number;
+}
+
 export interface Track {
   id: string; // dahili kimlik (source:source_id)
   source: TrackSource;
@@ -42,7 +52,7 @@ export interface QueueItem extends Track {
   // Resonance önerisi olarak araya eklendiyse:
   isRecommendation?: boolean;
   recSource?: "youtube" | "library";
-  recReason?: string;
+  recReason?: RecReason;
 }
 
 export type RepeatMode = "off" | "all" | "one";

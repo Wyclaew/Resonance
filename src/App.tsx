@@ -139,12 +139,20 @@ export default function App() {
           .then(() => {
             const s = useSettingsStore.getState();
             if (s.rememberVolume) usePlayerStore.getState().setVolume(s.savedVolume);
-            // Kaldığın yerden devam: son çalan şarkıyı duraklatılmış geri yükle.
+            // Kaldığın yerden devam. mode:"discovery" → tüm Keşfet kuyruğu
+            // (reroll atmadıkça değişmez); değilse tek şarkı (geriye dönük uyum).
             if (s.resumeState) {
               try {
-                const { track, positionMs } = JSON.parse(s.resumeState);
-                if (track?.id) {
-                  usePlayerStore.getState().restoreState(track, positionMs || 0);
+                const r = JSON.parse(s.resumeState);
+                if (r.mode === "discovery" && Array.isArray(r.queue) && r.queue.length) {
+                  usePlayerStore.getState().restoreDiscovery({
+                    queue: r.queue,
+                    queueIndex: r.queueIndex ?? 0,
+                    seedArtists: r.seedArtists ?? [],
+                    positionMs: r.positionMs || 0,
+                  });
+                } else if (r.track?.id) {
+                  usePlayerStore.getState().restoreState(r.track, r.positionMs || 0);
                 }
               } catch {
                 /* bozuk resume state — yoksay */

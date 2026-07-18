@@ -25,6 +25,8 @@ import { useLibraryStore } from "../store/useLibraryStore";
 import { formatMs } from "../lib/format";
 import { isTauri } from "../lib/db";
 import { useT } from "../lib/i18n";
+import { reasonText } from "../lib/recommender";
+import { useSettingsStore } from "../store/useSettingsStore";
 import { getTrackKarma, voteTrack, undoVote, ensureTrack } from "../lib/playlists";
 import AddToPlaylistButton from "./AddToPlaylistButton";
 import KarmaControl from "./KarmaControl";
@@ -38,6 +40,7 @@ function VolumeIcon({ volume, muted }: { volume: number; muted: boolean }) {
 
 export default function NowPlayingBar() {
   const t = useT();
+  const lang = useSettingsStore((s) => s.language);
   const {
     status,
     current,
@@ -170,12 +173,14 @@ export default function NowPlayingBar() {
           {current?.isRecommendation && (
             <div
               className="mb-0.5 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-accent"
-              title={current.recReason}
+              title={reasonText(current.recReason, lang)}
             >
               <Sparkles size={11} />
               <span className="truncate">
                 {t("rec.badge")}
-                {current.recReason ? ` · ${current.recReason}` : ""}
+                {current.recReason
+                  ? ` · ${reasonText(current.recReason, lang)}`
+                  : ""}
               </span>
             </div>
           )}

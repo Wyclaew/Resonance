@@ -59,6 +59,7 @@ interface PlayerState {
   startDiscovery: () => Promise<void>;
   rerollDiscovery: () => Promise<void>;
   restoreState: (track: Track, positionMs: number) => void;
+  restoreDiscovery: (state: DiscoveryResume) => void;
   toggle: () => void;
   next: () => void;
   prev: () => void;
@@ -70,6 +71,14 @@ interface PlayerState {
   toggleMute: () => void;
   cycleShuffle: () => void;
   cycleRepeat: () => void;
+}
+
+// Kapat-aç arası Keşfet kuyruğunu hatırlamak için kaydedilen hafif durum.
+interface DiscoveryResume {
+  queue: QueueItem[];
+  queueIndex: number;
+  seedArtists: string[];
+  positionMs: number;
 }
 
 const repeatOrder: RepeatMode[] = ["off", "all", "one"];
@@ -257,6 +266,16 @@ function persistVolume(v: number) {
 // Son çalan şarkı + pozisyonu ayarlara kaydet (kaldığın yerden devam). Tick her
 // 250ms geldiği için throttle'lanır (~5sn'de bir yazılır).
 let lastStateSave = 0;
+// Çalan durumu settings'e yazar (kaldığın yerden devam).
+// ⭐ KEŞFET AKTİFSE tüm kuyruğu kaydeder → kapat-aç son Keşfet partisini aynen
+// getirir, reroll atmadıkça değişmez (kullanıcı isteği). Değilse tek şarkı
+// (mode yok = geriye dönük uyumlu "single").
+function liteItem(i: QueueItem): QueueItem {
+  return {
+    ...i,
+    // uid restore'da yeniden üretilir; yine de saklamak zararsız.
+  };
+}
 function persistPlaybackState(force = false) {
   const st = usePlayerStore.getState();
   const c = st.current;
@@ -264,19 +283,30 @@ function persistPlaybackState(force = false) {
   const now = Date.now();
   if (!force && now - lastStateSave < 5000) return;
   lastStateSave = now;
-  const payload = JSON.stringify({
-    track: {
-      id: c.id,
-      source: c.source,
-      sourceId: c.sourceId,
-      title: c.title,
-      artist: c.artist,
-      album: c.album,
-      thumbnail: c.thumbnail,
-      durationMs: c.durationMs,
-    },
-    positionMs: st.positionMs,
-  });
+
+  const isDiscovery =
+    st.radioActive && st.radioPlaylistId === DISCOVERY_ID && st.queue.length > 0;
+  const payload = isDiscovery
+    ? JSON.stringify({
+        mode: "discovery",
+        queue: st.queue.map(liteItem),
+        queueIndex: st.queueIndex,
+        seedArtists: st.discoverySeedArtists,
+        positionMs: st.positionMs,
+      })
+    : JSON.stringify({
+        track: {
+          id: c.id,
+          source: c.source,
+          sourceId: c.sourceId,
+          title: c.title,
+          artist: c.artist,
+          album: c.album,
+          thumbnail: c.thumbnail,
+          durationMs: c.durationMs,
+        },
+        positionMs: st.positionMs,
+      });
   useSettingsStore.getState().update("resumeState", payload);
 }
 
@@ -727,6 +757,48 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       positionMs,
       durationMs: track.durationMs,
     });
+  },
+
+  // Açılışta son Keşfet kuyruğunu DURAKLATILMIŞ geri yükle (çalmaz; play'e
+  // basınca kaldığı pozisyondan devam). Kuyruk aynen gelir → reroll atmadıkça
+  // değişmez. Prewarm'a dokunmaz; Keşfet zaten aktif sayılır.
+  restoreDiscovery: (state) => {
+    const items: QueueItem[] = state.queue.map((it) => ({
+      ...it,
+      uid: crypto.randomUUID(),
+    }));
+    if (items.length === 0) return;
+    const idx = Math.min(Math.max(0, state.queueIndex), items.length - 1);
+    const first = items[idx];
+    hasLoaded = false;
+    resumeMsPending = state.positionMs;
+    rememberRecs(
+      items
+        .filter((i) => i.isRecommendation)
+        .map((i) => ({ ...i, recSource: i.recSource!, reason: { key: "rec.fromPlaylist" } }))
+    );
+    set({
+      queue: items,
+      queueIndex: idx,
+      current: first,
+      status: "paused",
+      positionMs: state.positionMs,
+      durationMs: first.durationMs,
+      radioActive: true,
+      radioPlaylistId: DISCOVERY_ID,
+      shuffleMode: "smart",
+      discoverySeedArtists: state.seedArtists ?? [],
+    });
+    // Sıradakileri önden indir (play'e basınca hazır olsun).
+    if (isTauri()) {
+      const s = useSettingsStore.getState();
+      for (const it of items.slice(idx, idx + 5)) {
+        invoke("prefetch_audio", {
+          sourceId: it.sourceId,
+          cookiesBrowser: s.cookiesBrowser,
+        }).catch(() => {});
+      }
+    }
   },
 
   toggle: () => {

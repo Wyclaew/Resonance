@@ -1,9 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Track } from "../types";
+import type { Track, RecReason } from "../types";
 import { getDb, isTauri } from "./db";
 import { decayWeight } from "./karma";
 import { useSettingsStore } from "../store/useSettingsStore";
-import { t, dayNameOf } from "./i18n";
+import { t, dayNameOf, type Lang } from "./i18n";
 
 // Resonance öneri motoru (M4).
 // "Hangi gün/saat hangi şarkıya oy verdin" sinyalinden sanatçı yakınlığı
@@ -12,9 +12,28 @@ import { t, dayNameOf } from "./i18n";
 
 export interface Recommendation extends Track {
   recSource: "youtube" | "library";
-  reason: string;
+  // reason ARTIK STRING DEĞİL — {anahtar, parametreler}. Neden: string üretim
+  // anındaki dile göre sabitlenirdi; dil sonradan değişince (veya prewarm settings
+  // yüklenmeden çalışınca) yanlış dilde kalırdı. Yapısal saklayıp GÖSTERİRKEN
+  // çeviriyoruz → dil değişimine ve kalıcı kuyruğa dayanıklı. `dow` sayı olarak
+  // saklanır; gün ADI render anında dayNameOf ile üretilir.
+  reason: RecReason;
   // Bu öneriyi hangi sanatçının radyosu getirdi ("reroll"da o tarzı dışlamak için).
   seedArtist?: string;
+}
+
+// RecReason'i O ANKİ dilde metne çevir (göstericiler bunu çağırır).
+// dow → gün ADI render anında üretilir, böylece dil değişince metin de değişir.
+export function reasonText(r: RecReason | undefined, lang?: Lang): string {
+  if (!r) return "";
+  const params: Record<string, string | number> = {};
+  if (r.seed !== undefined) params.seed = r.seed;
+  if (r.artist !== undefined) params.artist = r.artist;
+  if (r.dow !== undefined) params.day = dayNameOf(lang ?? getLang(), r.dow);
+  return t(r.key, params);
+}
+function getLang(): Lang {
+  return useSettingsStore.getState().language;
 }
 
 interface VoteRow {
@@ -265,7 +284,6 @@ async function computeRecommendations(
   const d = new Date();
   const curHour = d.getHours();
   const curDow = d.getDay();
-  const lang = useSettingsStore.getState().language;
 
   // --- SİNYAL KATMANLARI ---
   // İki ayrı harita, BİLEREK farklı besleniyor (bu ayrım kritik):
@@ -472,7 +490,7 @@ async function computeRecommendations(
       recs.push({
         ...toTrack(c),
         recSource: "library",
-        reason: t("rec.favorite", { day: dayNameOf(lang, curDow) }),
+        reason: { key: "rec.favorite", dow: curDow },
       });
       taken.add(c.id);
       favAdded++;
@@ -595,11 +613,8 @@ async function computeRecommendations(
             recSource: "youtube",
             seedArtist: seed.artist,
             reason: newArtist
-              ? t("rec.newDiscovery", { seed: seed.artist, artist: r.artist })
-              : t("rec.contextual", {
-                  day: dayNameOf(lang, curDow),
-                  seed: seed.artist,
-                }),
+              ? { key: "rec.newDiscovery", seed: seed.artist, artist: r.artist }
+              : { key: "rec.contextual", seed: seed.artist, dow: curDow },
           });
           taken.add(r.id);
           takenCores.add(songCore(r.title, r.artist));
@@ -692,7 +707,7 @@ async function addSearchFallback(
       recs.push({
         ...r,
         recSource: "youtube",
-        reason: t("rec.fromPlaylist", { seed }),
+        reason: { key: "rec.fromPlaylist", seed },
       });
       taken.add(r.id);
       takenCores.add(songCore(r.title, r.artist));

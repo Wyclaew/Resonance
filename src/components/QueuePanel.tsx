@@ -10,6 +10,8 @@ import {
 } from "lucide-react";
 import { usePlayerStore, DISCOVERY_ID } from "../store/usePlayerStore";
 import { useT } from "../lib/i18n";
+import { reasonText } from "../lib/recommender";
+import { useSettingsStore } from "../store/useSettingsStore";
 import { useAppStore } from "../store/useAppStore";
 import { formatMs } from "../lib/format";
 
@@ -17,6 +19,7 @@ import { formatMs } from "../lib/format";
 // sırala, kuyruktan çıkar. Öneri serpiştirmeleri işaretlenir.
 export default function QueuePanel() {
   const t = useT();
+  const lang = useSettingsStore((s) => s.language);
   const queue = usePlayerStore((s) => s.queue);
   const queueIndex = usePlayerStore((s) => s.queueIndex);
   const current = usePlayerStore((s) => s.current);
@@ -192,7 +195,7 @@ export default function QueuePanel() {
               {item.isRecommendation && (
                 <div
                   className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-accent"
-                  title={item.recReason}
+                  title={reasonText(item.recReason, lang)}
                 >
                   <Sparkles size={10} /> {t("queue.pickBadge")}
                 </div>

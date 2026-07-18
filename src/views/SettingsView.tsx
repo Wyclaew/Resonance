@@ -264,12 +264,9 @@ function IntegrationsSettings() {
         {t("settings.spotifyIntro")}
       </p>
       <p className="mb-4 text-sm leading-relaxed text-muted">
-        {t("settings.spotifyOptional")}{" "}
-        <span className="text-accent">developer.spotify.com</span> → Dashboard →
-        Create app → Client ID ve Client Secret'ı buraya yapıştır (Redirect URI
-        zorunlu değil). Anahtarlar cihazında kalır.
+        {t("settings.spotifyOptional")} {t("settings.spotifyKeysHelp")}
       </p>
-      <SettingRow label="Client ID" description="Spotify Developer Dashboard'dan">
+      <SettingRow label="Client ID" description={t("settings.clientIdDesc")}>
         <input
           value={spotifyClientId}
           onChange={(e) => update("spotifyClientId", e.target.value.trim())}

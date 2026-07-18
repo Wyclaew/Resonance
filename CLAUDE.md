@@ -4,12 +4,15 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.2.1** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.2.2** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
 medya tuşları artık çalışıyor; kilit ekranında şarkı bilgisi. Ayrıca çerçevesiz pencere,
 UI'da gerçek logo (◈ değil), Windows'a ÖZEL tam-taşan ikon.
+v1.2.2'de: Windows CI build fix (`raw-window-handle` dep), **Keşfet kuyruğu kalıcı** (kapat-aç
+hatırlar, reroll'a kadar sabit), öneri gerekçesi YAPISAL (dil değişince çevrilir), playlist
+ekleme/oluşturma toast'ları, çeşitli i18n düzeltmeleri.
 
 > Ayrıntılı geçmiş + kararlar otomatik bellekte (`memory/resonance-project.md`).
 > Mobil planı `docs/MOBILE.md`, senkron protokolü `docs/SYNC.md`, sürüm rehberi `docs/RELEASE.md`.
@@ -136,6 +139,11 @@ Tüm sinyaller tek skorda birleşir:
 - **Kapsam kritiği:** `excludeIds` (ID) TEK BAŞINA YETMEZ — aynı şarkının farklı kaydının ID'si farklıdır.
   Bu yüzden `excludeCores` (songCore kümesi) de her çağrıya geçirilir; store'da oturum boyu tutulur
   (`recommendedCoresThisSession`).
+- **⭐ ÖNERİ GEREKÇESİ YAPISAL** (v1.2.2, `RecReason` = {key, seed?, artist?, dow?}, STRING DEĞİL):
+  eskiden reason üretim anındaki dile göre string olarak sabitleniyordu → dil sonradan değişince
+  (veya prewarm settings yüklenmeden çalışınca) yanlış dilde kalıyordu ("cumartesi bu saatlerde"
+  EN arayüzde). Artık `reasonText(reason, lang)` GÖSTERİRKEN çevirir; `dow` sayı saklanır, gün adı
+  render anında `dayNameOf` ile üretilir. Kalıcı Keşfet kuyruğunda da doğru dilde gelir.
 - `getRecommendations` kalıcı geçmişe **yazar**; `record: false` ile yazmadan hesaplanır (prewarm bunu
   kullanır, öneri gerçekten kullanılınca `recordRecommended` çağrılır → prewarm önerileri boşa harcanmaz).
 - **Bilinçli tercih:** `songCore` aynı isimli GERÇEKTEN farklı şarkıları da eleyebilir. Kullanıcı bunu
@@ -266,6 +274,9 @@ Tüm sinyaller tek skorda birleşir:
 
 **Konfor:**
 - **Kaldığın yerden devam** (son şarkı + pozisyon, açılışta duraklatılmış gelir).
+  **⭐ Keşfet aktifse TÜM kuyruk kaydedilir** (v1.2.2, `resumeState` içinde `mode:"discovery"` +
+  queue + index + seedArtists): kapat-aç son Keşfet partisini aynen getirir, reroll atmadıkça
+  değişmez. `restoreDiscovery` duraklatılmış kurar; play'e basınca kaldığı yerden devam.
 - **Ambiyans ekranı**: X sn etkileşimsizlikte çalan şarkıyı tam ekran gösterir (süre Ayarlar'dan, **"Özel…"**
   ile manuel dakika).
 - **Arka plan FPS modu**: pencere odağı kaybedince animasyon/geçişler kapanır, tick saniyede 1'e iner
