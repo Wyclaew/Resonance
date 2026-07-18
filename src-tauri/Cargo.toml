@@ -47,6 +47,12 @@ tauri-plugin-autostart = "2"
 tauri-plugin-global-shortcut = "2"
 tokio = { version = "1", features = ["sync"] }
 
+# YALNIZ Windows: souvlaki'nin SMTC'si için pencere HWND'sini almak gerekiyor
+# (media_controls.rs). Tauri zaten 0.6 kullanıyor; aynı sürüm — macOS'ta bu dep
+# hiç çekilmez (target cfg windows). Bu eksikti → Windows CI derlemesi patlıyordu.
+[target.'cfg(windows)'.dependencies]
+raw-window-handle = "0.6"
+
 [profile.release]
 # Hafif sürüm: küçük ikili, iyi performans.
 codegen-units = 1

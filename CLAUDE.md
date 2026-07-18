@@ -42,6 +42,11 @@ Doğrulama: computer-use ekran görüntüsü (`request_access` uygulama adı **`
 `sqlite3 ~/Library/"Application Support"/com.resonance.app/resonance.db "..."`.
 Uygulama logu: macOS `~/Library/Logs/com.resonance.app/`, Windows `%APPDATA%\com.resonance.app\logs\`.
 **Preview (web) MCP'si işe yaramaz** — Tauri özellikleri (yt-dlp, DB, invoke) orada çalışmaz.
+**⭐ WINDOWS-ONLY Rust kodunu macOS'tan DOĞRULA** (`#[cfg(windows)]` blokları `cargo check`'te
+atlanır → hata Windows CI'da patlar; v1.2.1'de `raw_window_handle` eksikliği böyle kaçtı):
+`brew install mingw-w64 && rustup target add x86_64-pc-windows-gnu`, sidecar için
+`touch src-tauri/binaries/{yt-dlp,ffmpeg}-x86_64-pc-windows-gnu.exe` (sahte, .gitignore'da),
+sonra `cd src-tauri && cargo check --target x86_64-pc-windows-gnu`. Bitince sahte dosyaları sil.
 
 ## Mimari özet
 - **Görünümler** (`src/views/`): Home (Şu An), Search, Library, Downloads, Playlist, Import, Settings.

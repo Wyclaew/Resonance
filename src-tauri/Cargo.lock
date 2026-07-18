@@ -3803,6 +3803,7 @@ version = "1.2.1"
 dependencies = [
  "anyhow",
  "log",
+ "raw-window-handle",
  "reqwest 0.12.28",
  "rodio",
  "serde",
