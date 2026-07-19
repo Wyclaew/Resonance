@@ -1,67 +1,78 @@
 # Resonance
 
-Hafif, karma tabanlı kişisel müzik oynatıcı. **Mac & Windows** (Android planlandı: `docs/MOBILE.md`).
+Lightweight, karma-based personal music player. **Mac & Windows** (Android planned: `docs/MOBILE.md`).
 
-- **Hafif:** Tauri 2 (Rust + sistem webview). Electron değil.
-- **Kaynak:** YouTube (yt-dlp). Spotify / YouTube Music çalma listeleri link ile içe aktarılır
-  (Spotify için **anahtar gerekmez**).
-- **Karma:** Çalma listelerinde Reddit tarzı upvote/downvote — zaman decay'li skor.
-- **Öğrenen öneri:** Hangi gün/saat neyi oyladığını, **gerçekte ne kadar dinlediğini** ve
-  **çalma listelerine neleri eklediğini** öğrenen, hafif ve açıklanabilir bir algoritma.
-  Beğendiğin tarzda **yeni sanatçılar** keşfeder; sevdiğin şarkılar doğru gün/saatte geri gelir.
-- **Keşfet:** Playlist'siz, tamamen öneriyle ilerleyen sonsuz keşif modu (sıra hep önden dolu).
-- **Tamamen yerel:** sunucu yok, hesap yok, veri cihazında.
-- **Türkçe / İngilizce** arayüz, **koyu / açık** tema.
+- **Lightweight:** Tauri 2 (Rust + system webview). Not Electron.
+- **Source:** YouTube (yt-dlp). Spotify / YouTube Music playlists can be imported via link (**no key required** for Spotify).
+- **Karma:** Reddit-style upvotes/downvotes on playlists — with time-decay scoring.
+- **Learning recommendation:** A lightweight and explainable algorithm that learns what you vote for, **how much you actually listen to**, and **what you add to your playlists** based on the day/time. It discovers **new artists** in the styles you like; songs you love return at the right day/time.
+- **Discover:** An endless discovery mode driven entirely by recommendations, without playlists (the queue is always pre-filled).
+- **Completely local:** no servers, no accounts, data stays on your device.
+- **Turkish / English** interface, **dark / light** theme.
 
-> Kişisel kullanım içindir. YouTube'dan ses çekmek YouTube ToS'una aykırı olabilir;
-> depoyu özel (private) tutun.
+> For personal use only. Extracting audio from YouTube may violate YouTube's ToS; keep the repository private.
 
-## Geliştirme
+## Development
 
 ```bash
 npm install
-npm run build                                  # frontend tip kontrolü
-cd src-tauri && cargo check                    # Rust tip kontrolü
-npm run tauri build -- --debug --bundles app   # yerel debug paketi
-npm run tauri build                            # .dmg / .exe üret
+npm run build                                  # frontend type check
+cd src-tauri && cargo check                    # Rust type check
+npm run tauri build -- --debug --bundles app   # local debug bundle
+npm run tauri build                            # generate .dmg / .exe
 ```
 
-Gereksinimler: Node, Rust. `yt-dlp` + `ffmpeg` sistemde varsa kullanılır (hızlı),
-yoksa uygulamaya gömülü sidecar devreye girer.
+Requirements: Node, Rust. Uses system `yt-dlp` + `ffmpeg` if available (fast), otherwise falls back to the embedded sidecar in the application.
 
-> `npm run tauri dev` bazı ortamlarda GUI açamıyor — ayrıntı ve doğrulama akışı için `CLAUDE.md`.
+### Installation Note for macOS Users
 
-## Dokümanlar
+Our application is currently not signed with an official Apple Developer certificate. Therefore, when you download and try to open the `.dmg` file, macOS Gatekeeper may display an **"App is damaged and should be moved to the Trash"** or **"Cannot be verified"** warning. This is completely normal for open-source applications.
 
-| Dosya | İçerik |
+To run it without issues, please follow these steps:
+
+1. Open the downloaded `.dmg` file and drag the app into your **Applications** folder.
+2. Open **Terminal** on your Mac.
+3. Run the following command to remove the macOS quarantine lock:
+
+```bash
+xattr -cr /Applications/Resonance.app
+```
+> *Note: Make sure to replace `Resonance.app` with the exact name of the application.*
+
+4. You can now safely launch the app from your Applications folder or Launchpad! 
+
+> `npm run tauri dev` fails to open the GUI in some environments — see `CLAUDE.md` for details and the validation flow.
+
+## Documentation
+
+| File | Content |
 | --- | --- |
-| `CLAUDE.md` | **Mimari, kritik kararlar, tuzaklar** — geliştirmeye başlamadan önce oku |
-| `docs/MOBILE.md` | Mobil uygulama planı (ses katmanı seçenekleri, fazlar, riskler) |
-| `docs/SYNC.md` | Cihazlar arası senkron planı (Supabase, şema değişiklikleri) |
-| `docs/RELEASE.md` | Sürüm çıkarma / CI rehberi |
+| `CLAUDE.md` | **Architecture, critical decisions, pitfalls** — read before starting development |
+| `docs/MOBILE.md` | Mobile app plan (audio layer options, phases, risks) |
+| `docs/SYNC.md` | Cross-device sync plan (Supabase, schema changes) |
+| `docs/RELEASE.md` | Release / CI guide |
 
-## Durum
+## Status
 
-**v1.2.0** — masaüstü olgun ve günlük kullanımda. M0–M8 tamamlandı; Mac'te sorunsuz,
-Windows'ta bilinen tüm indirme/çalma sorunları çözüldü.
+**v1.2.0** — desktop is mature and in daily use. M0–M8 completed; runs flawlessly on Mac, all known download/playback issues on Windows have been resolved.
 
-| Aşama | İçerik | Durum |
+| Phase | Content | Status |
 | --- | --- | --- |
-| M0 | İskelet (Tauri + React + SQLite) | ✅ |
-| M1 | Çekirdek oynatma (yt-dlp + Rust ses motoru) | ✅ |
-| M2 | Kütüphane & çalma listeleri | ✅ |
+| M0 | Skeleton (Tauri + React + SQLite) | ✅ |
+| M1 | Core playback (yt-dlp + Rust audio engine) | ✅ |
+| M2 | Library & playlists | ✅ |
 | M3 | Karma (upvote/downvote + decay) | ✅ |
-| M4 | Öğrenen öneri algoritması | ✅ |
-| M5 | İçe aktarma (Spotify / YouTube Music) | ✅ |
-| M6 | Detaylı ayarlar | ✅ |
-| M7 | Ekstralar (sözler, sleep timer, medya tuşları, komut paleti, ambiyans, autostart) | ✅ |
-| M8 | Paketleme & CI (dmg + exe) | ✅ |
-| — | Keşfet modu, akıllı karışık, kaldığın yerden devam, yedek/geri yükle | ✅ |
-| — | TR/EN dil, açık tema, ilk açılış rehberi (v1.2.0) | ✅ |
-| M9 | Mobil (Android) + senkron | 📋 planlandı |
+| M4 | Learning recommendation algorithm | ✅ |
+| M5 | Import (Spotify / YouTube Music) | ✅ |
+| M6 | Detailed settings | ✅ |
+| M7 | Extras (lyrics, sleep timer, media keys, command palette, ambiance, autostart) | ✅ |
+| M8 | Packaging & CI (dmg + exe) | ✅ |
+| — | Discover mode, smart shuffle, resume playback, backup/restore | ✅ |
+| — | TR/EN language, light theme, onboarding guide (v1.2.0) | ✅ |
+| M9 | Mobile (Android) + sync | 📋 planned |
 
-Opsiyonel/ertelenen: equalizer (rodio'da DSP), mini/menubar player, gerçek streaming.
+Optional/deferred: equalizer (DSP in rodio), mini/menubar player, true streaming.
 
 ---
 
-Yapan: **Wyclaew**
+Created by: **Wyclaew**
