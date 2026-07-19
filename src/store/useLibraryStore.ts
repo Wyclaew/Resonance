@@ -5,6 +5,7 @@ import { isTauri } from "../lib/db";
 import * as lib from "../lib/library";
 import { useSettingsStore } from "./useSettingsStore";
 import { useToastStore } from "./useToastStore";
+import { t } from "../lib/i18n";
 
 // İndirilenler kütüphanesi. downloadedIds hızlı arama için (ikon göstergesi),
 // downloads listesi "İndirilenler" görünümü için.
@@ -71,7 +72,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       });
     } catch (e) {
       console.error("[resonance] indirme hatası:", e);
-      useToastStore.getState().show(`İndirilemedi: ${track.title}`, "error");
+      useToastStore
+        .getState()
+        .show(t("toast.downloadFailed", { title: track.title }), "error");
       set((s) => {
         const dTo = new Set(s.downloadingIds);
         dTo.delete(track.id);

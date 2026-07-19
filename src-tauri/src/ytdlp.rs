@@ -505,6 +505,14 @@ pub fn ensure_audio(
         "--no-playlist",
         "--no-warnings",
         "--no-part",
+        // Tek çağrı içindeki GEÇİCİ HTTP hatalarına (403/429 throttle) karşı
+        // yt-dlp'nin kendi yeniden denemeleri. Aynı format URL'sine tekrar
+        // vurur; asıl kurtarma app seviyesindeki taze-çıkarım döngüsündedir
+        // (aşağıda), bu ilk savunma hattı.
+        "--retries",
+        "3",
+        "--fragment-retries",
+        "3",
     ];
     // ffmpeg'i açıkça bildir (DASH m4a düzeltmesi için; Windows'ta şart).
     if let Some(s) = ff_str.as_deref() {
@@ -513,41 +521,76 @@ pub fn ensure_audio(
     }
     args.extend(["-o", dl_tmpl_str, "--", &url]);
 
-    // Önce ÇEREZSİZ dene: çerezsiz akış gerçek formatları getirir. Giriş
-    // yapılmış çerez ise YouTube'u "bot" moduna sokup yalnızca storyboard
-    // döndürebiliyor ("Requested format is not available"). Başarısız olur ve
-    // kullanıcı bir tarayıcı seçtiyse, çerezle bir kez daha dene (yaş/bölge
-    // kısıtlı veya özel video için).
-    let mut out = run_yt_dlp(&args, None)?;
-    if !out.status.success() {
-        let err0 = String::from_utf8_lossy(&out.stderr).into_owned();
-        // Kalıcı hata (silinmiş/özel/erişilemez): çerez de -F de kurtarmaz → dur.
-        if is_permanent_error(&err0) {
-            log::error!("kalıcı hata {video_id}: {}", err0.trim());
+    // ⭐ TAZE-ÇIKARIM RETRY (v1.2.3): asıl ses baytlarını indirirken YouTube
+    // çok sayıda eşzamanlı istek (Keşfet prefetch + radyo besleme + toplu
+    // indirme) altında GEÇİCİ "HTTP 403 Forbidden" döndürüyor. Format çözülür
+    // (--simulate geçer) ama bayt indirme reddedilir → "indirilemedi". Ölçüldü:
+    // 403 veren videolar birkaç saniye/dakika sonra AYNI argümanla iniyor,
+    // çünkü her yeni yt-dlp çağrısı TAZE format URL'si üretir. O yüzden geçici
+    // hatada kısa (artan) bekleyip yeniden dene — tek deneme yerine 3.
+    //
+    // Çerez: kullanıcı tarayıcı seçtiyse İLK başarısızlıkta bir kez çerezle de
+    // dene (yaş/bölge kısıtlı içerik için; 403 throttle'a etkisi yok, zararsız).
+    const MAX_ATTEMPTS: usize = 3;
+    let mut out: Option<std::process::Output> = None;
+    let mut last_err = String::new();
+    for attempt in 0..MAX_ATTEMPTS {
+        let o = run_yt_dlp(&args, None)?;
+        if o.status.success() {
+            out = Some(o);
+            break;
+        }
+        let err = String::from_utf8_lossy(&o.stderr).into_owned();
+        // Kalıcı hata (silinmiş/özel/erişilemez): ne çerez ne retry kurtarır.
+        if is_permanent_error(&err) {
+            log::error!("kalıcı hata {video_id}: {}", err.trim());
             anyhow::bail!("Bu video kullanılamıyor (kaldırılmış/özel/kısıtlı).");
         }
-        // Geçici olabilir: kullanıcı tarayıcı seçtiyse çerezle bir kez daha dene.
-        if let Some(c) = cookies {
-            if !c.is_empty() {
-                log::info!("çerezsiz başarısız, çerezle yeniden deneniyor: {video_id}");
-                out = run_yt_dlp(&args, Some(c))?;
+        // İlk denemede çerezli tek deneme (yaş/bölge kısıtı için).
+        if attempt == 0 {
+            if let Some(c) = cookies {
+                if !c.is_empty() {
+                    log::info!("çerezsiz başarısız, çerezle deneniyor: {video_id}");
+                    let oc = run_yt_dlp(&args, Some(c))?;
+                    if oc.status.success() {
+                        out = Some(oc);
+                        break;
+                    }
+                    let errc = String::from_utf8_lossy(&oc.stderr).into_owned();
+                    if is_permanent_error(&errc) {
+                        anyhow::bail!("Bu video kullanılamıyor (kaldırılmış/özel/kısıtlı).");
+                    }
+                }
             }
         }
-    }
-    if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr);
-        log::error!("yt-dlp indirme hata {video_id}: {}", err.trim());
-        if is_permanent_error(&err) {
-            anyhow::bail!("Bu video kullanılamıyor (kaldırılmış/özel/kısıtlı).");
+        last_err = err;
+        // Son deneme değilse: artan bekleme (throttle'ı azdırmamak için), sonra
+        // TAZE çıkarımla yeniden. 1.2sn, 2.4sn.
+        if attempt + 1 < MAX_ATTEMPTS {
+            let backoff = std::time::Duration::from_millis(1200 * (attempt as u64 + 1));
+            log::info!(
+                "geçici indirme hatası {video_id} (deneme {}/{}), {}ms sonra yeniden: {}",
+                attempt + 1,
+                MAX_ATTEMPTS,
+                backoff.as_millis(),
+                last_err.trim()
+            );
+            std::thread::sleep(backoff);
         }
-        // Teşhis (yalnızca geçici hatalarda): YouTube hangi formatları sunuyor?
+    }
+
+    // Tüm denemeler geçici hatayla tükendiyse: teşhis logu + vazgeç. (Başarıda
+    // indirilen dosya diskte; aşağıda find_src ile bulunup remux edilir.)
+    if out.is_none() {
+        log::error!("yt-dlp indirme hata {video_id}: {}", last_err.trim());
+        // Teşhis: YouTube hangi formatları sunuyor?
         if let Ok(lf) = run_yt_dlp(&["-F", "--no-warnings", "--", &url], None) {
             log::error!(
                 "mevcut formatlar {video_id}:\n{}",
                 String::from_utf8_lossy(&lf.stdout).trim()
             );
         }
-        anyhow::bail!("İndirme başarısız: {}", err.trim());
+        anyhow::bail!("İndirme başarısız: {}", last_err.trim());
     }
 
     let src = find_src(cache_dir, video_id)

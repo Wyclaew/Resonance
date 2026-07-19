@@ -968,7 +968,16 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   // Karışık modunu döndür: off → shuffle → smart → off.
   cycleShuffle: () => {
-    const { shuffleMode } = get();
+    const { shuffleMode, radioActive, radioPlaylistId } = get();
+    // ⭐ Keşfet'te karışık tuşu KİLİTLİ. Keşfet doğası gereği akıllı-karışık +
+    // sürekli öneri akışıdır; buradan "off"a düşürmek radioActive'i kapatıp
+    // queueIndex sonrası TÜM önerileri siler. Keşfet'te kuyruğun tamamı öneri
+    // olduğu için bu Keşfet'i çökertip "reset" atmasına yol açıyordu. Modu
+    // bozmadan smart'ta tut, kullanıcıya nedenini kısaca bildir.
+    if (radioActive && radioPlaylistId === DISCOVERY_ID) {
+      useToastStore.getState().show(t("player.discoveryShuffleLocked"), "info");
+      return;
+    }
     if (shuffleMode === "off") {
       set({ shuffleMode: "shuffle" });
     } else if (shuffleMode === "shuffle") {

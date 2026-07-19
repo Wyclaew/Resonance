@@ -68,7 +68,8 @@ jobs:
           releaseBody: |
             Otomatik sürüm. macOS `.dmg` ve Windows `.exe` ekte.
 
-            > macOS'ta imzasız olduğu için ilk açılışta sağ tık → Aç ya da
-            > `xattr -cr /Applications/Resonance.app` gerekebilir.
+            > macOS: ad-hoc imzalı (notarize değil). İlk açılışta uygulamaya
+            > **sağ tık → Aç → Aç** de (bir kez); sonra normal çift tıkla açılır.
+            > Windows: "bilinmeyen yayıncı" uyarısında "Yine de çalıştır".
           releaseDraft: true
           prerelease: false

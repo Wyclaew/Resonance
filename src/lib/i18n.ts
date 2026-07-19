@@ -60,6 +60,7 @@ const tr = {
   "player.loadFailed": "Şarkı yüklenemedi, atlanıyor",
   "player.playFailed": "Şarkı çalınamadı",
   "player.smartShuffleNeedsList": "Akıllı karışık için bir listeden çal",
+  "player.discoveryShuffleLocked": "Keşfet zaten akıllı öneriyle çalıyor",
 
   // — Karma / oylama
   "karma.voteHere": "Bu listede bu şarkıyı oyla",
@@ -242,6 +243,7 @@ const tr = {
   "settings.clientIdDesc": "Spotify Developer Dashboard'dan",
   "toast.addedToPlaylist": "\"{name}\" listesine eklendi",
   "toast.playlistCreated": "\"{name}\" listesi oluşturuldu",
+  "toast.downloadFailed": "İndirilemedi: {title}",
   "win.minimize": "Küçült",
   "win.maximize": "Büyüt",
   "win.restore": "Geri yükle",
@@ -469,6 +471,7 @@ const en: Record<TrKey, string> = {
   "player.loadFailed": "Couldn't load the track, skipping",
   "player.playFailed": "Couldn't play the track",
   "player.smartShuffleNeedsList": "Play from a playlist to use smart shuffle",
+  "player.discoveryShuffleLocked": "Discover already plays with smart recommendations",
 
   "karma.voteHere": "Vote on this track in this playlist",
   "karma.cooldown": "One vote per track per hour — try again in {mins} min",
@@ -642,6 +645,7 @@ const en: Record<TrKey, string> = {
   "settings.clientIdDesc": "From the Spotify Developer Dashboard",
   "toast.addedToPlaylist": "Added to \"{name}\"",
   "toast.playlistCreated": "Created playlist \"{name}\"",
+  "toast.downloadFailed": "Download failed: {title}",
   "win.minimize": "Minimize",
   "win.maximize": "Maximize",
   "win.restore": "Restore",

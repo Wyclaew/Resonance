@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.2.2** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.2.3** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -13,6 +13,10 @@ UI'da gerçek logo (◈ değil), Windows'a ÖZEL tam-taşan ikon.
 v1.2.2'de: Windows CI build fix (`raw-window-handle` dep), **Keşfet kuyruğu kalıcı** (kapat-aç
 hatırlar, reroll'a kadar sabit), öneri gerekçesi YAPISAL (dil değişince çevrilir), playlist
 ekleme/oluşturma toast'ları, çeşitli i18n düzeltmeleri.
+v1.2.3'te: **macOS ad-hoc imza** (`signingIdentity:"-"` → "damaged" hatası biter, sağ tık→Aç),
+**indirme taze-çıkarım retry** (geçici HTTP 403 throttle'a karşı 3 deneme → çok daha az
+"indirilemedi"), Keşfet'te karışık tuşu KİLİTLİ (modu bozup reset atmıyor), indirme-hatası
+toast'ı + iki i18n düzeltmesi.
 
 > Ayrıntılı geçmiş + kararlar otomatik bellekte (`memory/resonance-project.md`).
 > Mobil planı `docs/MOBILE.md`, senkron protokolü `docs/SYNC.md`, sürüm rehberi `docs/RELEASE.md`.
@@ -195,6 +199,18 @@ Tüm sinyaller tek skorda birleşir:
     ölü bir öneri hata verince O AN çalan şarkı atlanıyordu ("durup dururken şarkı geçti" bug'ı).
 11. **`is_permanent_error`**: "Video unavailable/private/removed" → çerez retry'ı ve `-F` yapma, hemen bırak.
     DİKKAT: "requested format is not available" **geçicidir**, buraya ASLA ekleme.
+11b. **⭐ İNDİRME 403 = GEÇİCİ THROTTLE, RETRY GEREKİR** (v1.2.3, `ensure_audio`): asıl ses baytlarını
+    indirirken YouTube çok sayıda eşzamanlı istek altında "unable to download video data: HTTP Error 403
+    Forbidden" döndürüyor. **Format ÇÖZÜLÜR** (`--simulate` geçer, `-F` liste verir) ama bayt indirme
+    reddedilir → tek denemede "indirilemedi". ÖLÇÜLDÜ: 403 veren videolar dakikalar sonra AYNI argümanla
+    iniyor, çünkü **her yeni yt-dlp çağrısı TAZE format URL'si** üretir. Çözüm: geçici hatada artan
+    beklemeyle (1.2sn/2.4sn) **3 kez taze-çıkarım retry** + yt-dlp'nin kendi `--retries/--fragment-retries`.
+    **Bu bir client/format sorunu DEĞİL** — `player_client=ios/android` denendi, DAHA KÖTÜ ("Requested
+    format is not available", ios m4a vermez; android 96k). `--simulate` ile test YANILTIR (403 orada
+    görünmez); gerçek indirme + app logu (`~/Library/Logs/com.resonance.app/`) ile teşhis et.
+    **Not:** `resolve_bin` sistemi (`/opt/homebrew/bin`) app_data/bin'den (runtime güncellenen) ÖNCE
+    seçer → dev makinesinde eski Homebrew yt-dlp, taze auto-update'i gölgeliyor olabilir (`brew upgrade
+    yt-dlp` veya sistemden kaldır). Son kullanıcıda sistemde yt-dlp yok → auto-update düzgün kullanılır.
 12. **`tracks`'e ASLA `INSERT OR REPLACE` YAPMA** → satırı silip ekler, `ON DELETE CASCADE` şarkıyı TÜM
     listelerden uçurur. `ensureTrack` (`src/lib/playlists.ts`) `ON CONFLICT(id) DO UPDATE` kullanır; onu çağır.
 13. **Oy verirken VE dinleme kaydederken ÖNCE `ensureTrack` çağır — yoksa SİNYAL SAYILMAZ.** `recommender.ts` oyları
