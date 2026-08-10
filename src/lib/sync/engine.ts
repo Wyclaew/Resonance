@@ -220,7 +220,7 @@ async function pullTable(spec: TableSpec, userId: string): Promise<number> {
   const db = await getDb();
   const sql = upsertSql(spec);
 
-  let { lastPulled } = await readWatermarks(spec.name);
+  const { lastPulled } = await readWatermarks(spec.name);
   let since = lastPulled || EPOCH0;
   let applied = 0;
 
@@ -261,7 +261,6 @@ async function pullTable(spec: TableSpec, userId: string): Promise<number> {
     if (!next || next === since) break; // ilerleme yok → sonsuz döngüyü kes
     since = next;
     await writeWatermark(spec.name, { lastPulled: since });
-    lastPulled = since;
     if (rows.length < PAGE || stopAdvancing) break;
   }
 

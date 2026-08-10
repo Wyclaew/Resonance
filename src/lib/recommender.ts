@@ -6,6 +6,8 @@ import { useSettingsStore } from "../store/useSettingsStore";
 import { t, dayNameOf, type Lang } from "./i18n";
 import { getDeviceId, newUid } from "./device";
 import { notifyLocalChange } from "./sync/engine";
+import { isProbeCandidate, moodMultiplier } from "./mood";
+import { queriesFor } from "./filters";
 
 // Resonance öneri motoru (M4).
 // "Hangi gün/saat hangi şarkıya oy verdin" sinyalinden sanatçı yakınlığı
@@ -22,6 +24,8 @@ export interface Recommendation extends Track {
   reason: RecReason;
   // Bu öneriyi hangi sanatçının radyosu getirdi ("reroll"da o tarzı dışlamak için).
   seedArtist?: string;
+  /** "Modun değişti mi?" denemesi — bilerek mod dışından seçilmiş parça. */
+  isProbe?: boolean;
 }
 
 // RecReason'i O ANKİ dilde metne çevir (göstericiler bunu çağırır).
@@ -103,11 +107,25 @@ const NON_SONG_PATTERNS: RegExp[] = [
   /\b(documentary|belgesel)\b/,
   /\b(explains?|anlatıyor|açıklıyor|yorumluyor)\b/,
   /\b(gündem|son dakika|münazara|tartışma programı)\b/,
+
+  // — Stok / telifsiz "içerik müziği" (gerçek şarkı değil)
+  // DİKKAT: tek başına "free" KULLANMA → "Free Bird", "Free" (Florence) elenir.
+  // Hepsi iki kelimelik kalıp; gerçek şarkı adlarına çarpma riski çok düşük.
+  /\bno copyright\b/,
+  /\bcopyright[- ]?free\b/,
+  /\broyalty[- ]?free\b/,
+  /\bbackground music\b/,
+  /\b(vlog|gaming|study|workout) music\b/,
+  /\bfree (music|to use|for creators)\b/,
+  /\bncs\b/,
+  /\bstock music\b/,
+  /\bmusic for (videos|content|creators|streamers)\b/,
 ];
 // Kanal adı sinyali: "X Podcast" kanalındaki her şey konuşma içeriğidir.
 // Bilerek dar tutuldu — "talk"/"tv"/"fm" gibi kelimeler müzik kanallarında da
 // geçtiği için (Kral TV, MTV) yanlış eleme yapar.
-const NON_SONG_CHANNEL = /\bpodcasts?\b/;
+const NON_SONG_CHANNEL =
+  /\bpodcasts?\b|\bno copyright\b|\bcopyright[- ]?free\b|\broyalty[- ]?free\b|\bncs\b/;
 
 // Süre tavanı 9 dk: kullanıcının 225 parçalık kütüphanesinde 8 dk'yı geçen TEK
 // parça var (Master of Puppets, 8:35). Eski 12 dk tavanı gereksiz gevşekti ve
@@ -247,6 +265,11 @@ export interface RecommendOpts {
   // false ise kalıcı geçmişe YAZILMAZ (prewarm için: öneriler kullanılmadan
   // "harcanmasın"). Kullanıldığında recordRecommended ile ayrıca kaydedilir.
   record?: boolean;
+  /**
+   * Keşfet filtreleri (ruh hali + tür anahtarları, `lib/filters.ts`).
+   * Boş/undefined → filtre yok, saf öğrenme algoritması çalışır.
+   */
+  filters?: string[];
 }
 
 // Önerilen parçaları kalıcı geçmişe yaz (45 gün tekrar önlenir).
@@ -552,41 +575,125 @@ async function computeRecommendations(
     //
     // Gumbel/exponential hilesi: key = -ln(rastgele)/ağırlık → küçükten sırala
     // = ağırlıklı, tekrarsız örnekleme.
-    const seedTracks = [...bestPerArtist.values()]
-      .filter((x) => !opts.excludeSeedArtists?.has(x.t.artist.toLowerCase()))
-      .map((x) => ({
-        t: x.t,
-        key: -Math.log(Math.random() || 1e-9) / Math.max(0.02, x.score),
-      }))
-      .sort((a, b) => a.key - b.key)
-      .slice(0, 12)
-      .map((x) => x.t);
+    //
+    // ⭐ MOD ÇARPANI (v1.3.0): kalıcı yakınlık "genel olarak kimi seversin"i,
+    // oturum modu "BUGÜN canın ne istiyor"u söyler. Sonuna kadar dinlediğin
+    // tarzlar öne çıkar, hemen geçtiklerin geriler (taban 0.35 → hiçbiri
+    // tamamen ölmez, yoksa keşif kapanır). Bkz. lib/mood.ts.
+    const pool = [...bestPerArtist.values()].filter(
+      (x) => !opts.excludeSeedArtists?.has(x.t.artist.toLowerCase())
+    );
+    const sampleWeighted = (
+      items: typeof pool,
+      n: number,
+      weight: (x: (typeof pool)[number]) => number
+    ) =>
+      items
+        .map((x) => ({
+          t: x.t,
+          key: -Math.log(Math.random() || 1e-9) / Math.max(0.02, weight(x)),
+        }))
+        .sort((a, b) => a.key - b.key)
+        .slice(0, n)
+        .map((x) => x.t);
+
+    const moodSeeds = sampleWeighted(
+      pool,
+      12,
+      (x) => x.score * moodMultiplier(x.t.artist)
+    );
 
     // Zaten sevilen sanatçılar — yeni sanatçı keşiflerini işaretlemek için.
     const knownArtists = new Set(
       [...artistAffinity.keys()].map((a) => a.toLowerCase())
     );
 
-    // Radyo sayısı: farklı sanatçılardan 3 radyo → 3 tarz harmanlanır.
     const needed = opts.limit - recs.length;
-    const radioCount = Math.min(seedTracks.length, needed <= 6 ? 2 : 3);
 
-    // Radyoları paralel çek (3 eşzamanlı yt-dlp — throttle sınırında güvenli).
-    const radios = await Promise.all(
-      seedTracks.slice(0, radioCount).map(async (seed) => {
-        try {
-          const results = await invoke<Track[]>("music_radio", {
-            videoId: seed.source_id,
-            limit: 50,
-          });
-          // Karıştır: hep radyonun ilk parçaları gelmesin (oturumlar arası tekrar).
-          return { seed, results: [...results].sort(() => Math.random() - 0.5) };
-        } catch (e) {
-          console.error("[resonance] radyo alınamadı:", e);
-          return { seed, results: [] as Track[] };
-        }
-      })
-    );
+    // ── Tohumları topla ────────────────────────────────────────────────────
+    // ⚠️ Eskiden yalnız 3 radyo açılıyordu → bir partide 3 tarz → kullanıcının
+    // "hep aynı 3-4 sanatçı" şikâyeti. Artık 6 radyo (2 dalga × 3 eşzamanlı):
+    // yt-dlp throttle sınırı eşzamanlılıkta, TOPLAM sayıda değil.
+    type RadioSeed = { sourceId: string; artist: string; probe?: boolean };
+    const seeds: RadioSeed[] = [];
+    const seenSeedArtist = new Set<string>();
+    const pushSeed = (s: RadioSeed) => {
+      const k = s.artist.toLowerCase();
+      if (!s.sourceId || seenSeedArtist.has(k)) return;
+      seenSeedArtist.add(k);
+      seeds.push(s);
+    };
+
+    const filterIds = opts.filters ?? [];
+    if (filterIds.length > 0) {
+      // FİLTRELİ MOD (karışık kaynak): tohumların çoğu filtreden, birkaçı
+      // kullanıcının kendi zevkinden → hem o tür/ruh hali, hem tanıdık tat.
+      const found = await seedsFromFilters(filterIds);
+      for (const s of found) pushSeed(s);
+      // Kişisel tohum SADECE 1: "karışık" isteniyor ama filtre baskın kalmalı.
+      // 2 olduğunda (ölçüldü) jazz filtresinde radyoların üçte biri kullanıcının
+      // rap sanatçısı olabiliyordu — seçilen tür seyreliyordu.
+      for (const t of moodSeeds.slice(0, 1)) {
+        pushSeed({ sourceId: t.source_id, artist: t.artist });
+      }
+    } else {
+      // FİLTRESİZ: saf öğrenme + mod.
+      for (const t of moodSeeds.slice(0, 5)) {
+        pushSeed({ sourceId: t.source_id, artist: t.artist });
+      }
+      // ⭐ PROB: modu ölçülmemiş bir tarzdan tohum ekle → "modun değişti mi?"
+      // testi. Bundan gelen parçalar isProbe işaretlenir; kullanıcı bunları
+      // dinlerse mod o yöne kayar (lib/mood.ts).
+      const probe = sampleWeighted(
+        pool.filter(
+          (x) =>
+            isProbeCandidate(x.t.artist) &&
+            !seenSeedArtist.has(x.t.artist.toLowerCase())
+        ),
+        1,
+        (x) => x.score
+      )[0];
+      if (probe) {
+        pushSeed({ sourceId: probe.source_id, artist: probe.artist, probe: true });
+      }
+    }
+
+    const radioCount = Math.min(seeds.length, needed <= 6 ? 3 : 6);
+    const chosen = seeds.slice(0, radioCount);
+
+    // Radyoları 3'erli DALGALAR hâlinde çek (aynı anda en fazla 3 yt-dlp →
+    // throttle güvenli; toplamda 6 tohum → 6 farklı tarz).
+    const radios: { seed: RadioSeed; results: Track[] }[] = [];
+    for (let start = 0; start < chosen.length; start += 3) {
+      const wave = await Promise.all(
+        chosen.slice(start, start + 3).map(async (seed) => {
+          try {
+            const results = await invoke<Track[]>("music_radio", {
+              videoId: seed.sourceId,
+              limit: 50,
+            });
+            // Karıştır — ama SAF rastgele değil: kullanıcının yakınlık duyduğu
+            // sanatçılar hafifçe öne çekilir (Gumbel: key = -ln(rnd)/ağırlık).
+            // Tür bozulmaz (parçalar zaten o radyodan), yalnız tanıdık olanlar
+            // biraz öne gelir → istenen "karışık" tat.
+            const weighted = results
+              .map((r) => ({
+                r,
+                key:
+                  -Math.log(Math.random() || 1e-9) /
+                  (1 + Math.max(0, artistAffinity.get(r.artist) ?? 0)),
+              }))
+              .sort((a, b) => a.key - b.key)
+              .map((x) => x.r);
+            return { seed, results: weighted };
+          } catch (e) {
+            console.error("[resonance] radyo alınamadı:", e);
+            return { seed, results: [] as Track[] };
+          }
+        })
+      );
+      radios.push(...wave);
+    }
 
     // ⚠️ ROUND-ROBIN: her radyodan SIRAYLA birer parça al.
     // Eskiden radyolar sırayla tüketiliyordu → ilk radyo 20 kontenjanın hepsini
@@ -609,7 +716,7 @@ async function computeRecommendations(
           if (taken.has(r.id)) continue;
           // Yeni keşifler 45-gün tekrar engeline TABİ (favoriler değil, bkz. yukarı).
           if (recentlyRecommended.has(r.id)) continue;
-          if (r.id === seed.id) continue; // seed'in kendisi
+          if (r.sourceId === seed.sourceId) continue; // seed'in kendisi
           if (playlistKeys.has(normKey(r.title, r.artist))) continue;
           if (takenCores.has(songCore(r.title, r.artist))) continue; // versiyon kopyası
           if (!isLikelySong(r)) continue; // radyoda da nadiren uzun içerik çıkar
@@ -621,6 +728,7 @@ async function computeRecommendations(
             ...r,
             recSource: "youtube",
             seedArtist: seed.artist,
+            isProbe: seed.probe,
             reason: newArtist
               ? { key: "rec.newDiscovery", seed: seed.artist, artist: r.artist }
               : { key: "rec.contextual", seed: seed.artist, dow: curDow },
@@ -647,6 +755,73 @@ async function computeRecommendations(
   }
 
   return recs.slice(0, opts.limit);
+}
+
+/**
+ * Filtrelerden (tür / ruh hali) radyo TOHUMU üretir.
+ *
+ * Akış: filtre sorgusuyla YouTube'da ara → `isLikelySong`ten geçen ilk birkaç
+ * sonuçtan rastgele biri tohum olur → asıl parçalar o tohumun RADYOSUNDAN gelir.
+ *
+ * ⚠️ Arama sonuçları DOĞRUDAN öneri olarak kullanılmaz (CLAUDE.md: metin araması
+ * röportaj/tepki videosu döndürür). Yalnız tohum seçilir ve tohum da süre +
+ * başlık filtresinden geçer. Radyo yapısı gereği şarkı döndürdüğü için tarz
+ * tutarlılığı oradan gelir.
+ */
+async function seedsFromFilters(
+  filterIds: string[]
+): Promise<{ sourceId: string; artist: string }[]> {
+  const queries = queriesFor(filterIds);
+  if (queries.length === 0) return [];
+  const cookiesBrowser = useSettingsStore.getState().cookiesBrowser;
+  const out: { sourceId: string; artist: string }[] = [];
+
+  // 3'erli dalgalar — eşzamanlı yt-dlp sınırı.
+  for (let start = 0; start < queries.length; start += 3) {
+    const wave = await Promise.all(
+      queries.slice(start, start + 3).map(async (q) => {
+        // 1) ÖNCE YouTube MUSIC araması: yalnız müzik kataloğunda arar.
+        try {
+          const m = await invoke<Track[]>("music_search", { query: q, limit: 15 });
+          if (m.length > 0) return { q, results: m, fromMusic: true };
+        } catch (e) {
+          console.error("[resonance] YT Music tohum araması başarısız:", q, e);
+        }
+        // 2) Yedek: normal YouTube araması (kalitesi düşük, bkz. yukarıdaki not).
+        try {
+          const r = await invoke<Track[]>("search_youtube", {
+            query: q,
+            limit: 12,
+            cookiesBrowser,
+          });
+          return { q, results: r, fromMusic: false };
+        } catch (e) {
+          console.error("[resonance] filtre tohumu aranamadı:", q, e);
+          return { q, results: [] as Track[], fromMusic: false };
+        }
+      })
+    );
+    for (const { q, results, fromMusic } of wave) {
+      // YT Music sonuçlarında süre/sanatçı GENELDE BOŞ gelir → isLikelySong'u
+      // uygulama (süresi 0 olanı zaten elemiyor ama sanatçı boş olduğu için
+      // filtreleme anlamsız). Normal arama sonuçlarında filtre uygulanır.
+      const usable = fromMusic
+        ? results.filter((r) => r.sourceId)
+        : results.filter((r) => isLikelySong(r) && r.artist);
+      if (usable.length === 0) continue;
+      // İlk sonucu değil, ilk birkaçından rastgele birini al → her yenilemede
+      // aynı tohum gelmesin.
+      const pick = usable[Math.floor(Math.random() * Math.min(5, usable.length))];
+      out.push({
+        // Tohumun sanatçısı bilinmiyorsa (YT Music) filtre sorgusunu etiket
+        // olarak kullan: kullanıcı "… tarzında" ifadesinde anlamlı bir şey görsün
+        // ve oturum modu (lib/mood.ts) bu tarzı ayırt edebilsin.
+        sourceId: pick.sourceId,
+        artist: pick.artist || q,
+      });
+    }
+  }
+  return out;
 }
 
 // Metin-araması yolu — YALNIZCA soğuk başlangıç yedeği (bkz. yukarıdaki not).

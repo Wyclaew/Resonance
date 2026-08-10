@@ -54,6 +54,21 @@ pub async fn music_radio(
         .map_err(|e| e.to_string())
 }
 
+/// YouTube Music araması — Keşfet tür/ruh hali filtrelerinin TOHUMU için.
+/// Sonuçlarında süre/sanatçı eksik olabilir; doğrudan öneri olarak kullanma
+/// (bkz. ytdlp::music_search).
+#[tauri::command]
+pub async fn music_search(
+    query: String,
+    limit: Option<u32>,
+) -> Result<Vec<SearchResult>, String> {
+    let limit = limit.unwrap_or(15);
+    tauri::async_runtime::spawn_blocking(move || ytdlp::music_search(&query, limit))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
 /// YouTube / YouTube Music çalma listesi URL'inden başlık + şarkıları çıkarır.
 #[tauri::command]
 pub async fn import_playlist(

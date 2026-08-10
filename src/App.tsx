@@ -17,6 +17,7 @@ import {
   prewarmDiscovery,
 } from "./store/usePlayerStore";
 import HomeView from "./views/HomeView";
+import DiscoverView from "./views/DiscoverView";
 import SearchView from "./views/SearchView";
 import LibraryView from "./views/LibraryView";
 import DownloadsView from "./views/DownloadsView";
@@ -35,6 +36,8 @@ function CurrentView() {
   switch (view) {
     case "now":
       return <HomeView />;
+    case "discover":
+      return <DiscoverView />;
     case "search":
       return <SearchView />;
     case "library":
@@ -150,6 +153,7 @@ export default function App() {
                     queue: r.queue,
                     queueIndex: r.queueIndex ?? 0,
                     seedArtists: r.seedArtists ?? [],
+                    filters: r.filters ?? [],
                     positionMs: r.positionMs || 0,
                   });
                 } else if (r.track?.id) {

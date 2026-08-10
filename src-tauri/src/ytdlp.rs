@@ -307,6 +307,69 @@ pub fn search(
 /// 50 sonuç, 15-46 farklı sanatçı, süresi eksik 0.
 ///
 /// Çerez KULLANILMAZ — arama ile aynı gerekçe (bkz. `search`).
+/// YouTube MUSIC araması — yalnız tohum (seed) bulmak için.
+///
+/// NEDEN AYRI BİR FONKSİYON: normal YouTube araması (`search`) müzik kataloğunda
+/// değil, TÜM videolarda arar. "energetic rock hits" gibi jenerik tür sorguları
+/// orada (a) telifsiz/stok müzik kanallarına (SEO yaptıkları için) ve
+/// (b) alakasız içeriğe ("Ancient Egyptian Music") düşüyor — ölçüldü.
+/// music.youtube.com araması YALNIZCA müzik kataloğunu döndürür.
+///
+/// ⚠️ Bu çıktıda SÜRE ve SANATÇI GENELDE YOK (flat-playlist sınırı, CLAUDE.md).
+/// Sorun değil: burada yalnız RADYO TOHUMU (video id) aranıyor; asıl parçalar
+/// `music_radio`dan tüm alanlarıyla geliyor ve filtreler orada uygulanıyor.
+/// Bu yüzden bu fonksiyonun sonuçları DOĞRUDAN öneri olarak kullanılmamalı.
+pub fn music_search(query: &str, limit: u32) -> anyhow::Result<Vec<SearchResult>> {
+    let url = format!(
+        "https://music.youtube.com/search?q={}",
+        urlencode(query)
+    );
+    let end = limit.clamp(1, 30).to_string();
+    let out = run_yt_dlp(
+        &[
+            "--flat-playlist",
+            "--dump-json",
+            "--no-warnings",
+            "--ignore-errors",
+            "--playlist-end",
+            &end,
+            &url,
+        ],
+        None,
+    )?;
+
+    let mut results = Vec::new();
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let line = line.trim();
+        if !line.starts_with('{') {
+            continue;
+        }
+        let v: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if let Some(r) = entry_to_result(&v) {
+            results.push(r);
+        }
+    }
+    Ok(results)
+}
+
+/// Sorgu dizesini URL'e gömülebilir hâle getirir (yt-dlp'ye tam URL veriyoruz).
+fn urlencode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for b in s.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*b as char)
+            }
+            b' ' => out.push('+'),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 pub fn music_radio(video_id: &str, limit: u32) -> anyhow::Result<Vec<SearchResult>> {
     let url =
         format!("https://music.youtube.com/watch?v={video_id}&list=RDAMVM{video_id}");

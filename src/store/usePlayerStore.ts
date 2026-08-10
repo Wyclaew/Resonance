@@ -17,6 +17,7 @@ import {
   type Recommendation,
 } from "../lib/recommender";
 import { recordPlay } from "../lib/history";
+import { noteListen } from "../lib/mood";
 import { useSettingsStore } from "./useSettingsStore";
 import { useToastStore } from "./useToastStore";
 import { useAppStore } from "./useAppStore";
@@ -47,6 +48,8 @@ interface PlayerState {
   discovering: boolean; // keşif hazırlanıyor (Sidebar butonu spinner gösterir)
   // Şu anki keşif partisini getiren seed sanatçılar — "reroll"da dışlanır.
   discoverySeedArtists: string[];
+  /** Keşfet filtreleri (lib/filters.ts id'leri). Boş = saf öğrenme algoritması. */
+  discoveryFilters: string[];
 
   // Uyku zamanlayıcı
   sleepTimerEndsAt: number | null;
@@ -56,8 +59,9 @@ interface PlayerState {
 
   playNow: (track: Track, queue?: Track[], playlistId?: string) => void;
   startSmartShuffle: (tracks: KarmaTrack[], playlistId: string) => Promise<void>;
-  startDiscovery: () => Promise<void>;
+  startDiscovery: (opts?: { force?: boolean }) => Promise<void>;
   rerollDiscovery: () => Promise<void>;
+  setDiscoveryFilters: (ids: string[]) => void;
   restoreState: (track: Track, positionMs: number) => void;
   restoreDiscovery: (state: DiscoveryResume) => void;
   toggle: () => void;
@@ -78,6 +82,8 @@ interface DiscoveryResume {
   queue: QueueItem[];
   queueIndex: number;
   seedArtists: string[];
+  /** Kaydedilen Keşfet filtreleri — besleme aynı türle devam etsin. */
+  filters?: string[];
   positionMs: number;
 }
 
@@ -113,6 +119,10 @@ function toRecItem(r: Recommendation, playlistId: string): QueueItem {
     isRecommendation: true,
     recSource: r.recSource,
     recReason: r.reason,
+    // Tarz vekili + prob işareti kuyrukta TAŞINMALI: oturum modu parça
+    // bittiğinde bunlara bakıyor (bkz. recordOutgoing → noteListen).
+    seedArtist: r.seedArtist,
+    isProbe: r.isProbe,
   };
 }
 
@@ -292,6 +302,7 @@ function persistPlaybackState(force = false) {
         queue: st.queue.map(liteItem),
         queueIndex: st.queueIndex,
         seedArtists: st.discoverySeedArtists,
+        filters: st.discoveryFilters,
         positionMs: st.positionMs,
       })
     : JSON.stringify({
@@ -329,11 +340,58 @@ function prefetchNext() {
   }
 }
 
-// Çıkan parçayı geçmişe yaz + erken geçilen öneriye yumuşak ceza.
-function recordOutgoing(s: PlayerState) {
+// Parçadan nasıl çıkıldı? Sinyalin ANLAMI buna bağlı.
+type ExitReason = "ended" | "next" | "prev" | "jump";
+
+// ⭐ YANLIŞ TUŞ / GEZİNME GÜRÜLTÜSÜ FİLTRESİ
+//
+// Problem: kullanıcı sevmediği şarkıyı geçmek için "sonraki"ye basacakken
+// yanlışlıkla "önceki"ye basıyor. Eski kod bunu ölçüsüzce sinyale çeviriyordu:
+//  • geçilen şarkı 1-2 sn çalmış görünüyordu → recommender'da <5sn = −0.35 ceza,
+//  • geri dönülen (SEVDİĞİ) şarkı da 1-2 sn çalıp yine −0.35 yiyordu,
+//  • üstüne öneriyse `skippedRecIds`'e giriyordu.
+// Yani tek yanlış tuş İKİ şarkıya birden haksız ceza yazıyordu.
+//
+// Kural: "önceki" ve "sıradan atla" bir YARGIY DEĞİL, GEZİNMEDİR. Kısa süreli
+// gezinme çıkışları hiç kaydedilmez (ne olumlu ne olumsuz). Uzun dinlemeden
+// sonra geri basmak gerçek bir dinlemedir → normal kaydedilir.
+// Çalma HATASI (indirilemedi / bozuk dosya) sonrası atlamada mod sinyali
+// yazılmaz: kullanıcı o şarkıyı hiç duymadı. Bayrak tek seferliktir.
+let skipMoodOnce = false;
+export function suppressMoodSignal() {
+  skipMoodOnce = true;
+}
+
+const NAV_NOISE_MS = 10_000; // bu sürenin altında gezinme = gürültü
+const CORRECTION_MS = 8_000; // "önceki"den sonra bu süre içindeki "sonraki" = düzeltme
+let lastPrevAt = 0;
+
+function recordOutgoing(s: PlayerState, reason: ExitReason) {
   if (!s.current) return;
+  const short = s.positionMs < NAV_NOISE_MS;
+  // Yanlışlıkla geri basıp hemen ileri basarak düzeltme: o "sonraki" de
+  // gezinmedir, kullanıcının o şarkıyı beğenmediği anlamına GELMEZ.
+  const correcting =
+    reason === "next" && Date.now() - lastPrevAt < CORRECTION_MS;
+  const navigating = reason === "prev" || reason === "jump" || correcting;
+
+  if (navigating && short) return; // sinyal yazma — yanlış tuş sayılır
+
   recordPlay(s.current, s.positionMs);
+
+  // ⭐ OTURUM MODU: bu tarzı ne kadar dinledin? (lib/mood.ts)
+  // Gezinme gürültüsü yukarıda elendiği için buraya yalnız gerçek dinlemeler
+  // ve gerçek atlamalar düşer — mod profili yanlış tuştan bozulmaz.
+  if (skipMoodOnce) {
+    skipMoodOnce = false; // hata kaynaklı atlama — tarzı cezalandırma
+  } else if (s.current.isRecommendation && s.durationMs > 0) {
+    noteListen(s.current.seedArtist, s.positionMs / s.durationMs);
+  }
+
+  // Ceza YALNIZ gerçek atlamada (kullanıcı bilerek "sonraki" dedi).
   if (
+    !navigating &&
+    reason === "next" &&
     s.current.isRecommendation &&
     s.positionMs < Math.min(20_000, s.durationMs * 0.3)
   ) {
@@ -388,6 +446,7 @@ export async function prewarmDiscovery() {
   try {
     const recs = await getRecommendations({
       playlistId: DISCOVERY_ID,
+      filters: usePlayerStore.getState().discoveryFilters,
       excludeIds: new Set(recommendedThisSession),
       excludeCores: buildExcludeCores(),
       limit: 20,
@@ -443,6 +502,10 @@ async function refillRadio(playAfter = false) {
     ]);
     const recs = await getRecommendations({
       playlistId,
+      // Keşfet'te besleme de AYNI filtreyle devam etmeli; yoksa kuyruk
+      // ilerledikçe seçtiğin tür sessizce kaybolurdu.
+      filters:
+        playlistId === DISCOVERY_ID ? st.discoveryFilters : undefined,
       excludeIds: exclude,
       excludeCores: buildExcludeCores(),
       limit: needed,
@@ -515,6 +578,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   radioPlaylistId: null,
   skippedRecIds: new Set(),
   discoverySeedArtists: [],
+  discoveryFilters: [],
   discovering: false,
 
   sleepTimerEndsAt: null,
@@ -580,15 +644,16 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   // Keşif modu: playlist yok — tamamen öğrenen algoritmanın önerileriyle ilerler.
   // Sürekli beslenir (refillRadio radioPlaylistId=DISCOVERY_ID ile çalışır).
-  startDiscovery: async () => {
-    // Keşif ZATEN çalışıyorsa: yeni sıra oluşturma — sadece mevcut sırayı göster.
+  startDiscovery: async (opts) => {
+    // Keşif ZATEN çalışıyorsa yeni sıra kurma — mevcut sırayı koru.
+    // force:true (Keşfet sayfasındaki "Yeni keşif" / filtre değişimi) bunu deler.
     const cur = get();
     if (
+      !opts?.force &&
       cur.radioActive &&
       cur.radioPlaylistId === DISCOVERY_ID &&
       cur.queue.length > 0
     ) {
-      useAppStore.setState({ queueOpen: true, lyricsOpen: false });
       return;
     }
     if (get().discovering) return; // arka arkaya basışları yut
@@ -608,6 +673,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       if (!recs) {
         recs = await getRecommendations({
           playlistId: DISCOVERY_ID,
+          filters: get().discoveryFilters,
           excludeIds: new Set<string>([
             ...get().skippedRecIds,
             ...recommendedThisSession,
@@ -660,14 +726,20 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           }).catch(() => {});
         }
       }
-      // Sıra panelini aç — kullanıcı gelecek önerileri görsün.
-      useAppStore.setState({ queueOpen: true, lyricsOpen: false });
       // Sonraki sefer için yeni parti hazırla (arka planda).
       void prewarmDiscovery();
     } catch (e) {
       console.error("[resonance] keşif başlatılamadı:", e);
       set({ discovering: false, status: "idle" });
     }
+  },
+
+  // Filtreleri değiştir. Hazır bekleyen prewarm partisi ESKİ filtrelerle
+  // kurulduğu için ÇÖPE ATILIR — yoksa kullanıcı "rock" seçtiğinde önüne
+  // filtresiz hazırlanmış eski parti gelirdi.
+  setDiscoveryFilters: (ids) => {
+    set({ discoveryFilters: ids });
+    discoveryPrewarm = null;
   },
 
   // "Bu tarzı beğenmedim" → sırayı at, BAŞKA sanatçıların radyolarından yeni
@@ -682,6 +754,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       const prevSeeds = new Set(get().discoverySeedArtists);
       const recs = await getRecommendations({
         playlistId: DISCOVERY_ID,
+        filters: get().discoveryFilters,
         excludeIds: new Set<string>([
           ...get().skippedRecIds,
           ...recommendedThisSession,
@@ -788,6 +861,9 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       radioPlaylistId: DISCOVERY_ID,
       shuffleMode: "smart",
       discoverySeedArtists: state.seedArtists ?? [],
+      // Filtreler de geri gelmeli: yoksa besleme (refillRadio) filtresiz devam
+      // eder ve birkaç şarkı sonra seçtiğin tür sessizce kaybolur.
+      discoveryFilters: state.filters ?? [],
     });
     // Sıradakileri önden indir (play'e basınca hazır olsun).
     if (isTauri()) {
@@ -821,7 +897,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   next: () => {
-    recordOutgoing(get());
+    recordOutgoing(get(), "next");
     const { queue, queueIndex, shuffleMode, repeat, radioActive } = get();
     if (queue.length === 0) return;
 
@@ -884,7 +960,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       get().seek(0);
       return;
     }
-    recordOutgoing(get());
+    // Düzeltme penceresini başlat: hemen ardından "sonraki"ye basılırsa bu bir
+    // yanlış-tuş düzeltmesidir, beğenmeme değil (bkz. recordOutgoing).
+    lastPrevAt = Date.now();
+    recordOutgoing(get(), "prev");
     const prevIdx = queueIndex - 1 < 0 ? 0 : queueIndex - 1;
     const item = queue[prevIdx];
     set({
@@ -901,7 +980,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   jumpTo: (index) => {
     const { queue } = get();
     if (index < 0 || index >= queue.length) return;
-    recordOutgoing(get());
+    recordOutgoing(get(), "jump");
     const item = queue[index];
     set({
       queueIndex: index,
@@ -1069,6 +1148,7 @@ export async function initPlayer() {
     // sonra dur ki sonsuz döngü olmasın.
     if (consecutiveErrors <= 3 && s.queue.length > 1) {
       useToastStore.getState().show(t("player.trackFailed"), "error");
+      suppressMoodSignal();
       s.next();
     } else {
       useToastStore

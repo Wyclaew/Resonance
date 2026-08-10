@@ -15,6 +15,9 @@ hatırlar, reroll'a kadar sabit), öneri gerekçesi YAPISAL (dil değişince çe
 ekleme/oluşturma toast'ları, çeşitli i18n düzeltmeleri.
 v1.3.0'da: **BULUT SENKRONU** (Mac ↔ Windows canlı) — migration v5, `src/lib/sync/`,
 Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/SYNC.md`.
+Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
+filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
+aşağıdaki "Keşfet" bölümü.
 v1.2.3'te: **macOS ad-hoc imza** (`signingIdentity:"-"` → "damaged" hatası biter, sağ tık→Aç),
 **indirme taze-çıkarım retry** (geçici HTTP 403 throttle'a karşı 3 deneme → çok daha az
 "indirilemedi"), Keşfet'te karışık tuşu KİLİTLİ (modu bozup reset atmıyor), indirme-hatası
@@ -58,12 +61,14 @@ atlanır → hata Windows CI'da patlar; v1.2.1'de `raw_window_handle` eksikliği
 sonra `cd src-tauri && cargo check --target x86_64-pc-windows-gnu`. Bitince sahte dosyaları sil.
 
 ## Mimari özet
-- **Görünümler** (`src/views/`): Home (Şu An), Search, Library, Downloads, Playlist, Import, Settings.
-- **Sidebar**: Şu An · **Keşfet** (aksiyon: `startDiscovery`) · Ara · Kütüphane · İndirilenler · İçe Aktar · Ayarlar.
+- **Görünümler** (`src/views/`): Home (Şu An), **Discover (Keşfet — v1.3.0'da kendi sayfası)**,
+  Search, Library, Downloads, Playlist, Import, Settings.
+- **Sidebar**: Şu An · **Keşfet** (artık GÖRÜNÜM: `navigate("discover")` + `startDiscovery()`) ·
+  Ara · Kütüphane · İndirilenler · İçe Aktar · Ayarlar.
 - **Oynatıcı** (`src/store/usePlayerStore.ts` — en büyük dosya): kuyruk, `playNow`, `startSmartShuffle`,
   `startDiscovery`, `refillRadio`, `restoreState`, uyku zamanlayıcı, medya tuşları, prefetch.
   Ses motoruna Tauri komutlarıyla bağlı; pozisyon `playback-tick` olayıyla gelir.
-- **Rust komutları** (`src-tauri/src/commands.rs`): search_youtube, **music_radio** (öneri kaynağı),
+- **Rust komutları** (`src-tauri/src/commands.rs`): search_youtube, **music_radio** (öneri kaynağı), **music_search** (YT Music — filtre tohumu),
   import_playlist, import_spotify,
   get_lyrics, play_track, download_audio, prefetch_audio, delete_audio, is_cached, cache_files,
   delete_cache_except, export_data, backup_db / list_backups / restore_backup, update_ytdlp, read_log,
@@ -77,7 +82,7 @@ sonra `cd src-tauri && cargo check --target x86_64-pc-windows-gnu`. Bitince saht
 - **DB tabloları:** tracks, playlists, playlist_tracks(+vote), votes (olay günlüğü), play_history,
   cache(+downloaded), settings, **recommendation_history**, **sync_state**.
   Migration'lar: v1 ilk şema, v2 downloaded,
-  v3 current_vote, v4 recommendation_history.
+  v3 current_vote, v4 recommendation_history, **v5 senkron iskeleti**.
 
 ## Öneri motoru (`src/lib/recommender.ts`) — nasıl çalışır
 Tüm sinyaller tek skorda birleşir:
@@ -332,6 +337,64 @@ Tüm sinyaller tek skorda birleşir:
   **SINIR: ≤100 şarkı** (embed'in tavanı; ölçüldü: 50'lik liste tam, ~150'lik liste 100'de kesiliyor).
   Daha uzun listelerin tamamı için Ayarlar'dan **opsiyonel** ücretsiz API anahtarı (Client Credentials);
   anahtar varsa önce API denenir, hata verirse anahtarsız yola düşülür.
+
+## ⭐ Keşfet (v1.3.0) — yeniden tasarım
+
+**Kendi sayfası**: `src/views/DiscoverView.tsx`, `ViewId = "discover"`. Eskiden sıra
+panelinin içindeydi (sağ üstte çarpı) — gezinince kapanıyordu. Normal çalmada
+eski kuyruk paneli DURUYOR, yalnız Keşfet ayrıldı.
+Sidebar `startDiscovery()` çağırır (force YOK) → sayfaya her girişte kuyruk
+SIFIRLANMAZ; "Yeni keşif" düğmesi `{force:true}` ile yeni parti kurar.
+
+### Tür / ruh hali filtreleri (`src/lib/filters.ts`)
+- ⚠️ **Veritabanında TÜR ALANI YOK** — `tracks` yalnız başlık/sanatçı/süre tutar.
+  Bu yüzden filtre tohumu ARAMAYLA üretilir.
+- **⭐ TOHUM İÇİN YouTube MUSIC ARAMASI KULLAN** (`music_search`, Rust). Normal
+  `search_youtube` TÜM videolarda arar ve jenerik tür sorgularında (a) telifsiz
+  stok müzik kanallarına (Infraction/MokkaMusic — "no copyright" SEO'su), (b)
+  alakasız içeriğe ("Ancient Egyptian Music") düşer. İKİSİ DE ÖLÇÜLDÜ.
+  `music.youtube.com/search` yalnız müzik kataloğunu döndürür.
+  Süre/sanatçı alanları BOŞ gelir — sorun değil, tohum için yalnız video id
+  gerekiyor; asıl parçalar `music_radio`dan tam metadata ile geliyor.
+- **Ruh hali × tür ÇAPRAZLANIR**: "Enerjik + Rock" → `energetic rock hits`.
+  Ayrı sorgu yapılsaydı sonuç BİRLEŞİM olurdu (ölçüldü: rock filtresiyle aynı
+  partide Gülben Ergen çıkıyordu). Aynı grup içinde çoklu seçim "veya"dır.
+- Sorgularda **"songs" yerine "hits"** — stok müzik kanalları "… songs" ifadesine
+  SEO yapıyor.
+- **Karışık kaynak** (kullanıcı tercihi): tohumların çoğu filtreden, **1 tanesi**
+  kullanıcının kendi yüksek yakınlıklı sanatçısından. (2 iken filtre seyreliyordu.)
+  Ayrıca radyo sonuçları yakınlık-ağırlıklı karıştırılır → tanıdık tat öne gelir,
+  tür bozulmaz.
+- Filtreler **kalıcı Keşfet durumunda saklanır** — yoksa kapat-aç sonrası kuyruk
+  geri gelir ama `refillRadio` filtresiz besler ve tür sessizce kaybolur.
+
+### Oturum modu (`src/lib/mood.ts`)
+- **Şikâyet**: bir partide yalnız 3-4 sanatçı radyosu → hep aynı tarz.
+  **Çözüm**: radyo sayısı 3 → **6** (2 dalga × 3 eşzamanlı; yt-dlp sınırı
+  EŞZAMANLILIKTA, toplamda değil) + mod çarpanı + prob.
+- "Tarz" vekili = **`seedArtist`** (radyonun tohum sanatçısı). Tür alanı olmadığı
+  için en iyi vekil bu.
+- Sonuna kadar dinlenen tarz beslenir (`moodMultiplier` 0.35…2.0 ile yakınlık
+  puanını ÇARPAR), hemen geçilen geriler. **Taban 0.35** — hiçbir tarz tamamen
+  ölmez, yoksa keşif kapanır.
+- **Prob** ("modun değişti mi?"): partide 1 tohum bilerek modu ÖLÇÜLMEMİŞ bir
+  tarzdan seçilir → round-robin ile kuyrukta ~5-6 şarkıda 1 prob (kullanıcı
+  tercihi "orta"). `QueueItem.isProbe` ile UI'da rozet.
+- **KALICI DEĞİL** (kapanınca sıfırlanır) — bilerek: "mod" bugüne ait, kalıcı zevk
+  zaten votes/play_history'de.
+- ⛔ **`suppressMoodSignal()`**: çalma HATASI (indirilemedi) sonrası atlamada mod
+  sinyali YAZILMAZ. Yoksa 403 indirme hatası "bu tarzı sevmedim" olarak
+  öğreniliyordu.
+
+### ⭐ Yanlış tuş algılama (`recordOutgoing`, usePlayerStore)
+Kullanıcı sevmediği şarkıyı geçmek için "sonraki"ye basacakken yanlışlıkla
+"önceki"ye basıyor. Eski kod bunu TEK yanlış tuşla İKİ şarkıya birden haksız
+ceza yazıyordu (geçilen + geri dönülen).
+- `ExitReason` = ended | next | prev | jump.
+- **prev/jump = GEZİNME, yargı DEĞİL** → 10 sn altındaki çıkışta HİÇBİR sinyal
+  yazılmaz (ne play_history ne skip cezası ne mod).
+- **Düzeltme penceresi**: "önceki"den sonra 8 sn içindeki "sonraki" de gezinmedir.
+- Ceza YALNIZ gerçek atlamada (bilerek "sonraki").
 
 ## ⭐ Senkron (`src/lib/sync/`, v1.3.0) — bilmen gerekenler
 

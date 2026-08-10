@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { useAppStore } from "../store/useAppStore";
 import { usePlaylistStore } from "../store/usePlaylistStore";
-import { usePlayerStore, DISCOVERY_ID } from "../store/usePlayerStore";
+import { usePlayerStore } from "../store/usePlayerStore";
 import { useT } from "../lib/i18n";
 import Logo from "./Logo";
 import type { ViewId } from "../types";
@@ -66,15 +66,13 @@ export default function Sidebar() {
   const playlists = usePlaylistStore((s) => s.playlists);
   const createPlaylist = usePlaylistStore((s) => s.create);
   const discovering = usePlayerStore((s) => s.discovering);
-  // Keşif çalıyorken sidebar'da "Şu An" değil "Keşfet" vurgulansın — kullanıcı
-  // nerede olduğunu oradan okuyor.
-  const radioPlaylistId = usePlayerStore((s) => s.radioPlaylistId);
-  const discoveryActive = radioPlaylistId === DISCOVERY_ID;
 
-  // "Keşfet" bir aksiyon (görünüm değil): keşif çalmasını başlatır ve "Şu An"a gider.
+  // Keşfet artık KENDİ SAYFASI (v1.3.0). Sayfaya git; keşif zaten çalışıyorsa
+  // startDiscovery mevcut kuyruğu KORUR (force yok) — sayfaya her girişte
+  // sıranın sıfırlanmaması için bu şart.
   function handleDiscover() {
-    navigate("now");
-    usePlayerStore.getState().startDiscovery();
+    navigate("discover");
+    void usePlayerStore.getState().startDiscovery();
   }
 
   async function handleCreatePlaylist() {
@@ -142,7 +140,7 @@ export default function Sidebar() {
             <NavItem
               icon={n.icon}
               label={n.label}
-              active={view === n.id && !(n.id === "now" && discoveryActive)}
+              active={view === n.id}
               collapsed={collapsed}
               onClick={() => navigate(n.id)}
             />
@@ -154,10 +152,10 @@ export default function Sidebar() {
                 title={collapsed ? (discovering ? t("nav.preparing") : t("nav.discover")) : undefined}
                 className={`group relative flex w-full items-center rounded-md text-sm text-accent transition-all hover:bg-accent/10 disabled:opacity-70 ${
                   collapsed ? "justify-center px-0 py-2.5" : "gap-3 px-3 py-2"
-                } ${discoveryActive && view === "now" ? "bg-accent/10" : ""}`}
+                } ${view === "discover" ? "bg-accent/10" : ""}`}
               >
                 {/* Keşif çalıyorken sol vurgu çizgisi — NavItem'daki ile aynı dil. */}
-                {discoveryActive && view === "now" && !collapsed && (
+                {view === "discover" && !collapsed && (
                   <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-accent" />
                 )}
                 <span className="transition-colors">

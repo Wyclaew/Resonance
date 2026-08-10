@@ -53,6 +53,11 @@ export interface QueueItem extends Track {
   isRecommendation?: boolean;
   recSource?: "youtube" | "library";
   recReason?: RecReason;
+  /** Bu öneriyi getiren radyonun seed sanatçısı — oturum modu bunu "tarz"
+   *  vekili olarak kullanır (lib/mood.ts). */
+  seedArtist?: string;
+  /** "Modun değişti mi?" denemesi: bilerek farklı tarzdan seçilmiş parça. */
+  isProbe?: boolean;
 }
 
 export type RepeatMode = "off" | "all" | "one";
@@ -68,6 +73,7 @@ export type PlaybackStatus = "idle" | "loading" | "playing" | "paused";
 // Sol menüdeki ana görünümler
 export type ViewId =
   | "now" // "Şu An" — algoritmanın önerdiği
+  | "discover" // Keşfet — kendi sayfası (v1.3.0; eskiden sıra paneliydi)
   | "search"
   | "library"
   | "downloads"
