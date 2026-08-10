@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.4.0** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.5.0** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,10 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.5.0'da: **ZAMAN-BAĞLAMLI ZEVK PROFİLİ** (`src/lib/taste.ts`) — "bu saatte ne
+dinlersin" tahmini, GÜVEN ile ölçekli (aşağıda); **önbellek LRU budama** (sınırsız
+büyüyordu, ölçüldü 1.1 GB); filtre başına kişisel radyo 2→1 ("Journey" sızıntısı);
+30 filtre (14 yeni); "Şu An"daki işlevsiz Keşfet kartı kaldırıldı.
 v1.4.0'da: **Keşfet filtreleri GERÇEKTEN çalışıyor** — tür havuzu YouTube Music'in
 küratörlü listelerinden geliyor (`music_genre_pool`); sanatçı tekrarı kesildi
 (parti başına 1); giriş/kayıt ayrı sekme + şifre tekrarı + şifre sıfırlama;
@@ -404,6 +408,35 @@ SIFIRLANMAZ; "Yeni keşif" düğmesi `{force:true}` ile yeni parti kurar.
 - ⛔ **`suppressMoodSignal()`**: çalma HATASI (indirilemedi) sonrası atlamada mod
   sinyali YAZILMAZ. Yoksa 403 indirme hatası "bu tarzı sevmedim" olarak
   öğreniliyordu.
+
+### ⭐ Zaman-bağlamlı zevk profili (`src/lib/taste.ts`, v1.5.0)
+"Hangi saat ne dinlediğime göre tahmin yapsın, tutmazsa onu da öğrensin."
+- **YENİ TABLO YOK** — profil `play_history` + `tracks`'ten TÜRETİLİR. Bu iki tablo
+  zaten senkronlanıyor → öğrenilen zevk cihazlar arası OTOMATİK ortak. Ayrı bir
+  profil tablosu olsaydı sayaçları LWW ile birleştirmek gerekirdi ve iki cihazın
+  öğrendiği birbirini EZERDİ.
+- **Kova modeli**: hafta içi/sonu × günün 5 dilimi. Recommender'daki mevcut
+  `contextWeight` (sürekli saat benzerliği) ile TAMAMLAYICI, aynı şey değil.
+- **⭐ KENDİNİ DÜZELTEN GÜVEN** — istenen "tutmazsa öğrensin" budur:
+  tahminin gücü, o kovadaki dinlemenin DERLİ TOPLULUĞUNA (entropi) bağlı.
+  Hep aynı tarzları dinliyorsan güven yüksek → tahmin güçlü. Her seferinde başka
+  şey dinliyorsan güven düşük → tahmin neredeyse hiç uygulanmaz. Ayrıca
+  <20 dinlemede güven kısılır (birkaç örnekten zevk çıkarmak gürültüdür).
+  Böylece ayrı bir "isabet/ıska defteri" tutmaya GEREK KALMAZ.
+- Seed ağırlığı artık ÜÇ katmanın çarpımı:
+  `kalıcı zevk × oturum modu (mood.ts) × zaman bağlamı (taste.ts)`.
+
+### ⭐ Önbellek LRU budama (v1.5.0)
+- **BUG'DI**: çalarken inen dosyalar `cache` TABLOSUNA YAZILMIYOR (oraya yalnız
+  kullanıcının "indir" dedikleri girer) → geçici dosyaları hiçbir şey takip
+  etmiyor, hiçbir şey temizleyemiyordu. Ölçüldü: **345 dosya / 1.1 GB**.
+- Çözüm: `prune_cache` (Rust) diskten mtime'a göre budar; `downloaded=1` olanlar
+  ASLA silinmez. Ayar: Depolama → Önbellek sınırı (varsayılan 2 GB, 0=sınırsız).
+- ⚠️ Budama AYARLAR YÜKLENDİKTEN SONRA çağrılmalı — önce çağrılırsa store
+  VARSAYILAN sınırı taşır ve kullanıcının seçtiği küçük sınır hiç uygulanmaz
+  (bu hataya bir kez düşüldü).
+- **Kaliteyi düşürmeden daha az veri MÜMKÜN DEĞİL**: opus daha verimli ama
+  symphonia (rodio) opus çözemiyor → tek gerçek kaldıraç budama.
 
 ### ⭐ Yanlış tuş algılama (`recordOutgoing`, usePlayerStore)
 Kullanıcı sevmediği şarkıyı geçmek için "sonraki"ye basacakken yanlışlıkla

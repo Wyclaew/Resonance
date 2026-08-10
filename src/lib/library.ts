@@ -1,6 +1,8 @@
+import { invoke } from "@tauri-apps/api/core";
 import type { Track } from "../types";
-import { getDb } from "./db";
+import { getDb, isTauri } from "./db";
 import { ensureTrack } from "./playlists";
+import { useSettingsStore } from "../store/useSettingsStore";
 
 // İndirilenler & kütüphane için SQLite yardımcıları.
 // "downloaded=1" kullanıcının açıkça indirdiği kalıcı parçalar.
@@ -71,4 +73,37 @@ export async function getDownloadedIds(): Promise<string[]> {
     `SELECT track_id FROM cache WHERE downloaded = 1`
   );
   return rows.map((r) => r.track_id);
+}
+
+/**
+ * Ses önbelleğini ayarlanan sınırın altına indirir (LRU).
+ *
+ * ⚠️ Kullanıcının açıkça İNDİRDİĞİ parçalar (`cache.downloaded = 1`) korunur —
+ * onlar çevrimdışı dinlemek için orada. Silinenler yalnız çalarken oluşan
+ * geçici dosyalardır; gerektiğinde yeniden inerler.
+ */
+export async function pruneAudioCache(): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    const limitGb = useSettingsStore.getState().cacheLimitGb;
+    if (!limitGb || limitGb <= 0) return; // 0 = sınırsız
+    // Korunacaklar: kullanıcının açıkça indirdikleri (source_id ile).
+    const db = await getDb();
+    const rows = await db.select<{ source_id: string }[]>(
+      `SELECT t.source_id FROM cache c JOIN tracks t ON t.id = c.track_id
+       WHERE c.downloaded = 1`
+    );
+    const keep = rows.map((r) => r.source_id);
+    const res = await invoke<{ deletedBytes: number; deletedCount: number }>(
+      "prune_cache",
+      { keep, maxBytes: Math.round(limitGb * 1024 * 1024 * 1024) }
+    );
+    if (res.deletedCount > 0) {
+      console.info(
+        `[resonance] önbellek budandı: ${res.deletedCount} dosya, ${res.deletedBytes} bayt`
+      );
+    }
+  } catch (e) {
+    console.error("[resonance] önbellek budanamadı:", e);
+  }
 }

@@ -244,6 +244,7 @@ pub fn run() {
             commands::is_cached,
             commands::cache_files,
             commands::delete_cache_except,
+            commands::prune_cache,
             commands::export_data,
             commands::backup_db,
             commands::list_backups,

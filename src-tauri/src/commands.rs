@@ -415,6 +415,78 @@ pub fn cache_files(app: AppHandle) -> Vec<CacheFile> {
     out
 }
 
+/// ⭐ ÖNBELLEK BUDAMA (LRU) — otomatik boyut sınırı.
+///
+/// SORUN: çalma sırasında inen her şarkı diske yazılıyor ama `cache` TABLOSUNA
+/// KAYDEDİLMİYOR (yalnız kullanıcının açıkça "indir" dediği parçalar oraya
+/// girer). Yani geçici dosyaları hiçbir şey takip etmiyordu ve hiçbir şey
+/// temizleyemiyordu → ölçüldü: 345 dosya / 1.1 GB.
+///
+/// ÇÖZÜM: diskten LRU budama. `keep` (kullanıcının indirdikleri) ASLA silinmez;
+/// kalanlar en son DEĞİŞTİRİLME zamanına göre sıralanır ve toplam boyut sınırın
+/// altına inene kadar en eskiden başlayarak silinir.
+///
+/// Neden mtime: dosya her çalındığında dokunulmuyor, ama pratikte "en son
+/// indirilen" ≈ "en son çalınan" (dosya çalınacağı için indiriliyor). Ayrı bir
+/// erişim defteri tutmak her çalmada disk/DB yazması demekti — buna değmez.
+#[tauri::command]
+pub fn prune_cache(app: AppHandle, keep: Vec<String>, max_bytes: u64) -> ClearResult {
+    let keep: std::collections::HashSet<String> = keep.into_iter().collect();
+    let mut out = ClearResult {
+        deleted_bytes: 0,
+        deleted_count: 0,
+    };
+    if max_bytes == 0 {
+        return out; // 0 = sınırsız
+    }
+    let Ok(dir) = audio_cache_dir(&app) else {
+        return out;
+    };
+
+    // (değiştirilme, boyut, yol) — korunacaklar hariç.
+    let mut items: Vec<(std::time::SystemTime, u64, PathBuf)> = Vec::new();
+    let mut total: u64 = 0;
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let Ok(meta) = e.metadata() else { continue };
+            if !meta.is_file() {
+                continue;
+            }
+            let len = meta.len();
+            total += len; // korunanlar da toplama dahil (gerçek disk kullanımı)
+            let name = e.file_name().to_string_lossy().to_string();
+            let sid = name.split('.').next().unwrap_or("").to_string();
+            if sid.is_empty() || keep.contains(&sid) {
+                continue;
+            }
+            let t = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
+            items.push((t, len, e.path()));
+        }
+    }
+    if total <= max_bytes {
+        return out;
+    }
+
+    items.sort_by_key(|(t, _, _)| *t); // en eski önce
+    for (_, len, path) in items {
+        if total <= max_bytes {
+            break;
+        }
+        if std::fs::remove_file(&path).is_ok() {
+            total = total.saturating_sub(len);
+            out.deleted_bytes += len;
+            out.deleted_count += 1;
+        }
+    }
+    log::info!(
+        "önbellek budandı: {} dosya, {} bayt (sınır {} bayt)",
+        out.deleted_count,
+        out.deleted_bytes,
+        max_bytes
+    );
+    out
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClearResult {

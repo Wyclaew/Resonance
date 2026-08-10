@@ -21,6 +21,8 @@ export interface Settings {
   savedVolume: number; // hatırlanan ses düzeyi
   prefetchEnabled: boolean; // sıradakini önceden indir
   screensaverSeconds: number; // kaç sn etkileşimsizlikte ambiyans ekranı (0=kapalı)
+  /** Ses önbelleği üst sınırı (GB). 0 = sınırsız. İndirilenler ASLA silinmez. */
+  cacheLimitGb: number;
   resumeState: string; // son çalan şarkı + pozisyon (JSON) — kaldığın yerden devam
   language: Lang; // arayüz dili ("tr" | "en")
   theme: Theme; // "dark" | "light" | "system"
@@ -41,6 +43,7 @@ const DEFAULTS: Settings = {
   savedVolume: 0.9,
   prefetchEnabled: true,
   screensaverSeconds: 90,
+  cacheLimitGb: 2,
   resumeState: "",
   language: detectLang(),
   theme: "system", // sistem tercihini izle (kullanıcının isteği)
@@ -62,6 +65,7 @@ const KEYS: Record<keyof Settings, string> = {
   savedVolume: "playback.savedVolume",
   prefetchEnabled: "playback.prefetch",
   screensaverSeconds: "appearance.screensaverSeconds",
+  cacheLimitGb: "storage.cacheLimitGb",
   resumeState: "playback.resumeState",
   language: "appearance.language",
   theme: "appearance.theme",

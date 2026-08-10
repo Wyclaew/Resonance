@@ -348,6 +348,8 @@ function StorageSettings() {
   const [files, setFiles] = useState<{ sourceId: string; bytes: number }[]>([]);
   const [clearing, setClearing] = useState(false);
   const [cleared, setCleared] = useState<string | null>(null);
+  const cacheLimitGb = useSettingsStore((st) => st.cacheLimitGb);
+  const updateSetting = useSettingsStore((st) => st.update);
 
   async function load() {
     if (!isTauri()) return;
@@ -399,6 +401,22 @@ function StorageSettings() {
           {formatBytes(cacheBytes)} ·{" "}
           {t("playlist.trackCount", { count: cacheCount })}
         </span>
+      </SettingRow>
+      <SettingRow
+        label={t("settings.cacheLimit")}
+        description={t("settings.cacheLimitDesc")}
+      >
+        <select
+          value={cacheLimitGb}
+          onChange={(e) => updateSetting("cacheLimitGb", Number(e.target.value))}
+          className="rounded-md border border-border bg-surface px-2 py-1.5 text-sm"
+        >
+          {[1, 2, 5, 10, 0].map((g) => (
+            <option key={g} value={g}>
+              {g === 0 ? t("settings.cacheLimitOff") : `${g} GB`}
+            </option>
+          ))}
+        </select>
       </SettingRow>
       <SettingRow
         label={t("settings.downloadsKept")}

@@ -11,6 +11,7 @@ import WindowControls from "./components/WindowControls";
 import Toasts from "./components/Toasts";
 import { getDb, isTauri } from "./lib/db";
 import { onRemoteApplied, startSync } from "./lib/sync/engine";
+import { pruneAudioCache } from "./lib/library";
 import {
   initPlayer,
   usePlayerStore,
@@ -165,6 +166,11 @@ export default function App() {
             }
             // Keşif önerilerini arka planda hazırla → Keşfet'e basınca anında başlasın.
             void prewarmDiscovery();
+            // ⚠️ Önbellek budaması AYARLAR YÜKLENDİKTEN SONRA çalışmalı —
+            // yukarıda çağrılırsa store hâlâ VARSAYILAN sınırı taşır ve
+            // kullanıcının seçtiği (daha küçük) sınır hiç uygulanmaz.
+            // İndirilenler korunur; yalnız geçici dosyalar en eskiden silinir.
+            void pruneAudioCache();
           });
         // Veri varsa otomatik yedek al (kazara kayba karşı güvenlik ağı).
         const hasData =

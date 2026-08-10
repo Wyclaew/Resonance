@@ -31,19 +31,8 @@ export default function HomeView() {
   const navigate = useAppStore((s) => s.navigate);
   const playNow = usePlayerStore((s) => s.playNow);
   const startSmartShuffle = usePlayerStore((s) => s.startSmartShuffle);
-  const startDiscovery = usePlayerStore((s) => s.startDiscovery);
   const current = usePlayerStore((s) => s.current);
   const status = usePlayerStore((s) => s.status);
-  const [discovering, setDiscovering] = useState(false);
-
-  async function discover() {
-    setDiscovering(true);
-    try {
-      await startDiscovery();
-    } finally {
-      setDiscovering(false);
-    }
-  }
 
   const [recent, setRecent] = useState<Track[]>([]);
   const [loadingRadio, setLoadingRadio] = useState<string | null>(null);
@@ -86,27 +75,6 @@ export default function HomeView() {
         </div>
 
         {/* Resonance Keşfi — sadece öğrenen algoritmanın önerileriyle çalar */}
-        <button
-          onClick={discover}
-          disabled={discovering}
-          className="group mt-4 flex w-full items-center gap-4 overflow-hidden rounded-xl border border-accent/30 bg-gradient-to-r from-accent/15 to-accent/5 px-5 py-4 text-left transition-all hover:border-accent/50 hover:from-accent/20 disabled:opacity-60"
-        >
-          <div className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-accent text-bg transition-transform group-hover:scale-105">
-            <Sparkles size={22} className={discovering ? "animate-pulse" : ""} />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-base font-semibold text-text">
-              {discovering ? t("home.discoveryPreparing") : t("home.discoveryTitle")}
-            </div>
-            <div className="text-sm text-muted">
-              {t("home.discoveryDesc")}
-            </div>
-          </div>
-          <Radio
-            size={20}
-            className="shrink-0 text-accent opacity-0 transition-opacity group-hover:opacity-100"
-          />
-        </button>
 
         {/* Son çalınanlar */}
         {recent.length > 0 && (

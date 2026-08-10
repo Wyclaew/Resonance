@@ -8,6 +8,7 @@ import { getDeviceId, newUid } from "./device";
 import { notifyLocalChange } from "./sync/engine";
 import { isProbeCandidate, moodMultiplier } from "./mood";
 import { queriesFor } from "./filters";
+import { buildTasteProfile, tasteBoost } from "./taste";
 
 // Resonance öneri motoru (M4).
 // "Hangi gün/saat hangi şarkıya oy verdin" sinyalinden sanatçı yakınlığı
@@ -325,6 +326,9 @@ async function computeRecommendations(
   const trackKarma = new Map<string, number>();
   // Favori dönüşü için: her parçanın ŞU ANKİ gün/saate en iyi uyumu (0..1).
   const trackContext = new Map<string, number>();
+  // Zaman-bağlamlı zevk profilini tazele (10 dk'da bir; ucuz).
+  await buildTasteProfile();
+
   const bumpContext = (id: string, m: number) =>
     trackContext.set(id, Math.max(trackContext.get(id) ?? 0, m));
 
@@ -597,10 +601,14 @@ async function computeRecommendations(
         .slice(0, n)
         .map((x) => x.t);
 
+    // ⭐ Üç katman çarpılır:
+    //   score        → KALICI zevk (oy + dinleme + playlist üyeliği)
+    //   moodMultiplier → BU OTURUMDAKİ mod (lib/mood.ts)
+    //   tasteBoost   → BU SAAT/GÜN bağlamı, güvene göre ölçekli (lib/taste.ts)
     const moodSeeds = sampleWeighted(
       pool,
       12,
-      (x) => x.score * moodMultiplier(x.t.artist)
+      (x) => x.score * moodMultiplier(x.t.artist) * tasteBoost(x.t.artist)
     );
 
     // Zaten sevilen sanatçılar — yeni sanatçı keşiflerini işaretlemek için.
@@ -639,10 +647,14 @@ async function computeRecommendations(
       const mineInGenre = pool.filter((x) =>
         poolArtists.has(x.t.artist.toLowerCase())
       );
+      // ⚠️ SADECE 1 kişisel radyo. 2 iken (ölçüldü) rock filtresinde kuyruğun
+      // yarısı tek sanatçının (Journey) radyosundan geliyordu — kullanıcı
+      // "daha az journey, daha çok filtreden gelen" dedi. Havuz aşağıda 3
+      // parçaya bölünüyor → oran ~%75 filtre / %25 kişisel.
       for (const t of sampleWeighted(
         mineInGenre,
-        2,
-        (x) => x.score * moodMultiplier(x.t.artist)
+        1,
+        (x) => x.score * moodMultiplier(x.t.artist) * tasteBoost(x.t.artist)
       )) {
         pushSeed({ sourceId: t.source_id, artist: t.artist });
       }
@@ -710,11 +722,14 @@ async function computeRecommendations(
     // (yeni sanatçılar), ~yarısının kullanıcının kendi tür sanatçılarının
     // radyosundan (tanıdık sanatçı, bilinmeyen şarkı) gelmesini sağlar.
     if (genrePool.length > 0) {
-      const half = Math.ceil(genrePool.length / 2);
+      // Havuzu ÜÇ sahte radyoya böl (kişisel radyo 1 tane) → round-robin'de
+      // her 4 parçanın 3'ü filtreden gelir.
+      const n = Math.ceil(genrePool.length / 3);
       const label = filterIds.join(" · ");
       radios.unshift(
-        { seed: { sourceId: "", artist: label }, results: genrePool.slice(0, half) },
-        { seed: { sourceId: "", artist: label }, results: genrePool.slice(half) }
+        { seed: { sourceId: "", artist: label }, results: genrePool.slice(0, n) },
+        { seed: { sourceId: "", artist: label }, results: genrePool.slice(n, n * 2) },
+        { seed: { sourceId: "", artist: label }, results: genrePool.slice(n * 2) }
       );
     }
 

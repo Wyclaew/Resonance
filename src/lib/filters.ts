@@ -49,6 +49,17 @@ export const DISCOVERY_FILTERS: DiscoveryFilter[] = [
   { id: "happy", term: "feel good", kind: "mood", labelKey: "filter.happy",
     queries: ["feel good songs", "neşeli şarkılar", "happy music"] },
 
+  { id: "romantic", term: "romantic", kind: "mood", labelKey: "filter.romantic",
+    queries: ["romantic hits", "aşk şarkıları", "love songs"] },
+  { id: "nostalgic", term: "nostalgic", kind: "mood", labelKey: "filter.nostalgic",
+    queries: ["nostalgic hits", "nostaljik şarkılar", "throwback hits"] },
+  { id: "party", term: "party", kind: "mood", labelKey: "filter.party",
+    queries: ["party hits", "parti şarkıları", "dance party hits"] },
+  { id: "rainy", term: "rainy day", kind: "mood", labelKey: "filter.rainy",
+    queries: ["rainy day hits", "yağmurlu hava şarkıları", "cozy rainy songs"] },
+  { id: "driving", term: "driving", kind: "mood", labelKey: "filter.driving",
+    queries: ["driving hits", "yolculuk şarkıları", "road trip hits"] },
+
   // — Tür
   { id: "rock", term: "rock", kind: "genre", labelKey: "filter.rock",
     queries: ["rock hits", "classic rock hits", "best rock songs"] },
@@ -70,6 +81,24 @@ export const DISCOVERY_FILTERS: DiscoveryFilter[] = [
     queries: ["acoustic songs", "akustik şarkılar", "singer songwriter"] },
   { id: "classical", term: "classical", kind: "genre", labelKey: "filter.classical",
     queries: ["classical music", "piano classical pieces"] },
+  { id: "indie", term: "indie", kind: "genre", labelKey: "filter.indie",
+    queries: ["indie hits", "indie rock hits", "bedroom pop hits"] },
+  { id: "arabesk", term: "arabesk", kind: "genre", labelKey: "filter.arabesk",
+    queries: ["arabesk şarkılar", "arabesk hits", "türk sanat müziği"] },
+  { id: "kpop", term: "k-pop", kind: "genre", labelKey: "filter.kpop",
+    queries: ["k-pop hits", "kpop best songs"] },
+  { id: "latin", term: "latin", kind: "genre", labelKey: "filter.latin",
+    queries: ["latin hits", "reggaeton hits", "latin pop hits"] },
+  { id: "funk", term: "funk", kind: "genre", labelKey: "filter.funk",
+    queries: ["funk hits", "disco hits", "groove classics"] },
+  { id: "country", term: "country", kind: "genre", labelKey: "filter.country",
+    queries: ["country hits", "country classics"] },
+  { id: "blues", term: "blues", kind: "genre", labelKey: "filter.blues",
+    queries: ["blues hits", "blues classics"] },
+  { id: "soundtrack", term: "soundtrack", kind: "genre", labelKey: "filter.soundtrack",
+    queries: ["movie soundtrack hits", "film müzikleri", "epic soundtrack"] },
+  { id: "ambient", term: "ambient", kind: "genre", labelKey: "filter.ambient",
+    queries: ["ambient music", "atmospheric ambient"] },
 ];
 
 export function filterById(id: string): DiscoveryFilter | undefined {
