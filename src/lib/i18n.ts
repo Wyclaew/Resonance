@@ -396,6 +396,19 @@ const tr = {
   "sync.firstPullConfirmYes": "Evet, buluttan al",
   "sync.working": "Çalışıyor… büyük kütüphanelerde biraz sürebilir.",
   "sync.firstDone": "Senkron kuruldu",
+  "sync.passwordAgain": "Şifre (tekrar)",
+  "sync.passwordMismatch": "Şifreler aynı değil.",
+  "sync.passwordTooShort": "Şifre en az 6 karakter olmalı.",
+  "sync.forgot": "Şifremi unuttum",
+  "sync.resetSent":
+    "Sıfırlama bağlantısı e-postana gönderildi. Bağlantı gelmezse Supabase panelinden de sıfırlayabilirsin.",
+  "sync.signUpNote":
+    "Kayıt olduktan sonra e-postana doğrulama bağlantısı gelebilir; onaylamadan giriş yapamazsın.",
+  "sync.signUpDone": "Kayıt alındı. E-posta doğrulaması istendiyse önce onayla, sonra giriş yap.",
+  "discover.filtersShow": "Filtreleri göster",
+  "discover.filtersHide": "Filtreleri gizle",
+  "discover.filtersActive": "{count} filtre",
+  "discover.filtersNone": "Filtre yok",
   // — Veri & Yedek
   "data.intro":
     "Çalma listelerin, oyların/karman bir JSON dosyasına yedeklenir (İndirilenler klasörüne). Bu dosyayı başka bir cihazda ya da bir arkadaşınla içe aktararak tüm listeleri paylaşabilirsin. Ses dosyaları dahil değildir — şarkılar her cihazda ilk çalmada otomatik indirilir. (Ayarlar/gizli anahtarlar paylaşılmaz.)",
@@ -856,6 +869,19 @@ const en: Record<TrKey, string> = {
   "sync.firstPullConfirmYes": "Yes, take from cloud",
   "sync.working": "Working… this can take a moment on large libraries.",
   "sync.firstDone": "Sync is set up",
+  "sync.passwordAgain": "Password (again)",
+  "sync.passwordMismatch": "Passwords don't match.",
+  "sync.passwordTooShort": "Password must be at least 6 characters.",
+  "sync.forgot": "Forgot password",
+  "sync.resetSent":
+    "A reset link has been sent to your email. If it doesn't arrive, you can also reset it from the Supabase dashboard.",
+  "sync.signUpNote":
+    "After signing up you may get a confirmation email; you can't sign in until you confirm it.",
+  "sync.signUpDone": "Signed up. If a confirmation email was sent, confirm it first, then sign in.",
+  "discover.filtersShow": "Show filters",
+  "discover.filtersHide": "Hide filters",
+  "discover.filtersActive": "{count} filter(s)",
+  "discover.filtersNone": "No filters",
   "data.intro":
     "Your playlists and votes/karma are backed up to a JSON file (in your Downloads folder). You can import that file on another device — or share it with a friend to pass on all your playlists. Audio files are not included; tracks download automatically on first play on each device. (Settings and secret keys are not shared.)",
   "data.exportBackup": "Export backup",

@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.3.0** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.4.0** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,10 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.4.0'da: **Keşfet filtreleri GERÇEKTEN çalışıyor** — tür havuzu YouTube Music'in
+küratörlü listelerinden geliyor (`music_genre_pool`); sanatçı tekrarı kesildi
+(parti başına 1); giriş/kayıt ayrı sekme + şifre tekrarı + şifre sıfırlama;
+filtre paneli açılır-kapanır.
 v1.2.3'te: **macOS ad-hoc imza** (`signingIdentity:"-"` → "damaged" hatası biter, sağ tık→Aç),
 **indirme taze-çıkarım retry** (geçici HTTP 403 throttle'a karşı 3 deneme → çok daha az
 "indirilemedi"), Keşfet'te karışık tuşu KİLİTLİ (modu bozup reset atmıyor), indirme-hatası
@@ -68,7 +72,7 @@ sonra `cd src-tauri && cargo check --target x86_64-pc-windows-gnu`. Bitince saht
 - **Oynatıcı** (`src/store/usePlayerStore.ts` — en büyük dosya): kuyruk, `playNow`, `startSmartShuffle`,
   `startDiscovery`, `refillRadio`, `restoreState`, uyku zamanlayıcı, medya tuşları, prefetch.
   Ses motoruna Tauri komutlarıyla bağlı; pozisyon `playback-tick` olayıyla gelir.
-- **Rust komutları** (`src-tauri/src/commands.rs`): search_youtube, **music_radio** (öneri kaynağı), **music_search** (YT Music — filtre tohumu),
+- **Rust komutları** (`src-tauri/src/commands.rs`): search_youtube, **music_radio** (öneri kaynağı), **music_genre_pool** (YT Music küratörlü tür listeleri),
   import_playlist, import_spotify,
   get_lyrics, play_track, download_audio, prefetch_audio, delete_audio, is_cached, cache_files,
   delete_cache_except, export_data, backup_db / list_backups / restore_backup, update_ytdlp, read_log,
@@ -349,13 +353,28 @@ SIFIRLANMAZ; "Yeni keşif" düğmesi `{force:true}` ile yeni parti kurar.
 ### Tür / ruh hali filtreleri (`src/lib/filters.ts`)
 - ⚠️ **Veritabanında TÜR ALANI YOK** — `tracks` yalnız başlık/sanatçı/süre tutar.
   Bu yüzden filtre tohumu ARAMAYLA üretilir.
-- **⭐ TOHUM İÇİN YouTube MUSIC ARAMASI KULLAN** (`music_search`, Rust). Normal
-  `search_youtube` TÜM videolarda arar ve jenerik tür sorgularında (a) telifsiz
-  stok müzik kanallarına (Infraction/MokkaMusic — "no copyright" SEO'su), (b)
-  alakasız içeriğe ("Ancient Egyptian Music") düşer. İKİSİ DE ÖLÇÜLDÜ.
-  `music.youtube.com/search` yalnız müzik kataloğunu döndürür.
-  Süre/sanatçı alanları BOŞ gelir — sorun değil, tohum için yalnız video id
-  gerekiyor; asıl parçalar `music_radio`dan tam metadata ile geliyor.
+- **⭐ TÜR HAVUZU İKİ AŞAMALIDIR** (`music_genre_pool`, Rust). Tek aşama ÇALIŞMIYOR:
+  - `music.youtube.com/search?q=…` **VİDEO DÖNDÜRMEZ** — playlist (`VLRDCLAK5uy_…`),
+    albüm (`MPREb_…`), kanal (`UC…`) kimlikleri döner, başlık/süre BOŞ. Bunları
+    radyo tohumu sanmak sessizce BOŞ sonuç verir → filtre hiç çalışmaz, Keşfet
+    kişisel havuza düşer. **"Türkçe seçtim tek Türkçe şarkı gelmedi" bug'ının
+    kökü buydu** ve sessiz olduğu için fark edilmiyordu.
+  - Çözüm: o `VL…` kimlikleri YouTube Music'in **küratörlü tür/ruh hali
+    listeleridir**. `VL` öneki atılıp `playlist?list=RDCLAK5uy_…` çekilince tam
+    metadata'lı gerçek şarkılar gelir (ölçüldü: "türkçe rock" → mor ve ötesi,
+    Dedublüman, Pinhâni).
+  - Yan fayda: jenerik metin aramasının getirdiği **telifsiz stok müzik**
+    (Infraction/MokkaMusic) sorunu da kökten biter.
+- **⭐ TÜR ETİKETİ KESİŞİMLE ÖĞRENİLİR**: DB'de tür alanı yok, kullanıcının hangi
+  sanatçısının "rock" olduğunu bilmiyoruz. Havuzdaki sanatçılarla kütüphane
+  sanatçılarını KESİŞTİRİNCE öğreniyoruz → o kesişimin radyosu "tanıdık
+  sanatçının bilmediğin şarkısı"nı, havuzun kendisi "hiç bilmediğin sanatçı"yı
+  getirir. Kullanıcının istediği karışım budur.
+- **`effectiveArtist()`**: YT Music liste girdilerinde `artist` alanı KANAL adıdır
+  ("MuzikPlay", "netd müzik"); gerçek sanatçı BAŞLIKTA ("Can Koç - …"). Çeşitlilik
+  sayacı ve kesişim buna göre yapılmalı, yoksa tek kanal partiyi doldurur.
+- **Sanatçı başına parti başına 1 parça** (eskiden 2 → kullanıcı "2 sanatçıdan
+  4 şarkı geldi" dedi). Ayrıca yeni parti ÖNCEKİ partinin seed sanatçılarını dışlar.
 - **Ruh hali × tür ÇAPRAZLANIR**: "Enerjik + Rock" → `energetic rock hits`.
   Ayrı sorgu yapılsaydı sonuç BİRLEŞİM olurdu (ölçüldü: rock filtresiyle aynı
   partide Gülben Ergen çıkıyordu). Aynı grup içinde çoklu seçim "veya"dır.

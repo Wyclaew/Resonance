@@ -625,15 +625,25 @@ async function computeRecommendations(
     };
 
     const filterIds = opts.filters ?? [];
+    let genrePool: Track[] = [];
     if (filterIds.length > 0) {
-      // FİLTRELİ MOD (karışık kaynak): tohumların çoğu filtreden, birkaçı
-      // kullanıcının kendi zevkinden → hem o tür/ruh hali, hem tanıdık tat.
-      const found = await seedsFromFilters(filterIds);
-      for (const s of found) pushSeed(s);
-      // Kişisel tohum SADECE 1: "karışık" isteniyor ama filtre baskın kalmalı.
-      // 2 olduğunda (ölçüldü) jazz filtresinde radyoların üçte biri kullanıcının
-      // rap sanatçısı olabiliyordu — seçilen tür seyreliyordu.
-      for (const t of moodSeeds.slice(0, 1)) {
+      // FİLTRELİ MOD — kullanıcının istediği karışım:
+      //  (a) hiç bilmediği sanatçılar → küratörlü tür havuzundan DOĞRUDAN,
+      //  (b) tanıdık sanatçının bilmediği şarkısı → havuzla KESİŞEN kendi
+      //      sanatçılarının radyosundan.
+      genrePool = await genrePoolFor(filterIds);
+      const poolArtists = new Set(
+        genrePool.map((t) => effectiveArtist(t).toLowerCase())
+      );
+      // Kullanıcının BU TÜRDEKİ sanatçıları (tür alanı olmadığı için kesişimle).
+      const mineInGenre = pool.filter((x) =>
+        poolArtists.has(x.t.artist.toLowerCase())
+      );
+      for (const t of sampleWeighted(
+        mineInGenre,
+        2,
+        (x) => x.score * moodMultiplier(x.t.artist)
+      )) {
         pushSeed({ sourceId: t.source_id, artist: t.artist });
       }
     } else {
@@ -695,6 +705,19 @@ async function computeRecommendations(
       radios.push(...wave);
     }
 
+    // ⭐ Tür havuzunu İKİ sahte radyo olarak ekle. Round-robin her kaynaktan
+    // sırayla parça aldığı için bu, partinin ~yarısının küratörlü havuzdan
+    // (yeni sanatçılar), ~yarısının kullanıcının kendi tür sanatçılarının
+    // radyosundan (tanıdık sanatçı, bilinmeyen şarkı) gelmesini sağlar.
+    if (genrePool.length > 0) {
+      const half = Math.ceil(genrePool.length / 2);
+      const label = filterIds.join(" · ");
+      radios.unshift(
+        { seed: { sourceId: "", artist: label }, results: genrePool.slice(0, half) },
+        { seed: { sourceId: "", artist: label }, results: genrePool.slice(half) }
+      );
+    }
+
     // ⚠️ ROUND-ROBIN: her radyodan SIRAYLA birer parça al.
     // Eskiden radyolar sırayla tüketiliyordu → ilk radyo 20 kontenjanın hepsini
     // doldurup ikinciye hiç sıra gelmiyordu (tek tarz). Round-robin tarzları
@@ -720,8 +743,11 @@ async function computeRecommendations(
           if (playlistKeys.has(normKey(r.title, r.artist))) continue;
           if (takenCores.has(songCore(r.title, r.artist))) continue; // versiyon kopyası
           if (!isLikelySong(r)) continue; // radyoda da nadiren uzun içerik çıkar
-          const a = r.artist.toLowerCase();
-          if ((radioArtistCount.get(a) ?? 0) >= 2) continue;
+          // Parti başına SANATÇI BAŞINA 1 PARÇA (eskiden 2'ydi; kullanıcı
+          // "2 sanatçıdan 4 şarkı geldi" dedi). effectiveArtist: YT Music liste
+          // girdilerinde artist alanı KANAL adıdır, gerçek sanatçı başlıkta.
+          const a = effectiveArtist(r).toLowerCase();
+          if ((radioArtistCount.get(a) ?? 0) >= 1) continue;
           radioArtistCount.set(a, (radioArtistCount.get(a) ?? 0) + 1);
           const newArtist = !knownArtists.has(a);
           recs.push({
@@ -768,60 +794,54 @@ async function computeRecommendations(
  * başlık filtresinden geçer. Radyo yapısı gereği şarkı döndürdüğü için tarz
  * tutarlılığı oradan gelir.
  */
-async function seedsFromFilters(
-  filterIds: string[]
-): Promise<{ sourceId: string; artist: string }[]> {
-  const queries = queriesFor(filterIds);
+/**
+ * Filtre(ler) için TÜR HAVUZU: YouTube Music'in küratörlü tür/ruh hali
+ * listelerinden gerçek şarkılar (bkz. ytdlp::music_genre_pool).
+ *
+ * Bu havuz iki işe yarar:
+ *  1. Doğrudan öneri adayı → kullanıcının HİÇ BİLMEDİĞİ sanatçılar.
+ *  2. ⭐ TÜR ETİKETİ KAYNAĞI: veritabanında tür alanı yok. Kullanıcının hangi
+ *     sanatçısının "rock" olduğunu bilmiyoruz — ama havuzdaki sanatçılarla
+ *     KESİŞTİRİNCE öğreniyoruz. O kesişim = "kullanıcının bu türdeki
+ *     sanatçıları" → onların radyosu, tanıdık sanatçının BİLİNMEYEN şarkısını
+ *     getirir. Kullanıcının istediği karışım tam olarak budur.
+ */
+async function genrePoolFor(filterIds: string[]): Promise<Track[]> {
+  // Seçilen HER tür temsil edilsin (queriesFor tür başına 1 sorgu üretir).
+  const queries = queriesFor(filterIds).slice(0, 3);
   if (queries.length === 0) return [];
-  const cookiesBrowser = useSettingsStore.getState().cookiesBrowser;
-  const out: { sourceId: string; artist: string }[] = [];
-
-  // 3'erli dalgalar — eşzamanlı yt-dlp sınırı.
-  for (let start = 0; start < queries.length; start += 3) {
-    const wave = await Promise.all(
-      queries.slice(start, start + 3).map(async (q) => {
-        // 1) ÖNCE YouTube MUSIC araması: yalnız müzik kataloğunda arar.
-        try {
-          const m = await invoke<Track[]>("music_search", { query: q, limit: 15 });
-          if (m.length > 0) return { q, results: m, fromMusic: true };
-        } catch (e) {
-          console.error("[resonance] YT Music tohum araması başarısız:", q, e);
-        }
-        // 2) Yedek: normal YouTube araması (kalitesi düşük, bkz. yukarıdaki not).
-        try {
-          const r = await invoke<Track[]>("search_youtube", {
-            query: q,
-            limit: 12,
-            cookiesBrowser,
-          });
-          return { q, results: r, fromMusic: false };
-        } catch (e) {
-          console.error("[resonance] filtre tohumu aranamadı:", q, e);
-          return { q, results: [] as Track[], fromMusic: false };
-        }
-      })
-    );
-    for (const { q, results, fromMusic } of wave) {
-      // YT Music sonuçlarında süre/sanatçı GENELDE BOŞ gelir → isLikelySong'u
-      // uygulama (süresi 0 olanı zaten elemiyor ama sanatçı boş olduğu için
-      // filtreleme anlamsız). Normal arama sonuçlarında filtre uygulanır.
-      const usable = fromMusic
-        ? results.filter((r) => r.sourceId)
-        : results.filter((r) => isLikelySong(r) && r.artist);
-      if (usable.length === 0) continue;
-      // İlk sonucu değil, ilk birkaçından rastgele birini al → her yenilemede
-      // aynı tohum gelmesin.
-      const pick = usable[Math.floor(Math.random() * Math.min(5, usable.length))];
-      out.push({
-        // Tohumun sanatçısı bilinmiyorsa (YT Music) filtre sorgusunu etiket
-        // olarak kullan: kullanıcı "… tarzında" ifadesinde anlamlı bir şey görsün
-        // ve oturum modu (lib/mood.ts) bu tarzı ayırt edebilsin.
-        sourceId: pick.sourceId,
-        artist: pick.artist || q,
-      });
+  const out: Track[] = [];
+  const seen = new Set<string>();
+  const waves = await Promise.all(
+    queries.map(async (q) => {
+      try {
+        return await invoke<Track[]>("music_genre_pool", { query: q, limit: 60 });
+      } catch (e) {
+        console.error("[resonance] tür havuzu alınamadı:", q, e);
+        return [] as Track[];
+      }
+    })
+  );
+  for (const w of waves) {
+    for (const t of w) {
+      if (!t.sourceId || seen.has(t.id)) continue;
+      seen.add(t.id);
+      out.push(t);
     }
   }
   return out;
+}
+
+/**
+ * Gerçek sanatçı adı. YouTube Music liste girdilerinde `artist` alanı çoğu zaman
+ * KANAL adıdır ("MuzikPlay", "netd müzik") — sanatçı başlıkta gizlidir
+ * ("Can Koç - Gökyüzünü Tutamam"). Çeşitlilik sayacı ve kullanıcı sanatçılarıyla
+ * kesişim bu ada göre yapılmalı, yoksa tek kanal tüm partiyi doldurur.
+ */
+function effectiveArtist(t: Track): string {
+  const dash = t.title.split(/\s[-–—]\s/);
+  if (dash.length > 1 && dash[0].trim().length >= 2) return dash[0].trim();
+  return t.artist;
 }
 
 // Metin-araması yolu — YALNIZCA soğuk başlangıç yedeği (bkz. yukarıdaki not).

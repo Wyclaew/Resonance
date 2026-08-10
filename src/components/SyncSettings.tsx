@@ -13,7 +13,13 @@ import {
 import { useT } from "../lib/i18n";
 import { getDeviceId } from "../lib/device";
 import { isSyncConfigured } from "../lib/sync/config";
-import { getSupabase, signIn, signOut, signUp } from "../lib/sync/client";
+import {
+  getSupabase,
+  resetPassword,
+  signIn,
+  signOut,
+  signUp,
+} from "../lib/sync/client";
 import {
   firstSyncPullReplace,
   firstSyncPushAll,
@@ -43,6 +49,9 @@ export default function SyncSettings() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [password2, setPassword2] = useState("");
+  const [authMode, setAuthMode] = useState<"in" | "up">("in");
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -103,8 +112,26 @@ export default function SyncSettings() {
     setErr(null);
     try {
       if (mode === "in") await signIn(email.trim(), password);
-      else await signUp(email.trim(), password);
+      else {
+        await signUp(email.trim(), password);
+        setNotice(t("sync.signUpDone"));
+      }
       setPassword("");
+      setPassword2("");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doReset = async () => {
+    setBusy(true);
+    setErr(null);
+    setNotice(null);
+    try {
+      await resetPassword(email);
+      setNotice(t("sync.resetSent"));
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -132,7 +159,14 @@ export default function SyncSettings() {
   };
 
   // ── Giriş yapılmamış ──
+  // Giriş ve KAYIT ayrı sekmeler: eskiden iki düğme yan yanaydı ve kullanıcı
+  // hangisinde olduğunu karıştırıp yanlış butona basıyordu.
   if (!userEmail) {
+    const canSubmit =
+      !busy &&
+      email.trim().length > 0 &&
+      password.length >= 6 &&
+      (authMode === "in" || password === password2);
     return (
       <div className="max-w-2xl">
         <div className="rounded-lg border border-accent/30 bg-accent/5 p-5">
@@ -143,40 +177,103 @@ export default function SyncSettings() {
           <p className="mt-2 text-sm leading-relaxed text-muted">
             {t("sync.signInBody")}
           </p>
-          <div className="mt-4 flex flex-col gap-2">
+
+          {/* Sekmeler */}
+          <div className="mt-4 flex gap-1 rounded-md bg-surface-2 p-1">
+            {(["in", "up"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => {
+                  setAuthMode(m);
+                  setErr(null);
+                  setNotice(null);
+                  setPassword2("");
+                }}
+                className={`flex-1 rounded px-3 py-1.5 text-sm transition-colors ${
+                  authMode === m
+                    ? "bg-accent font-medium text-bg"
+                    : "text-muted hover:text-text"
+                }`}
+              >
+                {m === "in" ? t("sync.signIn") : t("sync.signUp")}
+              </button>
+            ))}
+          </div>
+
+          <form
+            className="mt-3 flex flex-col gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (canSubmit) void doAuth(authMode);
+            }}
+          >
+            {/* name + autoComplete: şifre yöneticileri ve OS anahtar zinciri
+                alanları ancak bu ipuçlarıyla tanır. */}
             <input
               type="email"
+              name="username"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder={t("sync.email")}
-              autoComplete="email"
+              autoComplete="username"
               className="rounded-md border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
             />
             <input
               type="password"
+              name="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder={t("sync.password")}
-              autoComplete="current-password"
+              autoComplete={
+                authMode === "in" ? "current-password" : "new-password"
+              }
               className="rounded-md border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
             />
-            <div className="flex gap-2">
+            {authMode === "up" && (
+              <input
+                type="password"
+                name="password_confirm"
+                value={password2}
+                onChange={(e) => setPassword2(e.target.value)}
+                placeholder={t("sync.passwordAgain")}
+                autoComplete="new-password"
+                className="rounded-md border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
+              />
+            )}
+            {authMode === "up" &&
+              password2.length > 0 &&
+              password !== password2 && (
+                <p className="text-xs text-down">{t("sync.passwordMismatch")}</p>
+              )}
+            {authMode === "up" && password.length > 0 && password.length < 6 && (
+              <p className="text-xs text-muted">{t("sync.passwordTooShort")}</p>
+            )}
+
+            <div className="flex items-center gap-3">
               <button
-                disabled={busy || !email.trim() || !password}
-                onClick={() => void doAuth("in")}
+                type="submit"
+                disabled={!canSubmit}
                 className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-bg disabled:opacity-40"
               >
-                {t("sync.signIn")}
+                {authMode === "in" ? t("sync.signIn") : t("sync.signUp")}
               </button>
-              <button
-                disabled={busy || !email.trim() || !password}
-                onClick={() => void doAuth("up")}
-                className="rounded-md bg-surface-2 px-4 py-2 text-sm font-medium text-text disabled:opacity-40"
-              >
-                {t("sync.signUp")}
-              </button>
+              {authMode === "in" && (
+                <button
+                  type="button"
+                  disabled={busy || !email.trim()}
+                  onClick={() => void doReset()}
+                  className="text-sm text-muted underline-offset-2 hover:text-text hover:underline disabled:opacity-40"
+                >
+                  {t("sync.forgot")}
+                </button>
+              )}
             </div>
-          </div>
+          </form>
+
+          {authMode === "up" && (
+            <p className="mt-3 text-xs text-faint">{t("sync.signUpNote")}</p>
+          )}
+          {notice && <p className="mt-3 text-sm text-up">{notice}</p>}
           {err && <p className="mt-3 text-sm text-down">{err}</p>}
         </div>
         <DeviceRow deviceId={deviceId} />

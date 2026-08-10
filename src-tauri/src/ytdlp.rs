@@ -307,24 +307,25 @@ pub fn search(
 /// 50 sonuç, 15-46 farklı sanatçı, süresi eksik 0.
 ///
 /// Çerez KULLANILMAZ — arama ile aynı gerekçe (bkz. `search`).
-/// YouTube MUSIC araması — yalnız tohum (seed) bulmak için.
+/// YouTube MUSIC tür/ruh hali havuzu — Keşfet filtrelerinin KAYNAĞI.
 ///
-/// NEDEN AYRI BİR FONKSİYON: normal YouTube araması (`search`) müzik kataloğunda
-/// değil, TÜM videolarda arar. "energetic rock hits" gibi jenerik tür sorguları
-/// orada (a) telifsiz/stok müzik kanallarına (SEO yaptıkları için) ve
-/// (b) alakasız içeriğe ("Ancient Egyptian Music") düşüyor — ölçüldü.
-/// music.youtube.com araması YALNIZCA müzik kataloğunu döndürür.
+/// ⭐ İKİ AŞAMALI, ÇÜNKÜ TEK AŞAMA ÇALIŞMIYOR (ölçüldü):
+///  1. `music.youtube.com/search?q=…` VİDEO DÖNDÜRMEZ. Dönen id'ler playlist
+///     (`VLRDCLAK5uy_…`), albüm (`MPREb_…`) ve kanal (`UC…`) kimlikleridir;
+///     başlık/süre alanları BOŞ gelir. Bunları radyo tohumu sanıp
+///     `watch?v=VLRDCLAK…` denemek sessizce BOŞ sonuç veriyordu → filtre hiç
+///     çalışmıyor, Keşfet kişisel havuza düşüyordu ("türkçe seçtim tek türkçe
+///     şarkı gelmedi" bug'ının kökü buydu).
+///  2. Ama o `VL…` kimlikleri YouTube Music'in KENDİ KÜRATÖRLÜ tür/ruh hali
+///     listeleridir. `VL` öneki atılıp `playlist?list=RDCLAK5uy_…` olarak
+///     çekilince TAM metadata'lı gerçek şarkılar gelir (ölçüldü: "türkçe rock"
+///     → mor ve ötesi, Dedublüman, Pinhâni…).
 ///
-/// ⚠️ Bu çıktıda SÜRE ve SANATÇI GENELDE YOK (flat-playlist sınırı, CLAUDE.md).
-/// Sorun değil: burada yalnız RADYO TOHUMU (video id) aranıyor; asıl parçalar
-/// `music_radio`dan tüm alanlarıyla geliyor ve filtreler orada uygulanıyor.
-/// Bu yüzden bu fonksiyonun sonuçları DOĞRUDAN öneri olarak kullanılmamalı.
-pub fn music_search(query: &str, limit: u32) -> anyhow::Result<Vec<SearchResult>> {
-    let url = format!(
-        "https://music.youtube.com/search?q={}",
-        urlencode(query)
-    );
-    let end = limit.clamp(1, 30).to_string();
+/// Yani: arama = liste bulma, asıl şarkılar listeden. Bu YouTube Music'in kendi
+/// editör seçkisidir — jenerik metin aramasının getirdiği telifsiz stok müzik
+/// sorunu da böylece kökten biter.
+pub fn music_genre_pool(query: &str, limit: u32) -> anyhow::Result<Vec<SearchResult>> {
+    let search_url = format!("https://music.youtube.com/search?q={}", urlencode(query));
     let out = run_yt_dlp(
         &[
             "--flat-playlist",
@@ -332,13 +333,15 @@ pub fn music_search(query: &str, limit: u32) -> anyhow::Result<Vec<SearchResult>
             "--no-warnings",
             "--ignore-errors",
             "--playlist-end",
-            &end,
-            &url,
+            "25",
+            &search_url,
         ],
         None,
     )?;
 
-    let mut results = Vec::new();
+    // Aramadan yalnız ÇALMA LİSTESİ kimliklerini topla (VL öneki atılır).
+    // Albüm (MPREb_) ve kanal (UC) kimlikleri bu yolla çekilemez, atlanır.
+    let mut playlist_ids: Vec<String> = Vec::new();
     for line in String::from_utf8_lossy(&out.stdout).lines() {
         let line = line.trim();
         if !line.starts_with('{') {
@@ -348,8 +351,52 @@ pub fn music_search(query: &str, limit: u32) -> anyhow::Result<Vec<SearchResult>
             Ok(v) => v,
             Err(_) => continue,
         };
-        if let Some(r) = entry_to_result(&v) {
-            results.push(r);
+        if let Some(id) = v.get("id").and_then(|x| x.as_str()) {
+            if let Some(rest) = id.strip_prefix("VL") {
+                if !rest.is_empty() && playlist_ids.len() < 3 {
+                    playlist_ids.push(rest.to_string());
+                }
+            }
+        }
+    }
+    if playlist_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // İlk 2 listeyi çek (tek liste tek editörün seçkisi; iki liste daha geniş
+    // sanatçı yelpazesi verir — kullanıcının "hep aynı sanatçılar" şikâyeti).
+    let end = limit.clamp(10, 100).to_string();
+    let mut results = Vec::new();
+    for pid in playlist_ids.iter().take(2) {
+        let url = format!("https://music.youtube.com/playlist?list={pid}");
+        let out = match run_yt_dlp(
+            &[
+                "--flat-playlist",
+                "--dump-json",
+                "--no-warnings",
+                "--ignore-errors",
+                "--playlist-end",
+                &end,
+                &url,
+            ],
+            None,
+        ) {
+            Ok(o) => o,
+            Err(e) => {
+                log::warn!("tür listesi çekilemedi {pid}: {e}");
+                continue;
+            }
+        };
+        for line in String::from_utf8_lossy(&out.stdout).lines() {
+            let line = line.trim();
+            if !line.starts_with('{') {
+                continue;
+            }
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                if let Some(r) = entry_to_result(&v) {
+                    results.push(r);
+                }
+            }
         }
     }
     Ok(results)

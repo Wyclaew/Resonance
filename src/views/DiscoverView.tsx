@@ -7,13 +7,15 @@ import {
   Play,
   Pause,
   FlaskConical,
+  ChevronDown,
+  SlidersHorizontal,
 } from "lucide-react";
 import ViewHeader from "../components/ViewHeader";
 import { useT } from "../lib/i18n";
 import { usePlayerStore } from "../store/usePlayerStore";
 import { reasonText } from "../lib/recommender";
 import { useSettingsStore } from "../store/useSettingsStore";
-import { DISCOVERY_FILTERS, randomFilters } from "../lib/filters";
+import { DISCOVERY_FILTERS } from "../lib/filters";
 import { formatMs } from "../lib/format";
 import { topStyles } from "../lib/mood";
 
@@ -39,6 +41,10 @@ export default function DiscoverView() {
   // Seçim yerelde tutulur; "Yeni keşif"e basılınca uygulanır. Böylece her
   // tıklamada yeni bir parti kurulmaz (her parti ~6 radyo çağrısı demek).
   const [draft, setDraft] = useState<string[]>(activeFilters);
+  // Filtre paneli varsayılan KAPALI (kuyruk varken) — sürekli göz önünde
+  // durması sayfayı boğuyordu. Kuyruk boşken açık gelir ki ilk kullanımda
+  // kullanıcı filtreleri görsün.
+  const [filtersOpen, setFiltersOpen] = useState(!usePlayerStore.getState().current);
   const dirty =
     draft.length !== activeFilters.length ||
     draft.some((f) => !activeFilters.includes(f));
@@ -82,7 +88,8 @@ export default function DiscoverView() {
     <div className="flex h-full flex-col">
       <ViewHeader title={t("discover.title")} subtitle={t("discover.subtitle")}>
         <button
-          onClick={() => void apply(randomFilters())}
+          // "Rastgele" = FİLTRESİZ: saf öğrenme algoritmasıyla gez.
+          onClick={() => void apply([])}
           disabled={discovering}
           title={t("discover.random")}
           className="flex items-center gap-1.5 rounded-md bg-surface-2 px-3 py-2 text-sm text-muted transition-colors hover:text-text disabled:opacity-40"
@@ -101,49 +108,85 @@ export default function DiscoverView() {
       </ViewHeader>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-6">
-        {/* Filtreler */}
-        <section className="rounded-lg border border-border bg-surface p-4">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-sm font-medium">{t("discover.filters")}</span>
-            {draft.length > 0 && (
-              <button
-                onClick={() => setDraft([])}
-                className="flex items-center gap-1 text-xs text-muted hover:text-text"
-              >
-                <X size={12} />
-                {t("discover.clear")}
-              </button>
-            )}
-          </div>
+        {/* Filtreler — açılır/kapanır */}
+        <section className="rounded-lg border border-border bg-surface">
+          <button
+            onClick={() => setFiltersOpen((v) => !v)}
+            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+          >
+            <span className="flex items-center gap-2 text-sm font-medium">
+              <SlidersHorizontal size={15} className="text-accent" />
+              {t("discover.filters")}
+              <span className="text-xs font-normal text-faint">
+                ·{" "}
+                {draft.length === 0
+                  ? t("discover.filtersNone")
+                  : t("discover.filtersActive", { count: draft.length })}
+                {dirty && " ●"}
+              </span>
+            </span>
+            <span className="flex items-center gap-2">
+              {!filtersOpen && draft.length > 0 && (
+                <span className="hidden max-w-[22rem] truncate text-xs text-muted sm:inline">
+                  {draft
+                    .map((id) => DISCOVERY_FILTERS.find((f) => f.id === id))
+                    .filter(Boolean)
+                    .map((f) => t(f!.labelKey))
+                    .join(" · ")}
+                </span>
+              )}
+              <ChevronDown
+                size={16}
+                className={`shrink-0 text-muted transition-transform ${
+                  filtersOpen ? "rotate-180" : ""
+                }`}
+              />
+            </span>
+          </button>
 
-          <div className="mt-3">
-            <div className="mb-1.5 text-xs uppercase tracking-wide text-faint">
-              {t("discover.moodGroup")}
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {moods.map((f) => (
-                <Chip key={f.id} id={f.id} label={t(f.labelKey)} />
-              ))}
-            </div>
-          </div>
+          {filtersOpen && (
+            <div className="border-t border-border px-4 pb-4 pt-3">
+              <div className="flex items-center justify-end">
+                {draft.length > 0 && (
+                  <button
+                    onClick={() => setDraft([])}
+                    className="flex items-center gap-1 text-xs text-muted hover:text-text"
+                  >
+                    <X size={12} />
+                    {t("discover.clear")}
+                  </button>
+                )}
+              </div>
 
-          <div className="mt-3">
-            <div className="mb-1.5 text-xs uppercase tracking-wide text-faint">
-              {t("discover.genreGroup")}
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {genres.map((f) => (
-                <Chip key={f.id} id={f.id} label={t(f.labelKey)} />
-              ))}
-            </div>
-          </div>
+              <div className="mt-1">
+                <div className="mb-1.5 text-xs uppercase tracking-wide text-faint">
+                  {t("discover.moodGroup")}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {moods.map((f) => (
+                    <Chip key={f.id} id={f.id} label={t(f.labelKey)} />
+                  ))}
+                </div>
+              </div>
 
-          <p className="mt-3 text-xs text-faint">
-            {draft.length === 0
-              ? t("discover.noFilterHint")
-              : t("discover.filterHint", { count: draft.length })}
-            {dirty && " ●"}
-          </p>
+              <div className="mt-3">
+                <div className="mb-1.5 text-xs uppercase tracking-wide text-faint">
+                  {t("discover.genreGroup")}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {genres.map((f) => (
+                    <Chip key={f.id} id={f.id} label={t(f.labelKey)} />
+                  ))}
+                </div>
+              </div>
+
+              <p className="mt-3 text-xs text-faint">
+                {draft.length === 0
+                  ? t("discover.noFilterHint")
+                  : t("discover.filterHint", { count: draft.length })}
+              </p>
+            </div>
+          )}
         </section>
 
         {/* Şimdi çalıyor */}

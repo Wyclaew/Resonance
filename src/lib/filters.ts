@@ -92,23 +92,24 @@ export function queriesFor(ids: string[]): string[] {
   const shuffle = <T,>(a: T[]) => [...a].sort(() => Math.random() - 0.5);
 
   if (moods.length > 0 && genres.length > 0) {
-    const out: string[] = [];
-    for (const g of shuffle(genres)) {
-      for (const m of shuffle(moods)) {
-        // "songs" yerine "hits": stok/telifsiz müzik kanalları jenerik
-        // "... songs" ifadesine SEO yapıyor, "hits" ise gerçek popüler
-        // müziği getiriyor (ölçüldü: "energetic rock songs" partiyi
-        // Infraction/MokkaMusic ile doldurmuştu).
-        out.push(`${m.term} ${g.term} hits`);
-        if (out.length >= 4) return out; // en fazla 4 tohum sorgusu
-      }
-    }
-    return out;
+    // ⭐ HER TÜRE BİR SORGU GARANTİSİ. Eskiden tüm mood×genre çiftleri üretilip
+    // baştan kırpılıyordu; 4 filtre seçilince (ör. Sakin+Türkçe+Jazz+R&B)
+    // rastgele sırada TÜRKÇE eleniyordu ve kullanıcı seçtiği türden tek şarkı
+    // görmüyordu (ölçüldü). Artık her tür sırayla, rastgele bir ruh haliyle
+    // eşleştirilir.
+    // "songs" yerine "hits": stok/telifsiz müzik kanalları "… songs" ifadesine
+    // SEO yapıyor.
+    return shuffle(genres)
+      .slice(0, 3)
+      .map((g) => {
+        const m = shuffle(moods)[0];
+        return `${m.term} ${g.term} hits`;
+      });
   }
 
   // Tek grup: her filtrenin kendi hazır sorgularından rastgele biri.
-  return sel
-    .slice(0, 4)
+  return shuffle(sel)
+    .slice(0, 3)
     .map((f) => f.queries[Math.floor(Math.random() * f.queries.length)]);
 }
 

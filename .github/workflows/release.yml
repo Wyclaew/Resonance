@@ -63,6 +63,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          # macOS'ta hedefi AÇIKÇA ver: sidecar'lar aarch64 adıyla indiriliyor,
+          # runner mimarisi değişirse eşleşmeyip build kırılırdı.
+          args: ${{ matrix.platform == 'macos-latest' && '--target aarch64-apple-darwin' || '' }}
           tagName: ${{ github.ref_name }}
           releaseName: "Resonance ${{ github.ref_name }}"
           releaseBody: |

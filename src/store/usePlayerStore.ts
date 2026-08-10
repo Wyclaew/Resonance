@@ -674,6 +674,11 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         recs = await getRecommendations({
           playlistId: DISCOVERY_ID,
           filters: get().discoveryFilters,
+          // Bir önceki partinin seed sanatçılarını dışla → ardışık partiler
+          // aynı sanatçı kümesinden beslenmesin ("hep aynı sanatçılar").
+          excludeSeedArtists: new Set(
+            get().discoverySeedArtists.map((a) => a.toLowerCase())
+          ),
           excludeIds: new Set<string>([
             ...get().skippedRecIds,
             ...recommendedThisSession,

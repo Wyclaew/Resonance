@@ -45,6 +45,21 @@ export async function signUp(email: string, password: string) {
   return data.user;
 }
 
+/**
+ * Şifre sıfırlama e-postası gönderir.
+ *
+ * ⚠️ Bağlantı Supabase'deki **Site URL**'ine gider (Authentication → URL
+ * Configuration). Masaüstü uygulamasının web sayfası olmadığı için oraya bir
+ * adres tanımlı değilse bağlantı boşa düşer; o durumda şifre Supabase
+ * panelinden sıfırlanır. Bu bir istemci hatası değil, kurulum ayarıdır.
+ */
+export async function resetPassword(email: string) {
+  const sb = getSupabase();
+  if (!sb) throw new Error("sync-not-configured");
+  const { error } = await sb.auth.resetPasswordForEmail(email.trim());
+  if (error) throw error;
+}
+
 export async function signOut() {
   const sb = getSupabase();
   if (!sb) return;
