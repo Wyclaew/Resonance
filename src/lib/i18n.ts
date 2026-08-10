@@ -321,14 +321,41 @@ const tr = {
   "about.builtWith": "Tauri · React · rodio · yt-dlp · ffmpeg ile yapıldı.",
   "about.madeBy": "Yapımcı",
   // — Hesap & Senkron
-  "account.soonTitle": "Bulut senkronu — yakında",
-  "account.soonBody":
-    "Yakında bir hesapla giriş yapıp çalma listelerin, oyların/karman ve ayarların masaüstü ve telefon arasında otomatik senkronlanacak. Ses her cihazda yerel kalır; buluta yalnızca metadata gider. Şu an her şey tamamen yerel ve gizli — senkron açıldığında bile isteğe bağlı (opt-in) olacak.",
-  "account.signInSoon": "Giriş yap (yakında)",
   "account.thisDevice": "Bu cihaz",
-  "account.deviceDesc": "Senkron açıldığında bu cihazı tanımak için kullanılacak kimlik.",
-  "account.planNote":
-    "Planın tamamı depoda docs/SYNC.md ve docs/MOBILE.md dosyalarında: Supabase tabanlı hesap + delta senkron, mobil için React Native (Android).",
+  "account.deviceDesc": "Bu cihazı senkronda tanımak için kullanılan kimlik.",
+  "sync.notConfigured": "Senkron yapılandırılmamış",
+  "sync.notConfiguredBody":
+    "Bulut senkronu için Supabase bağlantı bilgileri gerekiyor. Proje URL'si ve anon anahtarı şu dosyaya girilmeli; boş kaldığı sürece uygulama tamamen yerel çalışır.",
+  "sync.signInTitle": "Bulut senkronu",
+  "sync.signInBody":
+    "Giriş yap; çalma listelerin, oyların ve dinleme geçmişin cihazların arasında otomatik senkronlansın. Ses dosyaları her cihazda yerel kalır — buluta yalnızca metadata gider.",
+  "sync.email": "E-posta",
+  "sync.password": "Şifre",
+  "sync.signIn": "Giriş yap",
+  "sync.signUp": "Kayıt ol",
+  "sync.signOut": "Çıkış",
+  "sync.statusIdle": "Güncel",
+  "sync.statusSyncing": "Senkronlanıyor…",
+  "sync.statusError": "Senkron hatası",
+  "sync.statusOff": "Kapalı",
+  "sync.lastSync": "son:",
+  "sync.syncNow": "Şimdi senkronla",
+  "sync.whatSyncs":
+    "Senkronlananlar: çalma listeleri, şarkı bilgileri, oylar, dinleme geçmişi ve öneri geçmişi. Senkronlanmayanlar: indirilen ses dosyaları ve cihaza özel ayarlar (ses seviyesi, tema, Keşfet kuyruğu).",
+  "sync.firstTitle": "İlk senkron — yön seç",
+  "sync.firstBody":
+    "Bu cihazda zaten veri var. Buluttakiyle nasıl birleşeceğine karar ver. Her iki durumda da önce otomatik yedek alınır.",
+  "sync.firstPush": "Bu cihaz kaynak — buluta yükle",
+  "sync.firstPushDesc":
+    "Bu cihazdaki her şey buluta gider. Diğer cihazlar bunu indirir. Verinin doğru olduğu cihazda bunu seç.",
+  "sync.firstPull": "Buluttan al — bu cihazı değiştir",
+  "sync.firstPullDesc":
+    "Bu cihazdaki çalma listeleri, oylar ve geçmiş SİLİNİP buluttakiyle değiştirilir. İndirilen ses dosyaları korunur.",
+  "sync.firstPullConfirm":
+    "Bu cihazdaki çalma listeleri, oylar ve dinleme geçmişi silinecek, yerine buluttaki veri gelecek. Önce otomatik yedek alınır. Devam edilsin mi?",
+  "sync.firstPullConfirmYes": "Evet, buluttan al",
+  "sync.working": "Çalışıyor… büyük kütüphanelerde biraz sürebilir.",
+  "sync.firstDone": "Senkron kuruldu",
   // — Veri & Yedek
   "data.intro":
     "Çalma listelerin, oyların/karman bir JSON dosyasına yedeklenir (İndirilenler klasörüne). Bu dosyayı başka bir cihazda ya da bir arkadaşınla içe aktararak tüm listeleri paylaşabilirsin. Ses dosyaları dahil değildir — şarkılar her cihazda ilk çalmada otomatik indirilir. (Ayarlar/gizli anahtarlar paylaşılmaz.)",
@@ -716,14 +743,41 @@ const en: Record<TrKey, string> = {
     "For personal use. Fetching audio from YouTube may conflict with YouTube's Terms of Service; use this app at your own risk.",
   "about.builtWith": "Built with Tauri · React · rodio · yt-dlp · ffmpeg.",
   "about.madeBy": "Made by",
-  "account.soonTitle": "Cloud sync — coming soon",
-  "account.soonBody":
-    "Soon you'll be able to sign in and have your playlists, votes/karma and settings sync automatically between desktop and phone. Audio stays local on each device; only metadata goes to the cloud. Right now everything is fully local and private — and sync will be opt-in even once it ships.",
-  "account.signInSoon": "Sign in (coming soon)",
   "account.thisDevice": "This device",
-  "account.deviceDesc": "The ID that will identify this device once sync is enabled.",
-  "account.planNote":
-    "The full plan lives in the repo under docs/SYNC.md and docs/MOBILE.md: Supabase-backed account + delta sync, React Native (Android) for mobile.",
+  "account.deviceDesc": "The ID that identifies this device in sync.",
+  "sync.notConfigured": "Sync not configured",
+  "sync.notConfiguredBody":
+    "Cloud sync needs your Supabase connection details. Add the project URL and anon key to the file below; while it's empty the app stays fully local.",
+  "sync.signInTitle": "Cloud sync",
+  "sync.signInBody":
+    "Sign in to keep your playlists, votes and listening history in sync across your devices. Audio files stay local on each device — only metadata goes to the cloud.",
+  "sync.email": "Email",
+  "sync.password": "Password",
+  "sync.signIn": "Sign in",
+  "sync.signUp": "Sign up",
+  "sync.signOut": "Sign out",
+  "sync.statusIdle": "Up to date",
+  "sync.statusSyncing": "Syncing…",
+  "sync.statusError": "Sync error",
+  "sync.statusOff": "Off",
+  "sync.lastSync": "last:",
+  "sync.syncNow": "Sync now",
+  "sync.whatSyncs":
+    "Synced: playlists, track info, votes, listening history and recommendation history. Not synced: downloaded audio files and device-specific settings (volume, theme, Discover queue).",
+  "sync.firstTitle": "First sync — pick a direction",
+  "sync.firstBody":
+    "This device already has data. Decide how it should meet the cloud. Either way a backup is taken first.",
+  "sync.firstPush": "This device is the source — upload",
+  "sync.firstPushDesc":
+    "Everything on this device goes to the cloud, and your other devices pull it down. Pick this on the device whose data is correct.",
+  "sync.firstPull": "Take from cloud — replace this device",
+  "sync.firstPullDesc":
+    "Playlists, votes and history on this device are DELETED and replaced with the cloud copy. Downloaded audio files are kept.",
+  "sync.firstPullConfirm":
+    "Playlists, votes and listening history on this device will be deleted and replaced with the cloud data. A backup is taken first. Continue?",
+  "sync.firstPullConfirmYes": "Yes, take from cloud",
+  "sync.working": "Working… this can take a moment on large libraries.",
+  "sync.firstDone": "Sync is set up",
   "data.intro":
     "Your playlists and votes/karma are backed up to a JSON file (in your Downloads folder). You can import that file on another device — or share it with a friend to pass on all your playlists. Audio files are not included; tracks download automatically on first play on each device. (Settings and secret keys are not shared.)",
   "data.exportBackup": "Export backup",

@@ -4,6 +4,8 @@ import { getDb, isTauri } from "./db";
 import { decayWeight } from "./karma";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { t, dayNameOf, type Lang } from "./i18n";
+import { getDeviceId, newUid } from "./device";
+import { notifyLocalChange } from "./sync/engine";
 
 // Resonance öneri motoru (M4).
 // "Hangi gün/saat hangi şarkıya oy verdin" sinyalinden sanatçı yakınlığı
@@ -255,10 +257,13 @@ export async function recordRecommended(trackIds: string[]): Promise<void> {
     const now = Date.now();
     for (const id of trackIds) {
       await db.execute(
-        `INSERT INTO recommendation_history (track_id, recommended_at) VALUES ($1, $2)`,
-        [id, now]
+        `INSERT INTO recommendation_history
+           (track_id, recommended_at, uid, device_id, updated_at)
+         VALUES ($1, $2, $3, $4, $2)`,
+        [id, now, newUid(), getDeviceId()]
       );
     }
+    notifyLocalChange();
   } catch (e) {
     console.error("[resonance] öneri geçmişi yazılamadı:", e);
   }
@@ -303,7 +308,8 @@ async function computeRecommendations(
   // 1) Oy sinyali — en güçlü, açık beğeni.
   const votes = await db.select<VoteRow[]>(
     `SELECT v.track_id, v.value, v.created_at, v.hour, v.dow, t.artist
-     FROM votes v JOIN tracks t ON t.id = v.track_id`
+     FROM votes v JOIN tracks t ON t.id = v.track_id
+     WHERE v.deleted = 0`
   );
   for (const v of votes) {
     const w =
@@ -332,7 +338,7 @@ async function computeRecommendations(
     >(
       `SELECT t.artist, pt.added_at
        FROM playlist_tracks pt JOIN tracks t ON t.id = pt.track_id
-       WHERE t.artist <> ''`
+       WHERE t.artist <> '' AND pt.deleted = 0`
     );
     for (const p of plRows) {
       const w =
@@ -431,7 +437,7 @@ async function computeRecommendations(
   const plTrackRows = await db.select<{ title: string; artist: string }[]>(
     `SELECT t.title, t.artist
      FROM playlist_tracks pt JOIN tracks t ON t.id = pt.track_id
-     WHERE pt.playlist_id = $1`,
+     WHERE pt.playlist_id = $1 AND pt.deleted = 0`,
     [opts.playlistId]
   );
   for (const r of plTrackRows) {
@@ -459,7 +465,10 @@ async function computeRecommendations(
               t.duration_ms, t.thumbnail
        FROM tracks t
        JOIN playlist_tracks pt ON pt.track_id = t.id AND pt.playlist_id <> $1
-       WHERE t.id NOT IN (SELECT track_id FROM playlist_tracks WHERE playlist_id = $1)`,
+            AND pt.deleted = 0
+       WHERE t.id NOT IN (
+         SELECT track_id FROM playlist_tracks WHERE playlist_id = $1 AND deleted = 0
+       )`,
       [opts.playlistId]
     );
     const scored = cands
@@ -658,7 +667,7 @@ async function addSearchFallback(
   const plArtists = await db.select<{ artist: string; c: number }[]>(
     `SELECT t.artist, COUNT(*) AS c
      FROM playlist_tracks pt JOIN tracks t ON t.id = pt.track_id
-     WHERE pt.playlist_id = $1 AND t.artist <> ''
+     WHERE pt.playlist_id = $1 AND t.artist <> '' AND pt.deleted = 0
      GROUP BY t.artist ORDER BY c DESC LIMIT 8`,
     [opts.playlistId]
   );

@@ -10,6 +10,7 @@ import Onboarding from "./components/Onboarding";
 import WindowControls from "./components/WindowControls";
 import Toasts from "./components/Toasts";
 import { getDb, isTauri } from "./lib/db";
+import { onRemoteApplied, startSync } from "./lib/sync/engine";
 import {
   initPlayer,
   usePlayerStore,
@@ -166,10 +167,24 @@ export default function App() {
           usePlaylistStore.getState().playlists.length > 0 ||
           useLibraryStore.getState().downloads.length > 0;
         if (hasData) invoke("backup_db").catch(() => {});
+        // Bulut senkronu: yalnız yapılandırılmış VE oturum açıksa başlar
+        // (aksi halde sessizce hiçbir şey yapmaz — uygulama %100 yerel).
+        void startSync();
       })
       .catch((e) => console.error("[resonance] veritabanı hatası:", e));
     initPlayer();
   }, []);
+
+  // Uzaktan (diğer cihazdan) veri geldiğinde listeleri tazele — kullanıcı
+  // Ayarlar'a girip elle yenilemek zorunda kalmasın.
+  useEffect(
+    () =>
+      onRemoteApplied(() => {
+        void useLibraryStore.getState().refresh();
+        void usePlaylistStore.getState().refresh();
+      }),
+    []
+  );
 
   // Vurgu rengini uygula (Görünüm ayarı).
   //

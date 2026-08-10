@@ -2,8 +2,17 @@ import type { Playlist, PlaylistTrack, Track, Vote } from "../types";
 import { getDb } from "./db";
 import { t } from "./i18n";
 import { computeKarma, type VoteEvent } from "./karma";
+import { getDeviceId, newUid } from "./device";
+import { notifyLocalChange } from "./sync/engine";
 
 // Çalma listesi & şarkı ilişkisi için SQLite yardımcıları.
+//
+// ⭐ SENKRON KURALLARI (migration v5, bkz. CLAUDE.md):
+//  • Her yazımda `updated_at = Date.now()` — LWW birleştirmenin temeli.
+//  • SİLME YOK, TOMBSTONE VAR (`deleted = 1`). Hard delete diğer cihaza
+//    "böyle bir satır hiç olmadı" gibi görünür → silinen satır geri gelir.
+//  • Bu yüzden HER OKUMA `deleted = 0` filtrelemek ZORUNDA.
+//  • Yazımdan sonra `notifyLocalChange()` → senkron debounce'lu tetiklenir.
 
 export async function listPlaylists(): Promise<Playlist[]> {
   const db = await getDb();
@@ -21,7 +30,8 @@ export async function listPlaylists(): Promise<Playlist[]> {
     `SELECT p.id, p.name, p.description, p.source, p.source_url AS sourceUrl,
             p.created_at AS createdAt, COUNT(pt.track_id) AS trackCount
      FROM playlists p
-     LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
+     LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id AND pt.deleted = 0
+     WHERE p.deleted = 0
      GROUP BY p.id
      ORDER BY p.created_at DESC`
   );
@@ -44,10 +54,11 @@ export async function createPlaylist(
   const id = crypto.randomUUID();
   const now = Date.now();
   await db.execute(
-    `INSERT INTO playlists (id, name, description, source, source_url, created_at)
-     VALUES ($1, $2, $3, 'local', NULL, $4)`,
+    `INSERT INTO playlists (id, name, description, source, source_url, created_at, updated_at)
+     VALUES ($1, $2, $3, 'local', NULL, $4, $4)`,
     [id, name.trim() || t("playlist.untitled"), description ?? null, now]
   );
+  notifyLocalChange();
   return {
     id,
     name: name.trim() || t("playlist.untitled"),
@@ -60,16 +71,30 @@ export async function createPlaylist(
 
 export async function renamePlaylist(id: string, name: string): Promise<void> {
   const db = await getDb();
-  await db.execute(`UPDATE playlists SET name = $1 WHERE id = $2`, [
-    name.trim() || t("playlist.untitled"),
-    id,
-  ]);
+  await db.execute(
+    `UPDATE playlists SET name = $1, updated_at = $2 WHERE id = $3`,
+    [name.trim() || t("playlist.untitled"), Date.now(), id]
+  );
+  notifyLocalChange();
 }
 
+// Listeyi siler — TOMBSTONE olarak (satır kalır, deleted=1).
+// ⚠️ Eskiden `DELETE FROM playlists` idi ve playlist_tracks ON DELETE CASCADE
+// ile temizleniyordu. Tombstone'da cascade TETİKLENMEZ → üyelikleri de elle
+// işaretlemek gerekir, yoksa liste diğer cihazda silinir ama şarkı üyelikleri
+// orada kalır (hayalet kayıtlar öneri motorunu beslemeye devam eder).
 export async function deletePlaylist(id: string): Promise<void> {
   const db = await getDb();
-  // playlist_tracks ON DELETE CASCADE ile temizlenir.
-  await db.execute(`DELETE FROM playlists WHERE id = $1`, [id]);
+  const now = Date.now();
+  await db.execute(
+    `UPDATE playlists SET deleted = 1, updated_at = $1 WHERE id = $2`,
+    [now, id]
+  );
+  await db.execute(
+    `UPDATE playlist_tracks SET deleted = 1, updated_at = $1 WHERE playlist_id = $2 AND deleted = 0`,
+    [now, id]
+  );
+  notifyLocalChange();
 }
 
 // Bir parça metadata'sını tracks tablosuna yazar (FK için gerekli).
@@ -80,11 +105,12 @@ export async function ensureTrack(track: Track): Promise<void> {
   const db = await getDb();
   await db.execute(
     `INSERT INTO tracks
-       (id, source, source_id, title, artist, album, duration_ms, thumbnail, added_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       (id, source, source_id, title, artist, album, duration_ms, thumbnail, added_at, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
      ON CONFLICT(id) DO UPDATE SET
        title=excluded.title, artist=excluded.artist, album=excluded.album,
-       duration_ms=excluded.duration_ms, thumbnail=excluded.thumbnail`,
+       duration_ms=excluded.duration_ms, thumbnail=excluded.thumbnail,
+       updated_at=excluded.updated_at`,
     [
       track.id,
       track.source,
@@ -95,6 +121,7 @@ export async function ensureTrack(track: Track): Promise<void> {
       track.durationMs,
       track.thumbnail ?? null,
       track.addedAt ?? Date.now(),
+      Date.now(),
     ]
   );
 }
@@ -107,22 +134,31 @@ export async function addTrackToPlaylist(
   const db = await getDb();
   await ensureTrack(track);
 
-  const exists = await db.select<{ c: number }[]>(
-    `SELECT COUNT(*) AS c FROM playlist_tracks WHERE playlist_id = $1 AND track_id = $2`,
+  // Zaten AKTİF üyeyse ekleme. Tombstone'lu (deleted=1) satır varsa PK çakışır →
+  // silmek yerine DİRİLTİLİR (ON CONFLICT), yoksa "listeden çıkar → geri ekle"
+  // akışı birincil anahtar hatası verirdi.
+  const existing = await db.select<{ deleted: number }[]>(
+    `SELECT deleted FROM playlist_tracks WHERE playlist_id = $1 AND track_id = $2`,
     [playlistId, track.id]
   );
-  if (exists[0]?.c > 0) return false;
+  if (existing[0] && existing[0].deleted === 0) return false;
 
   const posRow = await db.select<{ pos: number }[]>(
-    `SELECT COALESCE(MAX(position), -1) + 1 AS pos FROM playlist_tracks WHERE playlist_id = $1`,
+    `SELECT COALESCE(MAX(position), -1) + 1 AS pos FROM playlist_tracks
+     WHERE playlist_id = $1 AND deleted = 0`,
     [playlistId]
   );
   const position = posRow[0]?.pos ?? 0;
+  const now = Date.now();
   await db.execute(
-    `INSERT INTO playlist_tracks (playlist_id, track_id, position, added_at)
-     VALUES ($1, $2, $3, $4)`,
-    [playlistId, track.id, position, Date.now()]
+    `INSERT INTO playlist_tracks (playlist_id, track_id, position, added_at, updated_at, deleted)
+     VALUES ($1, $2, $3, $4, $4, 0)
+     ON CONFLICT(playlist_id, track_id) DO UPDATE SET
+       deleted = 0, position = excluded.position,
+       added_at = excluded.added_at, updated_at = excluded.updated_at`,
+    [playlistId, track.id, position, now]
   );
+  notifyLocalChange();
   return true;
 }
 
@@ -144,9 +180,11 @@ export async function removeTrackFromPlaylist(
 ): Promise<void> {
   const db = await getDb();
   await db.execute(
-    `DELETE FROM playlist_tracks WHERE playlist_id = $1 AND track_id = $2`,
-    [playlistId, trackId]
+    `UPDATE playlist_tracks SET deleted = 1, updated_at = $1
+     WHERE playlist_id = $2 AND track_id = $3`,
+    [Date.now(), playlistId, trackId]
   );
+  notifyLocalChange();
 }
 
 export async function getPlaylist(id: string): Promise<Playlist | null> {
@@ -179,7 +217,7 @@ export async function getPlaylistTracks(
             pt.position, pt.vote
      FROM playlist_tracks pt
      JOIN tracks t ON t.id = pt.track_id
-     WHERE pt.playlist_id = $1
+     WHERE pt.playlist_id = $1 AND pt.deleted = 0
      ORDER BY pt.position ASC`,
     [playlistId]
   );
@@ -188,7 +226,7 @@ export async function getPlaylistTracks(
   const events = await db.select<
     { track_id: string; value: number; created_at: number }[]
   >(
-    `SELECT track_id, value, created_at FROM votes WHERE playlist_id = $1`,
+    `SELECT track_id, value, created_at FROM votes WHERE playlist_id = $1 AND deleted = 0`,
     [playlistId]
   );
   const byTrack = new Map<string, VoteEvent[]>();
@@ -230,7 +268,8 @@ export async function getTrackKarma(
 ): Promise<{ karma: number; lastVoteAt?: number; myVote: Vote }> {
   const db = await getDb();
   const events = await db.select<{ value: number; created_at: number }[]>(
-    `SELECT value, created_at FROM votes WHERE playlist_id = $1 AND track_id = $2`,
+    `SELECT value, created_at FROM votes
+     WHERE playlist_id = $1 AND track_id = $2 AND deleted = 0`,
     [playlistId, trackId]
   );
   const voteEvents: VoteEvent[] = events.map((e) => ({
@@ -263,7 +302,8 @@ export async function voteTrack(
 
   // Cooldown kontrolü: bu (playlist, şarkı) için son oy ne zamandı?
   const lastRows = await db.select<{ last: number | null }[]>(
-    `SELECT MAX(created_at) AS last FROM votes WHERE playlist_id = $1 AND track_id = $2`,
+    `SELECT MAX(created_at) AS last FROM votes
+     WHERE playlist_id = $1 AND track_id = $2 AND deleted = 0`,
     [playlistId, trackId]
   );
   const last = lastRows[0]?.last ?? 0;
@@ -275,15 +315,26 @@ export async function voteTrack(
 
   const d = new Date();
   await db.execute(
-    `INSERT INTO votes (track_id, playlist_id, value, created_at, hour, dow)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [trackId, playlistId, direction, now, d.getHours(), d.getDay()]
+    `INSERT INTO votes (track_id, playlist_id, value, created_at, hour, dow, uid, device_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [
+      trackId,
+      playlistId,
+      direction,
+      now,
+      d.getHours(),
+      d.getDay(),
+      newUid(),
+      getDeviceId(),
+    ]
   );
   // Son oy yönünü ipucu olarak sakla.
   await db.execute(
-    `UPDATE playlist_tracks SET vote = $1 WHERE playlist_id = $2 AND track_id = $3`,
-    [direction, playlistId, trackId]
+    `UPDATE playlist_tracks SET vote = $1, updated_at = $2
+     WHERE playlist_id = $3 AND track_id = $4`,
+    [direction, now, playlistId, trackId]
   );
+  notifyLocalChange();
 
   return { ok: true, cooldownRemainingMs: 60 * 60 * 1000 };
 }
@@ -297,23 +348,30 @@ export async function undoVote(
 ): Promise<boolean> {
   const db = await getDb();
   const rows = await db.select<{ id: number }[]>(
-    `SELECT id FROM votes WHERE playlist_id = $1 AND track_id = $2
+    `SELECT id FROM votes WHERE playlist_id = $1 AND track_id = $2 AND deleted = 0
      ORDER BY created_at DESC LIMIT 1`,
     [playlistId, trackId]
   );
   const id = rows[0]?.id;
   if (id == null) return false;
-  await db.execute(`DELETE FROM votes WHERE id = $1`, [id]);
+  const now = Date.now();
+  // Tombstone (hard delete DEĞİL) → geri alma diğer cihaza da gider.
+  await db.execute(
+    `UPDATE votes SET deleted = 1, updated_at = $1 WHERE id = $2`,
+    [now, id]
+  );
   const last = await db.select<{ value: number }[]>(
-    `SELECT value FROM votes WHERE playlist_id = $1 AND track_id = $2
+    `SELECT value FROM votes WHERE playlist_id = $1 AND track_id = $2 AND deleted = 0
      ORDER BY created_at DESC LIMIT 1`,
     [playlistId, trackId]
   );
   const v = last[0]?.value ?? 0;
   await db.execute(
-    `UPDATE playlist_tracks SET vote = $1 WHERE playlist_id = $2 AND track_id = $3`,
-    [Math.sign(v), playlistId, trackId]
+    `UPDATE playlist_tracks SET vote = $1, updated_at = $2
+     WHERE playlist_id = $3 AND track_id = $4`,
+    [Math.sign(v), now, playlistId, trackId]
   );
+  notifyLocalChange();
   return true;
 }
 
@@ -323,10 +381,13 @@ export async function reorderPlaylist(
   orderedTrackIds: string[]
 ): Promise<void> {
   const db = await getDb();
+  const now = Date.now();
   for (let i = 0; i < orderedTrackIds.length; i++) {
     await db.execute(
-      `UPDATE playlist_tracks SET position = $1 WHERE playlist_id = $2 AND track_id = $3`,
-      [i, playlistId, orderedTrackIds[i]]
+      `UPDATE playlist_tracks SET position = $1, updated_at = $2
+       WHERE playlist_id = $3 AND track_id = $4`,
+      [i, now, playlistId, orderedTrackIds[i]]
     );
   }
+  notifyLocalChange();
 }

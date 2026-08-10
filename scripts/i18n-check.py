@@ -6,7 +6,12 @@
 Yorumlar, i18n.ts ve console.* satirlari haric (log ceviri gerektirmez)."""
 import re, sys, pathlib
 
-ROOT = pathlib.Path("/Users/erne/Desktop/MusicPlayer/src")
+# Betige GORE cozulur — mutlak yol YAZMA. (Proje klasoru yeniden
+# adlandirilinca sabit yol hicbir dosya bulamayip "KALAN: 0" diye SAHTE
+# temiz rapor veriyordu.)
+ROOT = pathlib.Path(__file__).resolve().parent.parent / "src"
+if not ROOT.is_dir():
+    sys.exit(f"HATA: kaynak klasoru bulunamadi: {ROOT}")
 SKIP = {"lib/i18n.ts"}
 UI_ATTRS = ("title", "placeholder", "aria-label", "alt", "label", "subtitle")
 TRC = "çğıöşüÇĞİÖŞÜ"

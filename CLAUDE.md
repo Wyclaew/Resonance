@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.2.3** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.3.0** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -13,6 +13,8 @@ UI'da gerçek logo (◈ değil), Windows'a ÖZEL tam-taşan ikon.
 v1.2.2'de: Windows CI build fix (`raw-window-handle` dep), **Keşfet kuyruğu kalıcı** (kapat-aç
 hatırlar, reroll'a kadar sabit), öneri gerekçesi YAPISAL (dil değişince çevrilir), playlist
 ekleme/oluşturma toast'ları, çeşitli i18n düzeltmeleri.
+v1.3.0'da: **BULUT SENKRONU** (Mac ↔ Windows canlı) — migration v5, `src/lib/sync/`,
+Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/SYNC.md`.
 v1.2.3'te: **macOS ad-hoc imza** (`signingIdentity:"-"` → "damaged" hatası biter, sağ tık→Aç),
 **indirme taze-çıkarım retry** (geçici HTTP 403 throttle'a karşı 3 deneme → çok daha az
 "indirilemedi"), Keşfet'te karışık tuşu KİLİTLİ (modu bozup reset atmıyor), indirme-hatası
@@ -71,8 +73,10 @@ sonra `cd src-tauri && cargo check --target x86_64-pc-windows-gnu`. Bitince saht
 - **yt-dlp/ffmpeg** (`ytdlp.rs`): `resolve_bin()` sırası → sistem → **app_data/bin (runtime güncellenen)** →
   sidecar → PATH.
 - **Öneri** (`src/lib/recommender.ts`): tek skorlama modeli (aşağıda ayrı bölüm).
+- **Senkron** (`src/lib/sync/`, v1.3.0): Supabase tabanlı bulut senkronu (aşağıda ayrı bölüm).
 - **DB tabloları:** tracks, playlists, playlist_tracks(+vote), votes (olay günlüğü), play_history,
-  cache(+downloaded), settings, **recommendation_history**. Migration'lar: v1 ilk şema, v2 downloaded,
+  cache(+downloaded), settings, **recommendation_history**, **sync_state**.
+  Migration'lar: v1 ilk şema, v2 downloaded,
   v3 current_vote, v4 recommendation_history.
 
 ## Öneri motoru (`src/lib/recommender.ts`) — nasıl çalışır
@@ -329,9 +333,48 @@ Tüm sinyaller tek skorda birleşir:
   Daha uzun listelerin tamamı için Ayarlar'dan **opsiyonel** ücretsiz API anahtarı (Client Credentials);
   anahtar varsa önce API denenir, hata verirse anahtarsız yola düşülür.
 
+## ⭐ Senkron (`src/lib/sync/`, v1.3.0) — bilmen gerekenler
+
+Supabase (Postgres + Auth + RLS + Realtime). Sunucu kodu YOK. Tam anlatım:
+**`docs/SYNC.md`**, sunucu şeması `docs/supabase-schema.sql`.
+Kurulum: `src/lib/sync/config.ts`'e Project URL + **anon** key (boşsa senkron kapalı,
+uygulama %100 yerel). ⛔ `service_role` anahtarı ASLA kullanılmaz (RLS'i bypass eder).
+
+- **⭐ İKİ AYRI ZAMAN DAMGASI — karıştırma:**
+  - `updated_at` (epoch ms, **CİHAZ** saati) → yalnız **çakışma çözümü** (LWW).
+  - `synced_at` (timestamptz, **SUNUCU** saati, Postgres trigger) → yalnız **pull penceresi**.
+  **Neden:** iki cihazın saati tutmaz; pencere cihaz saatine bağlansaydı saati geri kalan
+  cihaz diğerinin satırlarını "gördüm" sanıp SONSUZA DEK atlardı.
+- **⭐ SİLME = TOMBSTONE** (`deleted = 1`), hard delete YOK. Hard delete diğer cihaza
+  "bu satır hiç yoktu" gibi görünür → silinen satır geri gelir.
+  **Sonuç: HER OKUMA `deleted = 0` FİLTRELEMEK ZORUNDA.** (playlists.ts, recommender.ts,
+  dışa aktarma.) Yeni sorgu yazarken bunu unutma — sessizce silinmiş veri gösterirsin.
+  - `deletePlaylist` artık CASCADE'e güvenemez (satır silinmiyor) → `playlist_tracks`
+    üyeliklerini de ELLE tombstone'lar.
+  - `addTrackToPlaylist` tombstone'lu satırı `ON CONFLICT ... SET deleted=0` ile **diriltir**
+    (yoksa "çıkar → geri ekle" PK hatası verirdi).
+- **⭐ `uid`**: votes/play_history/recommendation_history `AUTOINCREMENT id` kullanıyor →
+  iki cihaz KAÇINILMAZ olarak aynı id'yi üretir. `uid` (UUID) cihazdan bağımsız upsert
+  anahtarıdır. Bu tablolara yazan HER yeni kod `uid` + `device_id` + `updated_at` vermeli
+  (bkz. `newUid()`, `getDeviceId()` — `src/lib/device.ts`).
+- **Yazma yolları** `notifyLocalChange()` çağırır (3 sn debounce → senkron). Senkron
+  kapalıysa no-op, güvenle çağrılabilir.
+- **Senkronlanmayanlar (bilerek):** `cache` (ses dosyaları cihaz-yerel) ve **`settings`'in
+  tamamı** — içinde `resumeState` (Keşfet kuyruğu), cihaz kimliği, ses seviyesi var.
+  Tema/dil de bu yüzden senkronlanmıyor.
+- **Bulutta FK YOK** (bilerek): parçası henüz yüklenmemiş bir `playlist_tracks` satırı
+  FK'lı şemada push'u komple patlatırdı. Tutarlılık yerelde korunur.
+- **Pull hata toleransı:** bir satır hata verirse (tipik: ebeveyni gelmemiş FK) o tablonun
+  su terazisi o satırdan ÖNCEYE sabitlenir → satır kaybolmaz, sonraki turda yeniden denenir.
+- **İlk senkron yönü** kullanıcıya sorulur (`firstSyncPushAll` / `firstSyncPullReplace`),
+  ikisinde de önce otomatik yedek. **"Buluttan al" `tracks`'i BİLEREK silmez** — `cache`
+  tracks'e CASCADE bağlı, silinseydi indirilmiş dosya kayıtları da uçardı.
+
 ## Sırada / ertelenenler
-- **Mobil + senkron** → `docs/MOBILE.md` (detaylı plan; ayrı sohbette yapılacak) + `docs/SYNC.md`.
+- **Mobil (Android)** → `docs/MOBILE.md` (ayrı sohbette yapılacak). Senkron şeması + protokolü
+  ARTIK HAZIR (`docs/SYNC.md`); mobil aynı şemayı kullanmalı, yeniden tasarlamamalı.
   **Platform kararı: ANDROID** (kullanıcı netleştirdi; iOS kapsam dışı).
+- Seçmeli ayar senkronu (tema/dil) — şu an `settings` hiç senkronlanmıyor.
 - **Yetim `play_history` kayıtları (104)**: `tracks`'te olmadıkları için öğrenmeye katılmıyorlar.
   yt-dlp ile metadata çekilip kurtarılabilir. Uygulama KAPALIYKEN + yedek alarak yapılmalı.
 - Gerçek **streaming** (ffmpeg PCM pipe → rodio): kullanıcı şimdilik istemedi.

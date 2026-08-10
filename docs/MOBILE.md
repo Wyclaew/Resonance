@@ -133,61 +133,54 @@ MusicPlayer/
 
 ---
 
-## 5. Veri modeli: senkron için şema değişiklikleri
+## 5. Veri modeli: senkron şeması — ✅ ARTIK VAR (v1.3.0)
 
-Mevcut şema (`src-tauri/src/lib.rs`, migration v1–v4) senkron için hazır **değil**. Gereken **migration v5**
-(masaüstü + mobil aynı SQL'i kullanır):
+**Bu bölüm planlama değil, uygulanmış durum.** Masaüstünde **migration v5**
+(`src-tauri/src/lib.rs`) senkron şemasını kurdu; mobil **birebir aynı şemayı**
+kullanmalı, yeniden tasarlama:
 
-```sql
--- 1) Satır bazlı LWW için zaman damgası + tombstone
-ALTER TABLE playlists       ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE playlists       ADD COLUMN deleted    INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE playlist_tracks ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE playlist_tracks ADD COLUMN deleted    INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE tracks          ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
+- `playlists`, `playlist_tracks`, `tracks` → `updated_at` (+ ilk ikisinde `deleted`)
+- `votes`, `play_history`, `recommendation_history` → `uid`, `device_id`, `updated_at`
+  (+ `votes`'ta `deleted`)
+- `sync_state(table_name, last_pulled TEXT, last_pushed INTEGER)`
 
--- 2) Cihazlar arası benzersiz kimlik (votes/play_history AUTOINCREMENT → çakışır!)
-ALTER TABLE votes        ADD COLUMN uid       TEXT;  -- "<device_id>:<local_id>" veya UUID
-ALTER TABLE play_history ADD COLUMN uid       TEXT;
-ALTER TABLE votes        ADD COLUMN device_id TEXT;
-ALTER TABLE play_history ADD COLUMN device_id TEXT;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_votes_uid ON votes(uid);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_hist_uid  ON play_history(uid);
+Tam SQL için `lib.rs` migration v5'e, sunucu tarafı için
+`docs/supabase-schema.sql`'e bak. Protokolün tamamı: **`docs/SYNC.md`**.
 
--- 3) Senkron defteri
-CREATE TABLE IF NOT EXISTS sync_state (
-  table_name  TEXT PRIMARY KEY,
-  last_pulled INTEGER NOT NULL DEFAULT 0,  -- son çekilen updated_at
-  last_pushed INTEGER NOT NULL DEFAULT 0
-);
-```
-- Cihaz kimliği **zaten var**: `src/lib/device.ts` (settings'te saklı) → `device_id` oradan.
-- **DİKKAT** (`CLAUDE.md` gotcha #12): senkron yazarken `tracks`'e `INSERT OR REPLACE` yapma →
-  CASCADE her şeyi uçurur. `ensureTrack` mantığını (`ON CONFLICT(id) DO UPDATE`) kullan.
-- Migration v5 masaüstüne eklendiğinde **eski satırların `updated_at`'i 0** olur → ilk senkronda
-  hepsi "eski" sayılıp uzaktakine yenilir. **Doğru davranış:** migration içinde mevcut satırları
-  `updated_at = added_at/created_at` ile doldur (`UPDATE ... SET updated_at = created_at`).
+**Mobilde tekrar düşmemesi gereken tuzaklar** (masaüstünde çözüldü):
+- `last_pulled` **sunucu zamanıdır (TEXT/ISO)**, cihaz zamanı değil — cihaz saatleri
+  birbirini tutmaz, cihaz saatiyle pencere kurulursa satırlar sonsuza dek atlanır.
+- Silme = **tombstone**; her okuma `deleted = 0` filtrelemeli.
+- `tracks`'e `INSERT OR REPLACE` YAPMA (`CLAUDE.md` gotcha #12) → CASCADE uçurur.
+  `ON CONFLICT(id) DO UPDATE` kullan.
+- Eski satırların `updated_at`'i migration'da mevcut zaman damgalarından doldurulur
+  (0 kalırsa hepsi "çok eski" sayılıp uzaktakine yenilirdi).
 
 ### Ne senkronlanır / ne senkronlanmaz
 | Senkron ✅ | Senkron ❌ |
 | --- | --- |
 | `playlists`, `playlist_tracks` (oy dahil) | `cache` — ses dosyaları, cihaz-yerel (her cihaz kendi indirir) |
 | `tracks` (metadata) | Gizli anahtarlar (Spotify client secret, çerez tarayıcısı) |
-| `votes` (append-only olay günlüğü) | Cihaza özel ayarlar (ses seviyesi, ambiyans süresi, autostart) |
-| `play_history` (öneri motorunu cihazlar arası eğitir) | `recommendation_history` — **tartışmalı**: senkronlanırsa telefonda gördüğünü PC'de tekrar görmezsin (iyi), ama trafiği artırır. **Öneri: senkronla** (küçük tablo, 45 gün) |
-| Genel ayarlar (tema, öneri ağırlıkları) | |
+| `votes` (tombstone'lu) | `settings` — **tamamı** (içinde `resumeState`, cihaz kimliği, ses seviyesi var) |
+| `play_history` (öneri motorunu cihazlar arası eğitir) | |
+| `recommendation_history` (telefonda göreni PC'de tekrar görme) | |
 
 ---
 
-## 6. Senkron protokolü
+## 6. Senkron protokolü — ✅ uygulandı
 
-Detay: `docs/SYNC.md`. Özet:
+Detay: `docs/SYNC.md`. Motor masaüstünde `src/lib/sync/engine.ts`'te çalışıyor;
+mobile taşınırken `packages/core`'a çıkarılacak (§4).
+
 - **Local-first**: her cihaz kendi SQLite'ında çalışır, offline tam çalışır.
-- **Supabase** (Postgres + Auth + RLS). Kişisel kullanımda ücretsiz katman fazlasıyla yeter.
-  Sunucu kodu yok; her istemci Supabase client'ıyla konuşur. RLS: `user_id = auth.uid()`.
-- **Delta sync**: `pull(since=last_pulled)` → merge → `push(değişenler)`.
-- **Çakışma**: satır başına **last-write-wins** (`updated_at`). `votes`/`play_history`
-  **append-only** → çakışma yok, `uid` ile idempotent upsert.
+- **Supabase** (Postgres + Auth + RLS), sunucu kodu yok. RLS: `user_id = auth.uid()`.
+- **Delta sync**: push (yerel `updated_at > last_pushed`) → pull (bulut
+  `synced_at > last_pulled`) → LWW merge.
+- **Çakışma**: satır başına **last-write-wins** (`updated_at`); olay günlükleri
+  `uid` ile idempotent upsert.
+- **Canlı**: Supabase Realtime aboneliği + periyodik (5 dk) + odak yedeği.
+- **Mobil özel iş**: OS uygulamayı öldürebilir → bekleyen push'lar için `outbox`
+  gerekebilir (masaüstünde gerekmedi).
 - **Tetik**: açılış, değişiklikte (debounce ~3sn), periyodik (~5dk), foreground'a dönüş.
 - **Mobil özel**: OS uygulamayı öldürebilir → push'u kuyruğa yaz (`outbox`), sonra tamamla.
 

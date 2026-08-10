@@ -1,5 +1,6 @@
 import { getDb } from "./db";
 import { t } from "./i18n";
+import { getDeviceId, newUid } from "./device";
 
 // Dışa aktarılan JSON yedeğini içe aktarma (birleştirme).
 // Dışa aktarma SettingsView.exportData'da üretilir: tüm tabloların ham satırları.
@@ -55,11 +56,12 @@ export async function importBackup(json: string): Promise<ImportResult> {
     if (!t.id) continue;
     await db.execute(
       `INSERT INTO tracks
-         (id, source, source_id, title, artist, album, duration_ms, thumbnail, added_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         (id, source, source_id, title, artist, album, duration_ms, thumbnail, added_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        ON CONFLICT(id) DO UPDATE SET
          title=excluded.title, artist=excluded.artist, album=excluded.album,
-         duration_ms=excluded.duration_ms, thumbnail=excluded.thumbnail`,
+         duration_ms=excluded.duration_ms, thumbnail=excluded.thumbnail,
+         updated_at=excluded.updated_at`,
       [
         asStr(t.id),
         asStr(t.source) || "youtube",
@@ -70,6 +72,7 @@ export async function importBackup(json: string): Promise<ImportResult> {
         asNum(t.duration_ms),
         t.thumbnail ?? null,
         asNum(t.added_at, now),
+        now,
       ]
     );
     res.tracks++;
@@ -79,11 +82,13 @@ export async function importBackup(json: string): Promise<ImportResult> {
   for (const p of data.playlists ?? []) {
     if (!p.id) continue;
     await db.execute(
-      `INSERT INTO playlists (id, name, description, source, source_url, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6)
+      // deleted=0: yedekten geri yükleme, o listeyi diriltmek demektir.
+      `INSERT INTO playlists (id, name, description, source, source_url, created_at, updated_at, deleted)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,0)
        ON CONFLICT(id) DO UPDATE SET
          name=excluded.name, description=excluded.description,
-         source=excluded.source, source_url=excluded.source_url`,
+         source=excluded.source, source_url=excluded.source_url,
+         updated_at=excluded.updated_at, deleted=0`,
       [
         asStr(p.id),
         asStr(p.name) || t("backup.importedList"),
@@ -91,6 +96,7 @@ export async function importBackup(json: string): Promise<ImportResult> {
         asStr(p.source) || "local",
         p.source_url ?? null,
         asNum(p.created_at, now),
+        now,
       ]
     );
     res.playlists++;
@@ -100,16 +106,18 @@ export async function importBackup(json: string): Promise<ImportResult> {
   for (const pt of data.playlistTracks ?? []) {
     if (!pt.playlist_id || !pt.track_id) continue;
     await db.execute(
-      `INSERT INTO playlist_tracks (playlist_id, track_id, position, added_at, vote)
-       VALUES ($1,$2,$3,$4,$5)
+      `INSERT INTO playlist_tracks (playlist_id, track_id, position, added_at, vote, updated_at, deleted)
+       VALUES ($1,$2,$3,$4,$5,$6,0)
        ON CONFLICT(playlist_id, track_id) DO UPDATE SET
-         position=excluded.position, vote=excluded.vote`,
+         position=excluded.position, vote=excluded.vote,
+         updated_at=excluded.updated_at, deleted=0`,
       [
         asStr(pt.playlist_id),
         asStr(pt.track_id),
         asNum(pt.position),
         asNum(pt.added_at, now),
         asNum(pt.vote),
+        now,
       ]
     );
     res.links++;
@@ -125,8 +133,8 @@ export async function importBackup(json: string): Promise<ImportResult> {
     );
     if ((dup[0]?.c ?? 0) > 0) continue;
     await db.execute(
-      `INSERT INTO votes (track_id, playlist_id, value, created_at, hour, dow)
-       VALUES ($1,$2,$3,$4,$5,$6)`,
+      `INSERT INTO votes (track_id, playlist_id, value, created_at, hour, dow, uid, device_id, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
       [
         asStr(v.track_id),
         v.playlist_id ?? null,
@@ -134,6 +142,9 @@ export async function importBackup(json: string): Promise<ImportResult> {
         asNum(v.created_at, now),
         asNum(v.hour),
         asNum(v.dow),
+        newUid(),
+        getDeviceId(),
+        now,
       ]
     );
     res.votes++;

@@ -10,3 +10,14 @@ export function getDeviceId(): string {
   }
   return id;
 }
+
+// Olay günlüğü satırları (votes / play_history / recommendation_history) için
+// CİHAZDAN BAĞIMSIZ benzersiz kimlik.
+//
+// NEDEN: bu tablolar AUTOINCREMENT `id` kullanıyor → iki cihaz KAÇINILMAZ
+// olarak aynı id'yi üretir (ikisi de 1, 2, 3… diye sayar). Buluta bu id ile
+// yazılsa cihazlar birbirinin oylarını ezerdi. `uid` upsert anahtarıdır:
+// aynı satır iki kez gelse bile tek kayıt olur (idempotent).
+export function newUid(): string {
+  return crypto.randomUUID();
+}

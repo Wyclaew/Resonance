@@ -28,7 +28,7 @@ import { useSettingsStore, type Theme } from "../store/useSettingsStore";
 import { useT, type TrKey, type Lang } from "../lib/i18n";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { usePlaylistStore } from "../store/usePlaylistStore";
-import { getDeviceId } from "../lib/device";
+import SyncSettings from "../components/SyncSettings";
 import { getDb, isTauri } from "../lib/db";
 import { formatBytes } from "../lib/format";
 import { importBackup, type ImportResult } from "../lib/backup";
@@ -287,38 +287,9 @@ function IntegrationsSettings() {
   );
 }
 
+// Bulut senkronu UI'ı ayrı bileşende (SyncSettings.tsx) — bu dosya zaten büyük.
 function AccountSettings() {
-  const t = useT();
-  const deviceId = getDeviceId();
-  return (
-    <div className="max-w-2xl">
-      <div className="rounded-lg border border-accent/30 bg-accent/5 p-5">
-        <div className="flex items-center gap-2 text-accent">
-          <Cloud size={18} />
-          <span className="text-sm font-semibold">{t("account.soonTitle")}</span>
-        </div>
-        <p className="mt-2 text-sm leading-relaxed text-muted">
-          {t("account.soonBody")}
-        </p>
-        <button
-          disabled
-          className="mt-4 cursor-default rounded-md bg-surface-2 px-4 py-2 text-sm font-medium text-faint"
-        >
-          {t("account.signInSoon")}
-        </button>
-      </div>
-
-      <div className="mt-5 border-b border-border py-4">
-        <div className="text-sm font-medium">{t("account.thisDevice")}</div>
-        <div className="mt-1 font-mono text-xs text-faint">{deviceId}</div>
-        <div className="mt-1 text-xs text-muted">{t("account.deviceDesc")}</div>
-      </div>
-
-      <p className="mt-4 text-xs leading-relaxed text-faint">
-        {t("account.planNote")}
-      </p>
-    </div>
-  );
+  return <SyncSettings />;
 }
 
 function PlaybackSettings() {
@@ -693,10 +664,13 @@ function DataSettings() {
       const db = await getDb();
       const [playlists, playlistTracks, tracks, votes, settings] =
         await Promise.all([
-          db.select("SELECT * FROM playlists"),
-          db.select("SELECT * FROM playlist_tracks"),
+          // deleted=0 ŞART: silinmiş satırlar (tombstone) da dışa aktarılırsa,
+          // içe aktarma onları deleted=0 ile geri yazıp SİLDİĞİN LİSTELERİ
+          // DİRİLTİR.
+          db.select("SELECT * FROM playlists WHERE deleted = 0"),
+          db.select("SELECT * FROM playlist_tracks WHERE deleted = 0"),
           db.select("SELECT * FROM tracks"),
-          db.select("SELECT * FROM votes"),
+          db.select("SELECT * FROM votes WHERE deleted = 0"),
           db.select("SELECT * FROM settings"),
         ]);
       const json = JSON.stringify(

@@ -120,6 +120,83 @@ fn migrations() -> Vec<Migration> {
                   CREATE INDEX IF NOT EXISTS idx_rechist_track ON recommendation_history(track_id);
                   CREATE INDEX IF NOT EXISTS idx_rechist_at ON recommendation_history(recommended_at);",
         },
+        Migration {
+            version: 5,
+            description: "sync_scaffolding",
+            kind: MigrationKind::Up,
+            // ⭐ BULUT SENKRONU (v1.3.0) için şema hazırlığı. Üç şey ekler:
+            //
+            // 1) `updated_at` + `deleted` (tombstone) — satır bazlı LWW
+            //    (last-write-wins) birleştirme. SİLME ARTIK KALICI DEĞİL:
+            //    `deleted=1` işaretlenir, çünkü hard delete diğer cihaza
+            //    "bu satır hiç yoktu" gibi görünür ve silinen satır geri gelir.
+            //    ⛔ Bu yüzden TÜM okumalara `deleted = 0` filtresi ŞART.
+            //
+            // 2) `uid` + `device_id` — votes/play_history/recommendation_history
+            //    AUTOINCREMENT id kullanıyor; iki cihaz KAÇINILMAZ olarak aynı
+            //    id'yi üretir ve buluta yazarken birbirini ezerdi. `uid` cihazdan
+            //    bağımsız benzersiz kimliktir (idempotent upsert anahtarı).
+            //
+            // 3) `sync_state` — tablo başına push/pull su terazisi (watermark).
+            //
+            // Eski satırlar: updated_at = 0 kalırsa ilk senkronda "çok eski"
+            // sayılıp uzaktaki her şeye yenilir → mevcut zaman damgalarından
+            // DOLDURULUR. uid boş kalırsa senkronlanamaz → rastgele üretilir
+            // (randomblob satır başına yeniden hesaplanır, çakışma olmaz).
+            sql: r#"
+                ALTER TABLE playlists       ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE playlists       ADD COLUMN deleted    INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE playlist_tracks ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE playlist_tracks ADD COLUMN deleted    INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE tracks          ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
+
+                UPDATE playlists       SET updated_at = created_at WHERE updated_at = 0;
+                UPDATE playlist_tracks SET updated_at = added_at   WHERE updated_at = 0;
+                UPDATE tracks          SET updated_at = added_at   WHERE updated_at = 0;
+
+                -- Olay günlükleri append-only'dir AMA `undoVote` bir oyu geri alır.
+                -- Bu da tombstone olmalı (hard delete senkronda "hiç olmadı"ya
+                -- eşittir → oy diğer cihazdan geri gelir). Tombstone `created_at`i
+                -- değiştirmediği için push penceresi onu göremez → üç tabloya da
+                -- ayrı `updated_at` gerekir (tek tip motor, tek kod yolu).
+                ALTER TABLE votes                  ADD COLUMN uid        TEXT;
+                ALTER TABLE votes                  ADD COLUMN device_id  TEXT;
+                ALTER TABLE votes                  ADD COLUMN deleted    INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE votes                  ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE play_history           ADD COLUMN uid        TEXT;
+                ALTER TABLE play_history           ADD COLUMN device_id  TEXT;
+                ALTER TABLE play_history           ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
+                ALTER TABLE recommendation_history ADD COLUMN uid        TEXT;
+                ALTER TABLE recommendation_history ADD COLUMN device_id  TEXT;
+                ALTER TABLE recommendation_history ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
+
+                UPDATE votes                  SET uid = lower(hex(randomblob(16))) WHERE uid IS NULL;
+                UPDATE play_history           SET uid = lower(hex(randomblob(16))) WHERE uid IS NULL;
+                UPDATE recommendation_history SET uid = lower(hex(randomblob(16))) WHERE uid IS NULL;
+
+                UPDATE votes                  SET updated_at = created_at     WHERE updated_at = 0;
+                UPDATE play_history           SET updated_at = played_at      WHERE updated_at = 0;
+                UPDATE recommendation_history SET updated_at = recommended_at WHERE updated_at = 0;
+
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_votes_uid   ON votes(uid);
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_hist_uid    ON play_history(uid);
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_rechist_uid ON recommendation_history(uid);
+
+                -- Push sorgusu "updated_at > watermark" ile tarar → indeks şart.
+                CREATE INDEX IF NOT EXISTS idx_playlists_upd ON playlists(updated_at);
+                CREATE INDEX IF NOT EXISTS idx_pt_upd        ON playlist_tracks(updated_at);
+                CREATE INDEX IF NOT EXISTS idx_tracks_upd    ON tracks(updated_at);
+                CREATE INDEX IF NOT EXISTS idx_votes_upd     ON votes(updated_at);
+                CREATE INDEX IF NOT EXISTS idx_hist_upd      ON play_history(updated_at);
+                CREATE INDEX IF NOT EXISTS idx_rechist_upd   ON recommendation_history(updated_at);
+
+                CREATE TABLE IF NOT EXISTS sync_state (
+                    table_name  TEXT PRIMARY KEY,
+                    last_pulled TEXT    NOT NULL DEFAULT '',  -- sunucu synced_at (ISO)
+                    last_pushed INTEGER NOT NULL DEFAULT 0    -- yerel updated_at (epoch ms)
+                );
+            "#,
+        },
     ]
 }
 

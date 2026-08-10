@@ -1,126 +1,143 @@
-# Resonance — Hesap & Senkron Planı
+# Resonance — Hesap & Senkron
 
-Amaç: Masaüstü (var, v1.2.0), **mobil (Android)** (`docs/MOBILE.md`) ve ileride web sürümlerini bir
-**hesap** üzerinden bağlamak; çalma listeleri, oylar/karma, dinleme geçmişi ve ayarlar tüm
-cihazlarda takip etsin. (Playlist **paylaşımı** zaten `RSNC1:` kodu ile çalışıyor — bu ondan
-ayrı: kişinin **kendi** verisinin cihazlar arası senkronu.)
+Kişinin **kendi** verisinin cihazlar arası senkronu: çalma listeleri, oylar/karma,
+dinleme geçmişi ve öneri geçmişi. (Playlist **paylaşımı** ayrı bir özellik: `RSNC1:` kodu.)
 
-**Durum: planlama.** Hiçbir parçası uygulanmadı; şu an her şey tamamen yerel.
-Uygulanan tek hazırlık: cihaz kimliği (`src/lib/device.ts`).
+**Durum: UYGULANDI (v1.3.0) — masaüstü (Mac + Windows).** Mobil için aynı şema ve
+aynı motor kullanılacak (`docs/MOBILE.md`).
 
 ---
 
-## ⚠️ En kritik gerçek: ses katmanı platforma göre değişir
+## Kurulum (tek seferlik)
 
-| Platform | Ses nasıl çalar? |
+1. **Supabase projesi** (ücretsiz katman yeter).
+2. **Şema**: Supabase paneli → SQL Editor → `docs/supabase-schema.sql` içeriğini
+   yapıştır → Run. (Tekrar çalıştırmak güvenli.)
+3. **Bağlantı bilgileri**: `src/lib/sync/config.ts` içine
+   Project URL + **anon** (public) anahtarı yaz.
+   - anon key gizli değildir; veriyi **RLS** korur (`user_id = auth.uid()`).
+   - ⛔ `service_role` anahtarı ASLA kullanılmaz — RLS'i bypass eder.
+   - Boş bırakılırsa senkron kapalıdır, uygulama %100 yerel çalışır.
+4. Uygulamada **Ayarlar → Hesap & Senkron** → e-posta/şifre ile kayıt ol / giriş yap.
+   - Supabase'de e-posta onayı açıksa ilk kayıtta gelen maili onayla.
+5. **İlk senkron yönünü seç** (aşağıda).
+
+## İlk senkron — yön seçimi
+
+İki cihazda da veri varsa çakışmayı kullanıcı çözer. Giriş yapınca sihirbaz çıkar:
+
+| Seçenek | Ne yapar |
 | --- | --- |
-| **Masaüstü** (var) | yt-dlp → m4a indir → ADTS remux → Rust/rodio çalar |
-| **Mobil** (planlanan, **Android**) | Cihazda `youtubei.js` çıkarımı → ExoPlayer. **yt-dlp gömülemez.** Alternatifler: `docs/MOBILE.md` §2 |
-| **Web** (kapsam dışı) | **yt-dlp ÇALIŞAMAZ** (tarayıcı sandbox). Tek gerçekçi yol: **YouTube IFrame Player API** — resmi ve ToS'a uygun |
+| **Bu cihaz kaynak** | Yereldeki her şey buluta yüklenir (`firstSyncPushAll`). |
+| **Buluttan al** | Yereldeki playlist/oy/geçmiş **silinir**, bulut kopyası gelir (`firstSyncPullReplace`). |
 
-**Sonuç:** Ortak katman = **hesap + veri senkronu** (playlist, oy, geçmiş, ayar).
-**Ses katmanı platforma özel** kalır ve senkronlanmaz.
+Her iki modda da **önce otomatik yedek** alınır (`backup_db`).
+
+**⚠️ "Buluttan al" `tracks` tablosunu BİLEREK silmez.** `cache` tablosu tracks'e
+`ON DELETE CASCADE` ile bağlıdır → tracks silinseydi **indirilmiş dosya kayıtları da
+uçardı** ve uygulama diskteki sesleri "indirilmemiş" sanardı. tracks yalnızca
+metadata ve anahtarı YouTube id'si olduğu için birleşmesi zararsızdır (kopya oluşmaz).
+
+Bu ilk seçimden sonra ikisi de **normal iki yönlü** çalışır: hangi cihazda
+değişiklik yaparsan diğerine gider.
 
 ---
 
-## Stack: Supabase
+## Mimari
 
-- **Auth**: e-posta/şifre veya Google.
-- **Postgres**: senkronlanan tabloların bulut aynası + **RLS** (`user_id = auth.uid()`).
-- **Realtime** (opsiyonel): açık cihazlar arasında anlık senkron.
-- **Sunucu kodu YOK** — her uygulama Supabase istemcisiyle doğrudan konuşur.
-- Kişisel kullanımda ücretsiz katman fazlasıyla yeter (veri = birkaç MB metin).
+```
+Cihaz A (SQLite)  ──push──▶  Supabase (Postgres + RLS)  ──pull──▶  Cihaz B (SQLite)
+      ▲                            │ realtime                          │
+      └────────────────────────────┴──────────────────────────────────-┘
+```
+
+- **Local-first**: her cihaz kendi SQLite'ını kullanır → **çevrimdışı tam çalışır**.
+- **Delta sync**: yalnız değişen satırlar taşınır.
+- **Sunucu kodu yok**: uygulama doğrudan Supabase ile konuşur.
+
+### ⭐ İki ayrı zaman damgası — bu ayrım kritik
+
+| Alan | Kimin saati | Ne için |
+| --- | --- | --- |
+| `updated_at` (epoch ms) | **Cihaz** | Yalnız **çakışma çözümü** (last-write-wins) |
+| `synced_at` (timestamptz) | **Sunucu** (Postgres trigger) | Yalnız **teslimat penceresi** (pull watermark) |
+
+**Neden:** iki cihazın saati birbirini tutmaz. Teslimat penceresi cihaz saatine
+bağlansaydı, saati geri kalan cihaz diğerinin satırlarını "zaten görmüşüm" sanıp
+**sonsuza dek atlardı**. Sunucu saati tek ve ortaktır.
+
+### ⭐ Silme = tombstone
+
+`deleted = 1` yazılır, satır **silinmez**. Hard delete diğer cihaza "böyle bir satır
+hiç yoktu" gibi görünür ve silinen satır geri gelir.
+
+**Sonuç: HER OKUMA `deleted = 0` filtrelemek ZORUNDA.** (`playlists.ts`,
+`recommender.ts`, dışa aktarma — hepsi filtreliyor.)
+
+### ⭐ `uid` — olay günlükleri için cihazdan bağımsız kimlik
+
+`votes` / `play_history` / `recommendation_history` `AUTOINCREMENT id` kullanır →
+iki cihaz **kaçınılmaz olarak** aynı id'yi üretir (ikisi de 1, 2, 3… diye sayar).
+Buluta o id ile yazılsa cihazlar birbirinin oylarını ezerdi. `uid` (UUID) upsert
+anahtarıdır → aynı satır iki kez gelse bile tek kayıt olur (idempotent).
+
+### Dosyalar
+
+| Dosya | İş |
+| --- | --- |
+| `src/lib/sync/config.ts` | URL + anon key (kullanıcı doldurur) |
+| `src/lib/sync/client.ts` | Supabase istemcisi + auth (giriş/kayıt/çıkış) |
+| `src/lib/sync/engine.ts` | push / pull / LWW merge / realtime / ilk-senkron modları |
+| `src/components/SyncSettings.tsx` | Ayarlar → Hesap & Senkron arayüzü |
+| `docs/supabase-schema.sql` | Sunucu şeması + RLS + realtime |
+| `src-tauri/src/lib.rs` (migration v5) | Yerel şema: `updated_at`, `deleted`, `uid`, `sync_state` |
+
+### Tetikleyiciler
+
+- Açılış (oturum varsa), **realtime** olayı (diğer cihaz yazdığı an),
+  yerel değişiklik (**3 sn debounce**, `notifyLocalChange()`),
+  periyodik (**5 dk**), pencere odağı.
+- Realtime kopabilir (uyku/ağ değişimi) → periyodik + odak yedek tetiklerdir.
 
 ## Ne senkronlanır / ne senkronlanmaz
 
 | Senkron ✅ | Senkron ❌ |
 | --- | --- |
-| `playlists`, `playlist_tracks` (güncel oy dahil) | `cache` — ses dosyaları; çok büyük, cihaz-yerel (her cihaz kendi indirir) |
-| `tracks` (metadata) | Gizli anahtarlar: Spotify client_id/secret, çerez tarayıcısı seçimi |
-| `votes` (append-only olay günlüğü) | Cihaza özel ayarlar: ses seviyesi, ambiyans süresi, autostart, arka plan FPS modu |
-| `play_history` (öneri motorunu cihazlar arası eğitir) | |
-| `recommendation_history` (telefonda göreni PC'de tekrar görme) | |
-| Genel ayarlar (tema, dil, öneri ağırlıkları) | |
+| `tracks` (metadata) | `cache` — indirilen ses dosyaları (cihaz-yerel, yolu farklı) |
+| `playlists`, `playlist_tracks` (oy dahil) | `settings` — **tamamı**; içinde `resumeState` (Keşfet kuyruğu), cihaz kimliği, ses seviyesi gibi cihaza özel şeyler var |
+| `votes` (tombstone'lu) | Gizli anahtarlar (Spotify client id/secret, çerez tarayıcısı) |
+| `play_history` | |
+| `recommendation_history` | |
 
-> ⭐ **v1.2.0 notu — senkron artık DAHA kritik.** Öğrenme sinyalleri genişledi:
-> `playlist_tracks` artık **sanatçı yakınlığının ana kaynağı** (8 → 184 sanatçı),
-> `votes` + `play_history` ise zaman-bağlam profilini besliyor. Bu üçü senkronlanmazsa
-> telefon ve PC **farklı zevk öğrenir** ve öneriler cihazlar arası tutarsız olur.
+> **Neden öğrenme sinyalleri de senkronlanıyor:** `playlist_tracks` sanatçı
+> yakınlığının ana kaynağı, `votes` + `play_history` zaman-bağlam profilini besliyor.
+> Bunlar senkronlanmazsa cihazlar **farklı zevk öğrenir** ve öneriler tutarsız olur.
 > (Ayrıntı: `CLAUDE.md` → Öneri motoru.)
 
-## Senkron modeli: local-first + delta sync
+**Tema/dil senkronlanmıyor** (bilinçli): `settings` tablosu bir bütün olarak
+cihaza özel şeyler içeriyor; seçmeli senkron ileride eklenebilir.
 
-- Her cihaz **yerel SQLite**'ını tutar → **çevrimdışı tam çalışır**.
-- Senkron motoru yereldeki değişiklikleri Supabase'e **push**, uzaktakileri **pull** edip birleştirir.
-- **Birleştirme**: her satırda `updated_at` (epoch ms) + `deleted` (tombstone).
-  Satır başına **last-write-wins**. `votes` / `play_history` append-only → **çakışma yok**,
-  `uid` ile idempotent upsert.
-- **Tetik**: açılışta, değişiklikte (debounce ~3sn), periyodik (~5dk), foreground'a dönüşte,
-  (opsiyonel) Realtime push.
-- **Mobil özel**: OS uygulamayı öldürebilir → bekleyen push'ları `outbox`'a yaz, sonra tamamla.
+## Güvenlik / gizlilik
 
-## Şema hazırlığı — migration v5 (senkron kurulurken)
+- **RLS**: her satır `user_id = auth.uid()` ile kilitli. anon key herkese açık olsa
+  bile başkasının verisi görünmez.
+- Senkron **opt-in**: giriş yapılmadıkça hiçbir şey buluta gitmez.
+- Ses dosyaları **asla** buluta gitmez — yalnız metadata.
+- Bulutta **yabancı anahtar (FK) yok** (bilerek): parçası henüz yüklenmemiş bir
+  `playlist_tracks` satırı FK'lı şemada push'u komple patlatırdı. Tutarlılık yerelde
+  (SQLite) korunur; bulut yalnızca taşıyıcıdır.
 
-Mevcut şema (`src-tauri/src/lib.rs`, v1–v4) senkron için hazır **değil**:
+## Veri kaybı riskine karşı
 
-```sql
--- 1) Satır bazlı LWW için zaman damgası + tombstone
-ALTER TABLE playlists       ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE playlists       ADD COLUMN deleted    INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE playlist_tracks ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE playlist_tracks ADD COLUMN deleted    INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE tracks          ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
+- İlk senkronun her iki modunda da **otomatik yedek**.
+- Açılışta otomatik yedek zaten var (son 12).
+- Silme her zaman tombstone → uzaktan gelen bir hata yereli kalıcı olarak uçuramaz.
+- Pull sırasında bir satır hata verirse (tipik: ebeveyni gelmemiş FK), o tablonun
+  su terazisi **o satırdan önceye sabitlenir** → satır kaybolmaz, sonraki turda
+  yeniden denenir.
 
--- Eski satırlar 0 kalırsa ilk senkronda "eski" sayılıp uzaktakine ezilir → doldur:
-UPDATE playlists       SET updated_at = created_at WHERE updated_at = 0;
-UPDATE playlist_tracks SET updated_at = added_at   WHERE updated_at = 0;
-UPDATE tracks          SET updated_at = added_at   WHERE updated_at = 0;
+## Sırada
 
--- 2) Cihazlar arası benzersiz kimlik
---    (votes/play_history AUTOINCREMENT → iki cihaz aynı id'yi üretir, ÇAKIŞIR)
-ALTER TABLE votes        ADD COLUMN uid       TEXT;   -- "<device_id>:<local_id>" veya UUID
-ALTER TABLE votes        ADD COLUMN device_id TEXT;
-ALTER TABLE play_history ADD COLUMN uid       TEXT;
-ALTER TABLE play_history ADD COLUMN device_id TEXT;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_votes_uid ON votes(uid);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_hist_uid  ON play_history(uid);
-
--- 3) Senkron defteri
-CREATE TABLE IF NOT EXISTS sync_state (
-  table_name  TEXT PRIMARY KEY,
-  last_pulled INTEGER NOT NULL DEFAULT 0,
-  last_pushed INTEGER NOT NULL DEFAULT 0
-);
-```
-- `user_id` gerekmez — Supabase RLS ile örtük.
-- Cihaz kimliği **zaten var**: `src/lib/device.ts` (settings'te saklı).
-- **⛔ DİKKAT** (`CLAUDE.md` gotcha #12): senkron `tracks`'e yazarken **`INSERT OR REPLACE` KULLANMA** →
-  satırı silip ekler, `ON DELETE CASCADE` şarkıyı TÜM listelerden uçurur.
-  `ensureTrack` mantığını (`ON CONFLICT(id) DO UPDATE`) kullan.
-
-## Kod paylaşımı
-
-Senkron motoru `packages/core/sync.ts`'te yaşar (bkz. `docs/MOBILE.md` §4) — masaüstü ve
-mobil aynı motoru kullanır, platform farkları `Ports` arayüzüyle soyutlanır.
-
-## Aşamalar
-
-1. **Yapıldı**: cihaz kimliği (`src/lib/device.ts`).
-2. **`packages/core` çıkarımı** (MOBILE.md Faz 1) — sync.ts'in yaşayacağı yer.
-3. **Senkron**: Supabase projesi + Auth + migration v5 + sync motoru. **Önce masaüstü.**
-4. **Mobil senkron** (MOBILE.md Faz 3).
-5. **Web** (opsiyonel, kapsam dışı): iframe player + Supabase.
-
-## ⚠️ Veri kaybı riski
-
-Geçmişte iki-instance yarışından şüphelenilen bir veri kaybı yaşandı; tek-örnek koruması ve
-açılışta otomatik yedek (`backups/`, son 12) o yüzden var. **Senkron bu riski artırır** —
-uzaktan gelen bir tombstone yereli silebilir. Kurallar:
-- İlk aşamada **salt-okunur pull** ile test et, yazmayı açma.
-- Test öncesi elle yedek al (`backup_db`).
-- Silme her zaman tombstone; **hard delete yok**.
-
-## Gizlilik notu
-
-Senkron açılana kadar her şey **tamamen yerel ve gizli** kalır. Senkron **opt-in** olacak
-(giriş yapılana kadar bulut yok). Ses hep cihazda; buluta yalnızca metadata gider.
+- **Mobil (Android)** — aynı şema + aynı motor mantığı (`docs/MOBILE.md`).
+- Seçmeli ayar senkronu (tema/dil) — şu an kapsam dışı.
+- Web (opsiyonel): iframe player + aynı Supabase.

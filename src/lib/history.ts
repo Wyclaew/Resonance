@@ -1,6 +1,8 @@
 import type { Track } from "../types";
 import { getDb, isTauri } from "./db";
 import { ensureTrack } from "./playlists";
+import { getDeviceId, newUid } from "./device";
+import { notifyLocalChange } from "./sync/engine";
 
 // Son çalınan benzersiz parçalar (en yeni önce) — "Şu An" ekranı için.
 export async function getRecentTracks(limit = 12): Promise<Track[]> {
@@ -66,10 +68,20 @@ export async function recordPlay(track: Track, msPlayed: number): Promise<void> 
     const db = await getDb();
     const d = new Date();
     await db.execute(
-      `INSERT INTO play_history (track_id, played_at, ms_played, hour, dow)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [track.id, d.getTime(), Math.floor(msPlayed), d.getHours(), d.getDay()]
+      `INSERT INTO play_history
+         (track_id, played_at, ms_played, hour, dow, uid, device_id, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $2)`,
+      [
+        track.id,
+        d.getTime(),
+        Math.floor(msPlayed),
+        d.getHours(),
+        d.getDay(),
+        newUid(),
+        getDeviceId(),
+      ]
     );
+    notifyLocalChange();
   } catch (e) {
     console.error("[resonance] geçmiş kaydedilemedi:", e);
   }
