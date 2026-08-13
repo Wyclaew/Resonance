@@ -324,6 +324,19 @@ pub fn search(
 /// Yani: arama = liste bulma, asıl şarkılar listeden. Bu YouTube Music'in kendi
 /// editör seçkisidir — jenerik metin aramasının getirdiği telifsiz stok müzik
 /// sorunu da böylece kökten biter.
+// Ses kalitesi tercihi ("high" | "low"). Frontend ayarı `set_audio_quality`
+// ile buraya yazar; her indirme bunu okur. Global tutuluyor çünkü aksi halde
+// play_track/prefetch/download komutlarının HEPSİNE parametre eklemek gerekirdi.
+static AUDIO_QUALITY: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+pub fn set_audio_quality(q: &str) {
+    *AUDIO_QUALITY.lock().unwrap() = q.to_string();
+}
+
+fn audio_quality() -> String {
+    AUDIO_QUALITY.lock().unwrap().clone()
+}
+
 pub fn music_genre_pool(query: &str, limit: u32) -> anyhow::Result<Vec<SearchResult>> {
     let search_url = format!("https://music.youtube.com/search?q={}", urlencode(query));
     let out = run_yt_dlp(
@@ -597,6 +610,16 @@ pub fn ensure_audio(
         resolve_bin("yt-dlp"),
         ff.as_deref().map(|p| p.display().to_string())
     );
+    // ⭐ SES KALİTESİ (v1.6.0): kullanıcı ayarı. "low" seçilirse YouTube'un
+    // düşük bit hızlı m4a'sı (itag 139, ~48k HE-AAC) tercih edilir → dosyalar
+    // ~3 kat küçülür. Kalite gözle görülür düşer; bu yüzden VARSAYILAN "high".
+    // Kaliteyi düşürmeden küçültmek mümkün değil: opus daha verimli ama
+    // symphonia (rodio) opus çözemiyor.
+    let fmt = if audio_quality() == "low" {
+        "bestaudio[ext=m4a][abr<=70]/bestaudio[abr<=70]/bestaudio[ext=m4a]/bestaudio/best"
+    } else {
+        "bestaudio[ext=m4a]/bestaudio/best[height<=480]/best"
+    };
     let mut args: Vec<&str> = vec![
         // /best fallback ŞART: eski/sınırlı yt-dlp (özellikle Windows sidecar)
         // YouTube'un nsig/JS challenge'ını çözemeyince audio-only DASH formatları
@@ -611,7 +634,7 @@ pub fn ensure_audio(
         // + çok eşzamanlı indirme YouTube throttle'ına (HTTP 403/416) yol açıyordu.
         // Tek bağlantı daha güvenilir.
         "-f",
-        "bestaudio[ext=m4a]/bestaudio/best[height<=480]/best",
+        fmt,
         "--no-playlist",
         "--no-warnings",
         "--no-part",

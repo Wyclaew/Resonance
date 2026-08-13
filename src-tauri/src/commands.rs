@@ -54,6 +54,13 @@ pub async fn music_radio(
         .map_err(|e| e.to_string())
 }
 
+/// Ses kalitesi tercihini ayarlar ("high" | "low"). Açılışta ve ayar
+/// değişince frontend çağırır.
+#[tauri::command]
+pub fn set_audio_quality(quality: String) {
+    ytdlp::set_audio_quality(&quality);
+}
+
 /// Keşfet tür/ruh hali havuzu — YouTube Music'in küratörlü listelerinden
 /// gerçek şarkılar (bkz. ytdlp::music_genre_pool).
 #[tauri::command]

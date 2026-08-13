@@ -88,6 +88,18 @@ const TABLES: TableSpec[] = [
     ],
   },
   {
+    // Cihazlar arası "kaldığın yerden devam": her cihaz KENDİ satırını yazar
+    // (anahtar device_id) → çakışma yok.
+    name: "now_playing",
+    conflict: "device_id",
+    cloudConflict: "user_id,device_id",
+    cols: [
+      "device_id", "device_name", "track_id", "source_id", "title", "artist",
+      "thumbnail", "duration_ms", "position_ms", "playing", "updated_at",
+      "deleted",
+    ],
+  },
+  {
     name: "recommendation_history",
     conflict: "uid",
     cloudConflict: "user_id,uid",
@@ -99,7 +111,7 @@ const TABLES: TableSpec[] = [
 const NUM_DEFAULT_0 = new Set([
   "updated_at", "deleted", "position", "vote", "duration_ms", "ms_played",
   "value", "hour", "dow", "added_at", "created_at", "played_at",
-  "recommended_at",
+  "recommended_at", "position_ms", "playing",
 ]);
 
 const PAGE = 500; // pull sayfa boyutu
@@ -468,6 +480,7 @@ export async function firstSyncPullReplace(): Promise<void> {
   await db.execute(`DELETE FROM votes`);
   await db.execute(`DELETE FROM play_history`);
   await db.execute(`DELETE FROM recommendation_history`);
+  await db.execute(`DELETE FROM now_playing`);
   // Her şeyi baştan çek; push terazisini de sıfırla ki yerelde KALAN
   // (silinmemiş) tracks satırları da buluta gitsin.
   for (const spec of TABLES) {

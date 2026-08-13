@@ -349,6 +349,7 @@ function StorageSettings() {
   const [clearing, setClearing] = useState(false);
   const [cleared, setCleared] = useState<string | null>(null);
   const cacheLimitGb = useSettingsStore((st) => st.cacheLimitGb);
+  const audioQuality = useSettingsStore((st) => st.audioQuality);
   const updateSetting = useSettingsStore((st) => st.update);
 
   async function load() {
@@ -401,6 +402,23 @@ function StorageSettings() {
           {formatBytes(cacheBytes)} ·{" "}
           {t("playlist.trackCount", { count: cacheCount })}
         </span>
+      </SettingRow>
+      <SettingRow
+        label={t("settings.audioQuality")}
+        description={t("settings.audioQualityDesc")}
+      >
+        <select
+          value={audioQuality}
+          onChange={(e) => {
+            const q = e.target.value as "high" | "low";
+            updateSetting("audioQuality", q);
+            invoke("set_audio_quality", { quality: q }).catch(() => {});
+          }}
+          className="rounded-md border border-border bg-surface px-2 py-1.5 text-sm"
+        >
+          <option value="high">{t("settings.qualityHigh")}</option>
+          <option value="low">{t("settings.qualityLow")}</option>
+        </select>
       </SettingRow>
       <SettingRow
         label={t("settings.cacheLimit")}

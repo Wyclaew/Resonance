@@ -167,6 +167,25 @@ Tam SQL için `lib.rs` migration v5'e, sunucu tarafı için
 
 ---
 
+## 5.1 Mobilin HAZIR bulacağı katmanlar (v1.3.0 → v1.6.0)
+
+Masaüstünde çalışan ve mobilde **yeniden yazılmaması gereken** parçalar:
+
+| Katman | Dosya | Mobil için not |
+| --- | --- | --- |
+| Senkron motoru | `src/lib/sync/engine.ts` | Saf TS + SQL; `packages/core`'a taşınır. Tek platform bağımlılığı DB adaptörü. |
+| Sunucu şeması | `docs/supabase-schema.sql` | Aynen kullanılır; mobil yeni tablo EKLEMEZ. |
+| Öneri motoru | `src/lib/recommender.ts` | `invoke()` çağrıları `Ports` arkasına alınmalı (search/radio/genre_pool). |
+| Tür/ruh hali filtreleri | `src/lib/filters.ts` | Saf veri + string; olduğu gibi taşınır. |
+| Oturum modu | `src/lib/mood.ts` | Saf TS, bağımlılıksız. |
+| Zaman-bağlamlı zevk | `src/lib/taste.ts` | Saf TS + tek SQL sorgusu. |
+| **Çapraz cihaz devam** | `src/lib/nowPlaying.ts` + `now_playing` tablosu | ⭐ Mobilin en görünür kazancı: PC'de bırak, telefonda devam et. Şema HAZIR. |
+
+**Mobilde platforma özel kalan tek şey SES**: yt-dlp gömülemez (§2).
+`music_radio` / `music_genre_pool` / `search_youtube` şu an Rust'ta yt-dlp
+sarmalayıcısı; mobilde bunların `youtubei.js` karşılığı yazılmalı ve aynı
+`Track` şeklini döndürmelidir. Öneri motoru bu üç fonksiyonun ARKASINI bilmez.
+
 ## 6. Senkron protokolü — ✅ uygulandı
 
 Detay: `docs/SYNC.md`. Motor masaüstünde `src/lib/sync/engine.ts`'te çalışıyor;

@@ -197,6 +197,35 @@ fn migrations() -> Vec<Migration> {
                 );
             "#,
         },
+        Migration {
+            version: 6,
+            description: "now_playing",
+            kind: MigrationKind::Up,
+            // ⭐ CİHAZLAR ARASI "KALDIĞIN YERDEN DEVAM" (v1.6.0).
+            //
+            // Her cihaz KENDİ satırını yazar (anahtar = device_id) → çakışma
+            // yapısı gereği yok; LWW zaten doğru sonucu verir. Tek ortak tablo
+            // (ör. "son çalan") olsaydı iki cihaz sürekli birbirini ezerdi.
+            //
+            // `settings.resumeState` YERİNE ayrı tablo: settings BİLEREK
+            // senkronlanmıyor (içinde cihaz kimliği, ses seviyesi, Keşfet
+            // kuyruğu var). Bu tablo ise senkronlanır.
+            sql: "CREATE TABLE IF NOT EXISTS now_playing (
+                    device_id   TEXT PRIMARY KEY,
+                    device_name TEXT,
+                    track_id    TEXT,
+                    source_id   TEXT,
+                    title       TEXT,
+                    artist      TEXT,
+                    thumbnail   TEXT,
+                    duration_ms INTEGER NOT NULL DEFAULT 0,
+                    position_ms INTEGER NOT NULL DEFAULT 0,
+                    playing     INTEGER NOT NULL DEFAULT 0,
+                    updated_at  INTEGER NOT NULL DEFAULT 0,
+                    deleted     INTEGER NOT NULL DEFAULT 0
+                  );
+                  CREATE INDEX IF NOT EXISTS idx_np_upd ON now_playing(updated_at);",
+        },
     ]
 }
 
@@ -234,6 +263,7 @@ pub fn run() {
             commands::search_youtube,
             commands::music_radio,
             commands::music_genre_pool,
+            commands::set_audio_quality,
             commands::import_playlist,
             commands::import_spotify,
             commands::get_lyrics,

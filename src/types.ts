@@ -79,6 +79,7 @@ export type ViewId =
   | "downloads"
   | "playlist"
   | "import"
+  | "stats" // Dinleme etkinliği & analiz (profil menüsünden)
   | "settings";
 
 // İndirme durumu (UI göstergeleri için)

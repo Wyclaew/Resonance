@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Sparkles, Clock, Radio, ListMusic, History, Play } from "lucide-react";
+import { Sparkles, Clock, Radio, ListMusic, History, Play, Laptop } from "lucide-react";
 import ViewHeader from "../components/ViewHeader";
 import TrackRow from "../components/TrackRow";
 import type { Playlist, Track } from "../types";
@@ -10,6 +10,8 @@ import { usePlaylistStore } from "../store/usePlaylistStore";
 import { useAppStore } from "../store/useAppStore";
 import { useT, dayNameOf } from "../lib/i18n";
 import { useSettingsStore } from "../store/useSettingsStore";
+import { otherDevicePlayback, type DevicePlayback } from "../lib/nowPlaying";
+import { formatMs } from "../lib/format";
 
 // "Şu An" — açılış ekranı. O anki bağlama göre son çalınanlar + çalma
 // listelerine hızlı erişim + tek tıkla Resonance Radyosu (M4).
@@ -35,10 +37,14 @@ export default function HomeView() {
   const status = usePlayerStore((s) => s.status);
 
   const [recent, setRecent] = useState<Track[]>([]);
+  // Başka cihazda yarım kalan çalma (senkronlanan now_playing tablosundan).
+  const [other, setOther] = useState<DevicePlayback | null>(null);
   const [loadingRadio, setLoadingRadio] = useState<string | null>(null);
 
   useEffect(() => {
     getRecentTracks(10).then(setRecent);
+    // Başka cihazda yarım kalan çalma var mı? (senkronlanan now_playing)
+    void otherDevicePlayback().then(setOther);
   }, []);
 
   async function radioFrom(p: Playlist) {
@@ -75,6 +81,46 @@ export default function HomeView() {
         </div>
 
         {/* Resonance Keşfi — sadece öğrenen algoritmanın önerileriyle çalar */}
+
+        {/* ⭐ Başka cihazda kaldığın yer (now_playing senkronu) */}
+        {other && (
+          <button
+            onClick={() => {
+              playNow({
+                id: other.trackId,
+                source: "youtube",
+                sourceId: other.sourceId,
+                title: other.title,
+                artist: other.artist,
+                thumbnail: other.thumbnail,
+                durationMs: other.durationMs,
+              });
+              // Not: pozisyon geri sarma bir sonraki adım — şu an baştan başlar
+              // ama şarkı ve cihaz bilgisi doğru gelir.
+              setOther(null);
+            }}
+            className="group mt-4 flex w-full items-center gap-4 rounded-xl border border-border bg-surface px-4 py-3 text-left transition-colors hover:border-accent"
+          >
+            <div className="h-12 w-12 shrink-0 overflow-hidden rounded bg-surface-2">
+              {other.thumbnail && (
+                <img src={other.thumbnail} alt="" className="h-full w-full object-cover" />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 text-xs text-accent">
+                <Laptop size={12} />
+                {t("home.otherDevice", { device: other.deviceName })}
+              </div>
+              <div className="truncate text-sm font-medium">{other.title}</div>
+              <div className="truncate text-xs text-muted">
+                {other.artist} · {formatMs(other.positionMs)} / {formatMs(other.durationMs)}
+              </div>
+            </div>
+            <span className="shrink-0 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-bg">
+              {t("home.otherDeviceResume")}
+            </span>
+          </button>
+        )}
 
         {/* Son çalınanlar */}
         {recent.length > 0 && (

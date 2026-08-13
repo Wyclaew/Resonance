@@ -18,6 +18,7 @@ import {
 } from "../lib/recommender";
 import { recordPlay } from "../lib/history";
 import { noteListen } from "../lib/mood";
+import { publishNowPlaying } from "../lib/nowPlaying";
 import { useSettingsStore } from "./useSettingsStore";
 import { useToastStore } from "./useToastStore";
 import { useAppStore } from "./useAppStore";
@@ -293,6 +294,10 @@ function persistPlaybackState(force = false) {
   const now = Date.now();
   if (!force && now - lastStateSave < 5000) return;
   lastStateSave = now;
+
+  // Cihazlar arası devam: bu cihazın durumunu senkronlanan tabloya yaz
+  // (kendi içinde 15 sn throttle'lı).
+  void publishNowPlaying(c, st.positionMs, st.status === "playing");
 
   const isDiscovery =
     st.radioActive && st.radioPlaylistId === DISCOVERY_ID && st.queue.length > 0;

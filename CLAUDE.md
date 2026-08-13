@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.5.0** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.6.0** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,11 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.6.0'da: **PROFİL & ÇAPRAZ CİHAZ** — sağ üstte profil menüsü (avatar, senkron
+durumu, çıkış), **dinleme etkinliği/analiz sayfası** (`StatsView`, play_history'den
+→ cihazlar arası ortak), **migration v6 `now_playing`** (PC'de bırak-telefonda
+devam; cihaz başına satır → çakışma yok), ses kalitesi ayarı (düşük ≈ 3× küçük
+dosya), uygulama içi **şifre sıfırlama** (localhost bağlantısını yapıştır).
 v1.5.0'da: **ZAMAN-BAĞLAMLI ZEVK PROFİLİ** (`src/lib/taste.ts`) — "bu saatte ne
 dinlersin" tahmini, GÜVEN ile ölçekli (aşağıda); **önbellek LRU budama** (sınırsız
 büyüyordu, ölçüldü 1.1 GB); filtre başına kişisel radyo 2→1 ("Journey" sızıntısı);
@@ -90,7 +95,7 @@ sonra `cd src-tauri && cargo check --target x86_64-pc-windows-gnu`. Bitince saht
 - **DB tabloları:** tracks, playlists, playlist_tracks(+vote), votes (olay günlüğü), play_history,
   cache(+downloaded), settings, **recommendation_history**, **sync_state**.
   Migration'lar: v1 ilk şema, v2 downloaded,
-  v3 current_vote, v4 recommendation_history, **v5 senkron iskeleti**.
+  v3 current_vote, v4 recommendation_history, **v5 senkron iskeleti**, **v6 now_playing**.
 
 ## Öneri motoru (`src/lib/recommender.ts`) — nasıl çalışır
 Tüm sinyaller tek skorda birleşir:

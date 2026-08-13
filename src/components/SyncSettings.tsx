@@ -14,6 +14,7 @@ import { useT } from "../lib/i18n";
 import { getDeviceId } from "../lib/device";
 import { isSyncConfigured } from "../lib/sync/config";
 import {
+  completePasswordReset,
   getSupabase,
   resetPassword,
   signIn,
@@ -52,6 +53,11 @@ export default function SyncSettings() {
   const [password2, setPassword2] = useState("");
   const [authMode, setAuthMode] = useState<"in" | "up">("in");
   const [notice, setNotice] = useState<string | null>(null);
+  // Sıfırlama bağlantısı yapıştırma paneli (Site URL localhost olduğu için
+  // maildeki bağlantı tarayıcıda AÇILAMIYOR — token'ı burada işliyoruz).
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetLink, setResetLink] = useState("");
+  const [newPass, setNewPass] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -134,6 +140,24 @@ export default function SyncSettings() {
       setNotice(t("sync.resetSent"));
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const doApplyReset = async () => {
+    setBusy(true);
+    setErr(null);
+    setNotice(null);
+    try {
+      await completePasswordReset(resetLink, newPass);
+      setResetOpen(false);
+      setResetLink("");
+      setNewPass("");
+      setNotice(t("sync.resetDone"));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setErr(msg === "invalid-reset-link" ? t("sync.resetLinkBad") : msg);
     } finally {
       setBusy(false);
     }
@@ -261,7 +285,10 @@ export default function SyncSettings() {
                 <button
                   type="button"
                   disabled={busy || !email.trim()}
-                  onClick={() => void doReset()}
+                  onClick={() => {
+                    setResetOpen(true);
+                    void doReset();
+                  }}
                   className="text-sm text-muted underline-offset-2 hover:text-text hover:underline disabled:opacity-40"
                 >
                   {t("sync.forgot")}
@@ -272,6 +299,47 @@ export default function SyncSettings() {
 
           {authMode === "up" && (
             <p className="mt-3 text-xs text-faint">{t("sync.signUpNote")}</p>
+          )}
+
+          {/* Sıfırlama bağlantısını yapıştır → yeni şifre */}
+          {resetOpen && authMode === "in" && (
+            <div className="mt-4 rounded-md border border-border bg-surface p-3">
+              <p className="text-xs leading-relaxed text-muted">
+                {t("sync.resetPasteHelp")}
+              </p>
+              <textarea
+                value={resetLink}
+                onChange={(e) => setResetLink(e.target.value)}
+                placeholder="http://localhost:3000/#access_token=…"
+                rows={2}
+                className="mt-2 w-full resize-none rounded-md border border-border bg-bg px-2 py-1.5 font-mono text-[11px] outline-none focus:border-accent"
+              />
+              <input
+                type="password"
+                value={newPass}
+                onChange={(e) => setNewPass(e.target.value)}
+                placeholder={t("sync.newPassword")}
+                autoComplete="new-password"
+                className="mt-2 w-full rounded-md border border-border bg-bg px-3 py-2 text-sm outline-none focus:border-accent"
+              />
+              <div className="mt-2 flex gap-2">
+                <button
+                  type="button"
+                  disabled={busy || !resetLink.trim() || newPass.length < 6}
+                  onClick={() => void doApplyReset()}
+                  className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-bg disabled:opacity-40"
+                >
+                  {t("sync.resetApply")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setResetOpen(false)}
+                  className="rounded-md bg-surface-2 px-3 py-1.5 text-sm text-text"
+                >
+                  {t("common.cancel")}
+                </button>
+              </div>
+            </div>
           )}
           {notice && <p className="mt-3 text-sm text-up">{notice}</p>}
           {err && <p className="mt-3 text-sm text-down">{err}</p>}

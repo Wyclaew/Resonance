@@ -25,6 +25,8 @@ import DownloadsView from "./views/DownloadsView";
 import PlaylistView from "./views/PlaylistView";
 import ImportView from "./views/ImportView";
 import SettingsView from "./views/SettingsView";
+import StatsView from "./views/StatsView";
+import ProfileMenu from "./components/ProfileMenu";
 import { useAppStore } from "./store/useAppStore";
 import { useLibraryStore } from "./store/useLibraryStore";
 import { usePlaylistStore } from "./store/usePlaylistStore";
@@ -49,6 +51,8 @@ function CurrentView() {
       return <PlaylistView playlistId={activePlaylistId} />;
     case "import":
       return <ImportView />;
+    case "stats":
+      return <StatsView />;
     case "settings":
       return <SettingsView />;
     default:
@@ -171,6 +175,8 @@ export default function App() {
             // kullanıcının seçtiği (daha küçük) sınır hiç uygulanmaz.
             // İndirilenler korunur; yalnız geçici dosyalar en eskiden silinir.
             void pruneAudioCache();
+            // Ses kalitesi tercihini indirme motoruna bildir (Rust global).
+            invoke("set_audio_quality", { quality: s.audioQuality }).catch(() => {});
           });
         // Veri varsa otomatik yedek al (kazara kayba karşı güvenlik ağı).
         const hasData =
@@ -300,6 +306,12 @@ export default function App() {
         className="flex h-7 w-full shrink-0 items-stretch justify-end bg-bg"
         style={{ paddingLeft: isWindows ? 0 : "5rem" }}
       >
+        <div
+          data-tauri-drag-region={false}
+          className="flex items-center pr-2"
+        >
+          <ProfileMenu />
+        </div>
         <WindowControls />
       </div>
       {/* AMBİYANS = ANA İÇERİĞİ UNMOUNT ET (liste/sidebar/playbar).
