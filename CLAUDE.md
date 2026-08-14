@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.6.1** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.6.2** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,10 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.6.2'de: **AYARLAR PROFİL MENÜSÜNE GİRDİ** (sidebar'dan kalktı) ve tema/dil
+Ayarlar'dan ÇIKARILDI → tek yerde: profil menüsü. ⚠️ Tema orada 3 DURUMLU
+döngüdür (koyu→açık→sistem); "sistem" başka hiçbir yerde kalmadı.
+Ayarlar'a ikinci erişim: komut paleti (⌘K).
 v1.6.1'de: profil SIDEBAR ALTINA taşındı (başlık şeridindeki 24px düğme hem
 küçüktü hem sürükleme bölgesiyle çakışıyordu); **Hesap & Senkron Ayarlar'dan
 ÇIKARILDI** → kendi sayfası (`AccountView`, `ViewId="account"`), yalnız profil
@@ -83,8 +87,9 @@ sonra `cd src-tauri && cargo check --target x86_64-pc-windows-gnu`. Bitince saht
 - **Görünümler** (`src/views/`): Home (Şu An), **Discover (Keşfet)**, Search, Library,
   Downloads, Playlist, Import, **Stats (dinleme analizi)**, **Account (hesap & senkron)**, Settings.
   ⚠️ Account/Stats sidebar'da DEĞİL — yalnız profil menüsünden (sidebar altı) açılır.
-- **Sidebar**: Şu An · **Keşfet** (artık GÖRÜNÜM: `navigate("discover")` + `startDiscovery()`) ·
-  Ara · Kütüphane · İndirilenler · İçe Aktar · Ayarlar.
+- **Sidebar**: Şu An · **Keşfet** (GÖRÜNÜM: `navigate("discover")` + `startDiscovery()`) ·
+  Ara · Kütüphane · İndirilenler · İçe Aktar · **profil satırı (altta)**.
+  ⚠️ Ayarlar/Hesap/İstatistik sidebar'da DEĞİL — profil menüsünden açılır (⌘K de çalışır).
 - **Oynatıcı** (`src/store/usePlayerStore.ts` — en büyük dosya): kuyruk, `playNow`, `startSmartShuffle`,
   `startDiscovery`, `refillRadio`, `restoreState`, uyku zamanlayıcı, medya tuşları, prefetch.
   Ses motoruna Tauri komutlarıyla bağlı; pozisyon `playback-tick` olayıyla gelir.

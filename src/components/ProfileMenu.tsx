@@ -8,9 +8,12 @@ import {
   ChevronUp,
   Moon,
   Sun,
+  Monitor,
   Languages,
+  Settings,
 } from "lucide-react";
 import { useT, type Lang } from "../lib/i18n";
+import type { Theme } from "../store/useSettingsStore";
 import { useAppStore } from "../store/useAppStore";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { isSyncConfigured } from "../lib/sync/config";
@@ -76,14 +79,6 @@ export default function ProfileMenu({ collapsed }: { collapsed: boolean }) {
     r.readAsDataURL(file);
   };
 
-  // Gerçekte açık temada mıyız? Ayar "system" olabileceği için DOM'daki
-  // data-theme'e bakılır (App.tsx orayı yazıyor).
-  const isLight =
-    theme === "light" ||
-    (theme === "system" &&
-      typeof document !== "undefined" &&
-      document.documentElement.getAttribute("data-theme") === "light");
-
   const signedIn = isSyncConfigured() && !!email;
   const syncLabel = !isSyncConfigured()
     ? t("profile.syncOff")
@@ -116,7 +111,7 @@ export default function ProfileMenu({ collapsed }: { collapsed: boolean }) {
         className={`group relative mb-0.5 flex w-full items-center rounded-md text-sm transition-colors ${
           collapsed ? "justify-center px-0 py-2" : "gap-2.5 px-2 py-2"
         } ${
-          open || view === "account" || view === "stats"
+          open || view === "account" || view === "stats" || view === "settings"
             ? "bg-surface-2 text-text"
             : "text-muted hover:bg-surface hover:text-text"
         }`}
@@ -195,18 +190,49 @@ export default function ProfileMenu({ collapsed }: { collapsed: boolean }) {
 
           <div className="border-t border-border" />
 
-          {/* Hızlı ayarlar — en sık değiştirilen ikisi (Ayarlar'a girmeden). */}
-          {/* Etiket HEDEFİ gösterir (tıklayınca ne olacağı). "system" seçiliyse
-              gerçekte hangi temada olduğumuzu DOM'dan okuruz — ayarın kendisi
-              "system" olduğu için tek başına yeterli değil. */}
           <MenuItem
-            icon={isLight ? <Moon size={15} /> : <Sun size={15} />}
-            label={isLight ? t("profile.themeDark") : t("profile.themeLight")}
-            onClick={() => update("theme", isLight ? "dark" : "light")}
+            icon={<Settings size={15} />}
+            label={t("nav.settings")}
+            onClick={() => {
+              navigate("settings");
+              setOpen(false);
+            }}
+          />
+
+          <div className="border-t border-border" />
+
+          {/* Tema/dil YALNIZ BURADA (Ayarlar'dan çıkarıldı — aynı ayarı iki
+              yerde tutmak, birini değiştirip diğerini unutmaya davetiyeydi).
+              Bu yüzden tema 3 DURUMLU döngü olmalı: "sistem" seçeneği başka
+              hiçbir yerde kalmadı. Etiket MEVCUT durumu gösterir. */}
+          <MenuItem
+            icon={
+              theme === "system" ? (
+                <Monitor size={15} />
+              ) : theme === "light" ? (
+                <Sun size={15} />
+              ) : (
+                <Moon size={15} />
+              )
+            }
+            label={`${t("settings.theme")}: ${
+              theme === "system"
+                ? t("settings.themeSystem")
+                : theme === "light"
+                ? t("settings.themeLight")
+                : t("settings.themeDark")
+            }`}
+            onClick={() => {
+              const next: Theme =
+                theme === "dark" ? "light" : theme === "light" ? "system" : "dark";
+              update("theme", next);
+            }}
           />
           <MenuItem
             icon={<Languages size={15} />}
-            label={language === "tr" ? "Türkçe" : "English"}
+            label={`${t("settings.language")}: ${
+              language === "tr" ? "Türkçe" : "English"
+            }`}
             onClick={() =>
               update("language", (language === "tr" ? "en" : "tr") as Lang)
             }

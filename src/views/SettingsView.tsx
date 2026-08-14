@@ -24,8 +24,8 @@ import Toggle from "../components/Toggle";
 import Confetti from "../components/Confetti";
 import { CatDrawing, HeartDrawing } from "../components/SecretCat";
 import Logo from "../components/Logo";
-import { useSettingsStore, type Theme } from "../store/useSettingsStore";
-import { useT, type TrKey, type Lang } from "../lib/i18n";
+import { useSettingsStore } from "../store/useSettingsStore";
+import { useT, type TrKey } from "../lib/i18n";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { usePlaylistStore } from "../store/usePlaylistStore";
 import { getDb, isTauri } from "../lib/db";
@@ -511,8 +511,6 @@ const SCREENSAVER_OPTS: { v: number; labelKey: TrKey }[] = [
 function AppearanceSettings() {
   const t = useT();
   const accentColor = useSettingsStore((s) => s.accentColor);
-  const theme = useSettingsStore((s) => s.theme);
-  const language = useSettingsStore((s) => s.language);
   const screensaverSeconds = useSettingsStore((s) => s.screensaverSeconds);
   const update = useSettingsStore((s) => s.update);
 
@@ -592,28 +590,8 @@ function AppearanceSettings() {
           </div>
         </div>
       </SettingRow>
-      {/* Tema — açık tema v1.2.0'da eklendi (token'lar :root[data-theme] ile). */}
-      <SettingRow label={t("settings.theme")} description={t("settings.themeDesc")}>
-        <select
-          value={theme}
-          onChange={(e) => update("theme", e.target.value as Theme)}
-          className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text outline-none focus:border-border-strong"
-        >
-          <option value="dark">{t("settings.themeDark")}</option>
-          <option value="light">{t("settings.themeLight")}</option>
-          <option value="system">{t("settings.themeSystem")}</option>
-        </select>
-      </SettingRow>
-      <SettingRow label={t("settings.language")} description={t("settings.languageDesc")}>
-        <select
-          value={language}
-          onChange={(e) => update("language", e.target.value as Lang)}
-          className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text outline-none focus:border-border-strong"
-        >
-          <option value="tr">Türkçe</option>
-          <option value="en">English</option>
-        </select>
-      </SettingRow>
+      {/* Tema ve dil BİLEREK BURADA DEĞİL — profil menüsünde (sidebar altı).
+          İki yerde tutmak, birini değiştirip diğerini unutmaya davetiye. */}
     </div>
   );
 }

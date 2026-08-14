@@ -4,7 +4,6 @@ import {
   Clock,
   Search,
   Library,
-  Settings,
   Link2,
   HardDriveDownload,
   Plus,
@@ -223,14 +222,9 @@ export default function Sidebar() {
       <div className="border-t border-border px-2 py-2">
         {/* Profil — Ayarlar'ın hemen üstü. Eskiden pencere başlık şeridindeydi:
             24px'lik düğme hem küçük hem de sürükleme bölgesiyle çakışıyordu. */}
+        {/* Ayarlar artık PROFİL MENÜSÜNÜN İÇİNDE — hesap, tema, dil ve
+            ayarların hepsi tek yerde toplandı. */}
         <ProfileMenu collapsed={collapsed} />
-        <NavItem
-          icon={<Settings size={ICON} />}
-          label={t("nav.settings")}
-          active={view === "settings"}
-          collapsed={collapsed}
-          onClick={() => navigate("settings")}
-        />
       </div>
     </aside>
   );
