@@ -58,7 +58,13 @@ interface PlayerState {
 
   error: string | null;
 
-  playNow: (track: Track, queue?: Track[], playlistId?: string) => void;
+  playNow: (
+    track: Track,
+    queue?: Track[],
+    playlistId?: string,
+    /** Bu milisaniyeden başlat (cihazlar arası "kaldığın yerden devam"). */
+    startMs?: number
+  ) => void;
   startSmartShuffle: (tracks: KarmaTrack[], playlistId: string) => Promise<void>;
   startDiscovery: (opts?: { force?: boolean }) => Promise<void>;
   rerollDiscovery: () => Promise<void>;
@@ -603,7 +609,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   error: null,
 
-  playNow: (track, queue, playlistId) => {
+  playNow: (track, queue, playlistId, startMs = 0) => {
     const items = (queue ?? [track]).map((t) => toQueueItem(t, playlistId));
     const idx = Math.max(0, items.findIndex((i) => i.id === track.id));
     const current = items[idx];
@@ -612,13 +618,13 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       queueIndex: idx,
       current,
       status: "loading",
-      positionMs: 0,
+      positionMs: startMs,
       durationMs: track.durationMs,
       radioActive: false,
       radioPlaylistId: null,
       error: null,
     });
-    scheduleLoad(current);
+    scheduleLoad(current, startMs);
   },
 
   // Akıllı karışık: karma-ağırlıklı karıştırılmış kuyruk + araya Resonance

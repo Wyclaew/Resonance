@@ -26,7 +26,7 @@ import PlaylistView from "./views/PlaylistView";
 import ImportView from "./views/ImportView";
 import SettingsView from "./views/SettingsView";
 import StatsView from "./views/StatsView";
-import ProfileMenu from "./components/ProfileMenu";
+import AccountView from "./views/AccountView";
 import { useAppStore } from "./store/useAppStore";
 import { useLibraryStore } from "./store/useLibraryStore";
 import { usePlaylistStore } from "./store/usePlaylistStore";
@@ -53,6 +53,8 @@ function CurrentView() {
       return <ImportView />;
     case "stats":
       return <StatsView />;
+    case "account":
+      return <AccountView />;
     case "settings":
       return <SettingsView />;
     default:
@@ -306,12 +308,6 @@ export default function App() {
         className="flex h-7 w-full shrink-0 items-stretch justify-end bg-bg"
         style={{ paddingLeft: isWindows ? 0 : "5rem" }}
       >
-        <div
-          data-tauri-drag-region={false}
-          className="flex items-center pr-2"
-        >
-          <ProfileMenu />
-        </div>
         <WindowControls />
       </div>
       {/* AMBİYANS = ANA İÇERİĞİ UNMOUNT ET (liste/sidebar/playbar).

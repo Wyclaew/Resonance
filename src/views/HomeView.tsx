@@ -86,17 +86,21 @@ export default function HomeView() {
         {other && (
           <button
             onClick={() => {
-              playNow({
-                id: other.trackId,
-                source: "youtube",
-                sourceId: other.sourceId,
-                title: other.title,
-                artist: other.artist,
-                thumbnail: other.thumbnail,
-                durationMs: other.durationMs,
-              });
-              // Not: pozisyon geri sarma bir sonraki adım — şu an baştan başlar
-              // ama şarkı ve cihaz bilgisi doğru gelir.
+              // Diğer cihazda bırakılan SANİYEDEN devam et.
+              playNow(
+                {
+                  id: other.trackId,
+                  source: "youtube",
+                  sourceId: other.sourceId,
+                  title: other.title,
+                  artist: other.artist,
+                  thumbnail: other.thumbnail,
+                  durationMs: other.durationMs,
+                },
+                undefined,
+                undefined,
+                other.positionMs
+              );
               setOther(null);
             }}
             className="group mt-4 flex w-full items-center gap-4 rounded-xl border border-border bg-surface px-4 py-3 text-left transition-colors hover:border-accent"

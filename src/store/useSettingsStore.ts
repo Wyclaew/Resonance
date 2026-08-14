@@ -24,7 +24,7 @@ export interface Settings {
   /** Ses önbelleği üst sınırı (GB). 0 = sınırsız. İndirilenler ASLA silinmez. */
   cacheLimitGb: number;
   /** İndirme ses kalitesi. "low" ≈ 48k (dosyalar ~3 kat küçük), "high" ≈ 128k. */
-  audioQuality: "high" | "low";
+  audioQuality: "high" | "medium" | "low";
   /** Profil avatarı (data URI). YERELDE kalır — settings senkronlanmıyor. */
   avatarDataUrl: string;
   resumeState: string; // son çalan şarkı + pozisyon (JSON) — kaldığın yerden devam
@@ -48,7 +48,7 @@ const DEFAULTS: Settings = {
   prefetchEnabled: true,
   screensaverSeconds: 90,
   cacheLimitGb: 2,
-  audioQuality: "high" as "high" | "low",
+  audioQuality: "high" as "high" | "medium" | "low",
   avatarDataUrl: "",
   resumeState: "",
   language: detectLang(),

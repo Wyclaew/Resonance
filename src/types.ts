@@ -80,6 +80,7 @@ export type ViewId =
   | "playlist"
   | "import"
   | "stats" // Dinleme etkinliği & analiz (profil menüsünden)
+  | "account" // Hesap & senkron (profil menüsünden; Ayarlar'dan çıkarıldı)
   | "settings";
 
 // İndirme durumu (UI göstergeleri için)

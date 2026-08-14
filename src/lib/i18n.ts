@@ -127,8 +127,9 @@ const tr = {
   "filter.classical": "Klasik",
   "settings.audioQuality": "Ses kalitesi",
   "settings.audioQualityDesc":
-    "Düşük kalite dosyaları ~3 kat küçültür (daha az disk ve veri) ama sesi gözle görülür bozar. Değişiklik yalnız YENİ indirilenlere uygulanır.",
+    "YouTube yalnız iki kademe sunuyor: ~130 kbps ve ~49 kbps. Orta seçeneği bunun arasını ffmpeg ile yeniden kodlayarak üretir (~%26 küçülme, çift kodlama nedeniyle bir tık kalite kaybı). Değişiklik yalnız YENİ indirilenlere uygulanır.",
   "settings.qualityHigh": "Yüksek (~128 kbps)",
+  "settings.qualityMedium": "Orta (~96 kbps, yeniden kodlanır)",
   "settings.qualityLow": "Düşük (~48 kbps)",
   "settings.cacheLimit": "Önbellek sınırı",
   "settings.cacheLimitDesc":
@@ -155,6 +156,8 @@ const tr = {
   "profile.notSignedIn": "Giriş yapılmadı",
   "profile.syncOff": "Senkron kapalı",
   "profile.stats": "Dinleme istatistikleri",
+  "profile.themeDark": "Koyu tema",
+  "profile.themeLight": "Açık tema",
   "profile.account": "Hesap & senkron",
   "profile.changeAvatar": "Profil fotoğrafını değiştir",
   "profile.avatarTooBig": "Fotoğraf çok büyük (en fazla 512 KB).",
@@ -277,7 +280,6 @@ const tr = {
 
   // — Ayarlar: kategoriler
   "settings.title": "Ayarlar",
-  "settings.catAccount": "Hesap & Senkron",
   "settings.catPlayback": "Oynatma",
   "settings.catStorage": "Depolama & Önbellek",
   "settings.catShortcuts": "Kısayollar",
@@ -666,8 +668,9 @@ const en: Record<TrKey, string> = {
   "filter.classical": "Classical",
   "settings.audioQuality": "Audio quality",
   "settings.audioQualityDesc":
-    "Low quality makes files roughly 3x smaller (less disk and data) but audibly worse. Only applies to NEW downloads.",
+    "YouTube only offers two tiers: ~130 kbps and ~49 kbps. Medium re-encodes to fill the gap (~26% smaller, slightly lossier because it's a second encode). Only applies to NEW downloads.",
   "settings.qualityHigh": "High (~128 kbps)",
+  "settings.qualityMedium": "Medium (~96 kbps, re-encoded)",
   "settings.qualityLow": "Low (~48 kbps)",
   "settings.cacheLimit": "Cache limit",
   "settings.cacheLimitDesc":
@@ -693,6 +696,8 @@ const en: Record<TrKey, string> = {
   "profile.notSignedIn": "Not signed in",
   "profile.syncOff": "Sync off",
   "profile.stats": "Listening stats",
+  "profile.themeDark": "Dark theme",
+  "profile.themeLight": "Light theme",
   "profile.account": "Account & sync",
   "profile.changeAvatar": "Change profile photo",
   "profile.avatarTooBig": "Image too large (512 KB max).",
@@ -811,7 +816,6 @@ const en: Record<TrKey, string> = {
     "Note: the keyless path reads at most 100 tracks from a playlist. For longer playlists you can add a one-time free Spotify key under Settings → Integrations (optional).",
 
   "settings.title": "Settings",
-  "settings.catAccount": "Account & Sync",
   "settings.catPlayback": "Playback",
   "settings.catStorage": "Storage & Cache",
   "settings.catShortcuts": "Shortcuts",

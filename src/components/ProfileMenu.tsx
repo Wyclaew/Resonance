@@ -1,22 +1,38 @@
 import { useEffect, useRef, useState } from "react";
-import { User, LogOut, Settings, BarChart3, Cloud, CloudOff } from "lucide-react";
-import { useT } from "../lib/i18n";
+import {
+  User,
+  LogOut,
+  BarChart3,
+  Cloud,
+  CloudOff,
+  ChevronUp,
+  Moon,
+  Sun,
+  Languages,
+} from "lucide-react";
+import { useT, type Lang } from "../lib/i18n";
 import { useAppStore } from "../store/useAppStore";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { isSyncConfigured } from "../lib/sync/config";
 import { getSupabase, signOut } from "../lib/sync/client";
 import { stopSync, subscribeSync, type SyncState } from "../lib/sync/engine";
 
-// Sağ üstteki yuvarlak profil düğmesi + menüsü (Spotify'daki gibi).
-// İçinde: hesap/senkron durumu, dinleme istatistikleri, ayarlar, çıkış.
+// Profil — SIDEBAR'IN ALTINDA, Ayarlar'ın hemen üstünde.
 //
-// Avatar YERELDE saklanır (`settings` senkronlanmıyor) — buluta yüklemek
-// Supabase Storage kurulumu ister, kişisel uygulamada gereksiz.
+// Eskiden pencere başlık şeridindeydi: 24px'lik düğme hem çok küçüktü hem de
+// sürükleme bölgesiyle aynı yerdeydi. Sidebar tabanı hem her sayfada sabit,
+// hem de görünüm başlıklarındaki aksiyon düğmeleriyle çakışmıyor.
+//
+// Menü YUKARI açılır (altta yer yok).
+// Avatar YERELDE saklanır — `settings` senkronlanmıyor.
 
-export default function ProfileMenu() {
+export default function ProfileMenu({ collapsed }: { collapsed: boolean }) {
   const t = useT();
   const navigate = useAppStore((s) => s.navigate);
+  const view = useAppStore((s) => s.view);
   const avatar = useSettingsStore((s) => s.avatarDataUrl);
+  const theme = useSettingsStore((s) => s.theme);
+  const language = useSettingsStore((s) => s.language);
   const update = useSettingsStore((s) => s.update);
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState<string | null>(null);
@@ -29,16 +45,15 @@ export default function ProfileMenu() {
   useEffect(() => {
     const sb = getSupabase();
     if (!sb) return;
-    void sb.auth.getSession().then(({ data }) =>
-      setEmail(data.session?.user.email ?? null)
-    );
+    void sb.auth
+      .getSession()
+      .then(({ data }) => setEmail(data.session?.user.email ?? null));
     const { data: sub } = sb.auth.onAuthStateChange((_e, session) =>
       setEmail(session?.user.email ?? null)
     );
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  // Dışarı tıklayınca kapan.
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
@@ -51,7 +66,7 @@ export default function ProfileMenu() {
   }, [open]);
 
   const pickAvatar = (file: File) => {
-    // Küçük tut: data URI settings tablosunda saklanıyor, dev dosya koyma.
+    // Data URI settings tablosunda saklanıyor → büyük dosya koyma.
     if (file.size > 512 * 1024) {
       alert(t("profile.avatarTooBig"));
       return;
@@ -61,6 +76,15 @@ export default function ProfileMenu() {
     r.readAsDataURL(file);
   };
 
+  // Gerçekte açık temada mıyız? Ayar "system" olabileceği için DOM'daki
+  // data-theme'e bakılır (App.tsx orayı yazıyor).
+  const isLight =
+    theme === "light" ||
+    (theme === "system" &&
+      typeof document !== "undefined" &&
+      document.documentElement.getAttribute("data-theme") === "light");
+
+  const signedIn = isSyncConfigured() && !!email;
   const syncLabel = !isSyncConfigured()
     ? t("profile.syncOff")
     : !email
@@ -71,60 +95,95 @@ export default function ProfileMenu() {
     ? t("sync.statusError")
     : t("sync.statusIdle");
 
+  const Avatar = ({ size }: { size: number }) => (
+    <span
+      className="grid shrink-0 place-items-center overflow-hidden rounded-full border border-border bg-surface-2 text-muted"
+      style={{ width: size, height: size }}
+    >
+      {avatar ? (
+        <img src={avatar} alt="" className="h-full w-full object-cover" />
+      ) : (
+        <User size={Math.round(size * 0.55)} />
+      )}
+    </span>
+  );
+
   return (
     <div ref={boxRef} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        title={email ?? t("profile.title")}
-        className="grid h-6 w-6 shrink-0 place-items-center overflow-hidden rounded-full border border-border bg-surface-2 text-muted transition-colors hover:border-accent hover:text-text"
+        title={collapsed ? email ?? t("profile.title") : undefined}
+        className={`group relative mb-0.5 flex w-full items-center rounded-md text-sm transition-colors ${
+          collapsed ? "justify-center px-0 py-2" : "gap-2.5 px-2 py-2"
+        } ${
+          open || view === "account" || view === "stats"
+            ? "bg-surface-2 text-text"
+            : "text-muted hover:bg-surface hover:text-text"
+        }`}
       >
-        {avatar ? (
-          <img src={avatar} alt="" className="h-full w-full object-cover" />
-        ) : (
-          <User size={13} />
+        <Avatar size={collapsed ? 22 : 26} />
+        {!collapsed && (
+          <>
+            <span className="min-w-0 flex-1 text-left">
+              <span className="block truncate text-[13px] font-medium text-text">
+                {email ?? t("profile.local")}
+              </span>
+              <span className="flex items-center gap-1 text-[11px] text-muted">
+                {signedIn ? (
+                  <Cloud size={10} className="shrink-0 text-accent" />
+                ) : (
+                  <CloudOff size={10} className="shrink-0" />
+                )}
+                <span className="truncate">{syncLabel}</span>
+              </span>
+            </span>
+            <ChevronUp
+              size={14}
+              className={`shrink-0 text-faint transition-transform ${
+                open ? "" : "rotate-180"
+              }`}
+            />
+          </>
         )}
       </button>
 
       {open && (
-        <div className="absolute right-0 top-8 z-50 w-64 overflow-hidden rounded-lg border border-border bg-surface shadow-xl">
-          <div className="flex items-center gap-3 border-b border-border p-3">
-            <button
-              onClick={() => fileRef.current?.click()}
-              title={t("profile.changeAvatar")}
-              className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full border border-border bg-surface-2 text-muted hover:border-accent"
-            >
-              {avatar ? (
-                <img src={avatar} alt="" className="h-full w-full object-cover" />
-              ) : (
-                <User size={18} />
-              )}
-            </button>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) pickAvatar(f);
-                e.target.value = "";
-              }}
-            />
-            <div className="min-w-0">
-              <div className="truncate text-sm font-medium">
+        <div className="absolute bottom-full left-0 z-50 mb-1 w-60 overflow-hidden rounded-lg border border-border bg-surface shadow-xl">
+          {/* Avatar değiştir */}
+          <button
+            onClick={() => fileRef.current?.click()}
+            className="flex w-full items-center gap-3 border-b border-border p-3 text-left transition-colors hover:bg-surface-2"
+          >
+            <Avatar size={36} />
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-medium">
                 {email ?? t("profile.local")}
-              </div>
-              <div className="flex items-center gap-1 text-xs text-muted">
-                {isSyncConfigured() && email ? (
-                  <Cloud size={11} className="text-accent" />
-                ) : (
-                  <CloudOff size={11} />
-                )}
-                <span className="truncate">{syncLabel}</span>
-              </div>
-            </div>
-          </div>
+              </span>
+              <span className="block truncate text-xs text-muted">
+                {t("profile.changeAvatar")}
+              </span>
+            </span>
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) pickAvatar(f);
+              e.target.value = "";
+            }}
+          />
 
+          <MenuItem
+            icon={<Cloud size={15} />}
+            label={t("profile.account")}
+            onClick={() => {
+              navigate("account");
+              setOpen(false);
+            }}
+          />
           <MenuItem
             icon={<BarChart3 size={15} />}
             label={t("profile.stats")}
@@ -133,33 +192,40 @@ export default function ProfileMenu() {
               setOpen(false);
             }}
           />
+
+          <div className="border-t border-border" />
+
+          {/* Hızlı ayarlar — en sık değiştirilen ikisi (Ayarlar'a girmeden). */}
+          {/* Etiket HEDEFİ gösterir (tıklayınca ne olacağı). "system" seçiliyse
+              gerçekte hangi temada olduğumuzu DOM'dan okuruz — ayarın kendisi
+              "system" olduğu için tek başına yeterli değil. */}
           <MenuItem
-            icon={<Cloud size={15} />}
-            label={t("profile.account")}
-            onClick={() => {
-              navigate("settings");
-              setOpen(false);
-            }}
+            icon={isLight ? <Moon size={15} /> : <Sun size={15} />}
+            label={isLight ? t("profile.themeDark") : t("profile.themeLight")}
+            onClick={() => update("theme", isLight ? "dark" : "light")}
           />
           <MenuItem
-            icon={<Settings size={15} />}
-            label={t("nav.settings")}
-            onClick={() => {
-              navigate("settings");
-              setOpen(false);
-            }}
+            icon={<Languages size={15} />}
+            label={language === "tr" ? "Türkçe" : "English"}
+            onClick={() =>
+              update("language", (language === "tr" ? "en" : "tr") as Lang)
+            }
           />
-          {email && (
-            <MenuItem
-              icon={<LogOut size={15} />}
-              label={t("sync.signOut")}
-              danger
-              onClick={() => {
-                stopSync();
-                void signOut();
-                setOpen(false);
-              }}
-            />
+
+          {signedIn && (
+            <>
+              <div className="border-t border-border" />
+              <MenuItem
+                icon={<LogOut size={15} />}
+                label={t("sync.signOut")}
+                danger
+                onClick={() => {
+                  stopSync();
+                  void signOut();
+                  setOpen(false);
+                }}
+              />
+            </>
           )}
         </div>
       )}

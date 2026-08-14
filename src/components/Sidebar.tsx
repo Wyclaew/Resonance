@@ -18,6 +18,7 @@ import { usePlaylistStore } from "../store/usePlaylistStore";
 import { usePlayerStore } from "../store/usePlayerStore";
 import { useT } from "../lib/i18n";
 import Logo from "./Logo";
+import ProfileMenu from "./ProfileMenu";
 import type { ViewId } from "../types";
 
 interface NavItemProps {
@@ -220,6 +221,9 @@ export default function Sidebar() {
       </div>
 
       <div className="border-t border-border px-2 py-2">
+        {/* Profil — Ayarlar'ın hemen üstü. Eskiden pencere başlık şeridindeydi:
+            24px'lik düğme hem küçük hem de sürükleme bölgesiyle çakışıyordu. */}
+        <ProfileMenu collapsed={collapsed} />
         <NavItem
           icon={<Settings size={ICON} />}
           label={t("nav.settings")}

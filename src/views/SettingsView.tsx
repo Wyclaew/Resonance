@@ -9,7 +9,7 @@ import {
   Brain,
   Info,
   ChevronDown,
-  Cloud,
+
   Trash2,
   Download,
   Upload,
@@ -28,14 +28,12 @@ import { useSettingsStore, type Theme } from "../store/useSettingsStore";
 import { useT, type TrKey, type Lang } from "../lib/i18n";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { usePlaylistStore } from "../store/usePlaylistStore";
-import SyncSettings from "../components/SyncSettings";
 import { getDb, isTauri } from "../lib/db";
 import { formatBytes } from "../lib/format";
 import { importBackup, type ImportResult } from "../lib/backup";
 
 // label yerine çeviri ANAHTARI — dil değişince kategori adları da değişsin.
 const categories = [
-  { id: "account", labelKey: "settings.catAccount", icon: Cloud },
   { id: "playback", labelKey: "settings.catPlayback", icon: Play },
   { id: "storage", labelKey: "settings.catStorage", icon: HardDrive },
   { id: "shortcuts", labelKey: "settings.catShortcuts", icon: Keyboard },
@@ -287,11 +285,6 @@ function IntegrationsSettings() {
   );
 }
 
-// Bulut senkronu UI'ı ayrı bileşende (SyncSettings.tsx) — bu dosya zaten büyük.
-function AccountSettings() {
-  return <SyncSettings />;
-}
-
 function PlaybackSettings() {
   const t = useT();
   const s = useSettingsStore();
@@ -410,13 +403,14 @@ function StorageSettings() {
         <select
           value={audioQuality}
           onChange={(e) => {
-            const q = e.target.value as "high" | "low";
+            const q = e.target.value as "high" | "medium" | "low";
             updateSetting("audioQuality", q);
             invoke("set_audio_quality", { quality: q }).catch(() => {});
           }}
           className="rounded-md border border-border bg-surface px-2 py-1.5 text-sm"
         >
           <option value="high">{t("settings.qualityHigh")}</option>
+          <option value="medium">{t("settings.qualityMedium")}</option>
           <option value="low">{t("settings.qualityLow")}</option>
         </select>
       </SettingRow>
@@ -929,7 +923,7 @@ function AboutSettings() {
 
 export default function SettingsView() {
   const t = useT();
-  const [active, setActive] = useState<CatId>("account");
+  const [active, setActive] = useState<CatId>("playback");
   const current = categories.find((c) => c.id === active)!;
 
   return (
@@ -964,9 +958,7 @@ export default function SettingsView() {
             {t(current.labelKey)}
           </h2>
           <div className="flex min-h-0 flex-1 flex-col">
-            {active === "account" ? (
-            <AccountSettings />
-          ) : active === "playback" ? (
+            {active === "playback" ? (
             <PlaybackSettings />
           ) : active === "storage" ? (
             <StorageSettings />

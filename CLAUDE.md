@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.6.0** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.6.1** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,12 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.6.1'de: profil SIDEBAR ALTINA taşındı (başlık şeridindeki 24px düğme hem
+küçüktü hem sürükleme bölgesiyle çakışıyordu); **Hesap & Senkron Ayarlar'dan
+ÇIKARILDI** → kendi sayfası (`AccountView`, `ViewId="account"`), yalnız profil
+menüsünden açılır; menüye hızlı tema/dil geçişi; ses kalitesine **Orta** (~96k,
+ffmpeg ile yeniden kodlama — YouTube 49k/130k dışında kademe SUNMUYOR);
+"başka cihazda kaldığın yer" artık POZİSYONDAN devam ediyor.
 v1.6.0'da: **PROFİL & ÇAPRAZ CİHAZ** — sağ üstte profil menüsü (avatar, senkron
 durumu, çıkış), **dinleme etkinliği/analiz sayfası** (`StatsView`, play_history'den
 → cihazlar arası ortak), **migration v6 `now_playing`** (PC'de bırak-telefonda
@@ -74,8 +80,9 @@ atlanır → hata Windows CI'da patlar; v1.2.1'de `raw_window_handle` eksikliği
 sonra `cd src-tauri && cargo check --target x86_64-pc-windows-gnu`. Bitince sahte dosyaları sil.
 
 ## Mimari özet
-- **Görünümler** (`src/views/`): Home (Şu An), **Discover (Keşfet — v1.3.0'da kendi sayfası)**,
-  Search, Library, Downloads, Playlist, Import, Settings.
+- **Görünümler** (`src/views/`): Home (Şu An), **Discover (Keşfet)**, Search, Library,
+  Downloads, Playlist, Import, **Stats (dinleme analizi)**, **Account (hesap & senkron)**, Settings.
+  ⚠️ Account/Stats sidebar'da DEĞİL — yalnız profil menüsünden (sidebar altı) açılır.
 - **Sidebar**: Şu An · **Keşfet** (artık GÖRÜNÜM: `navigate("discover")` + `startDiscovery()`) ·
   Ara · Kütüphane · İndirilenler · İçe Aktar · Ayarlar.
 - **Oynatıcı** (`src/store/usePlayerStore.ts` — en büyük dosya): kuyruk, `playNow`, `startSmartShuffle`,

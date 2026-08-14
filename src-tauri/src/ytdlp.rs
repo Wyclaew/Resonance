@@ -615,6 +615,14 @@ pub fn ensure_audio(
     // ~3 kat küçülür. Kalite gözle görülür düşer; bu yüzden VARSAYILAN "high".
     // Kaliteyi düşürmeden küçültmek mümkün değil: opus daha verimli ama
     // symphonia (rodio) opus çözemiyor.
+    // ⚠️ YouTube m4a'da yalnız İKİ kademe sunuyor (ölçüldü): itag 139 (~49k) ve
+    // 140 (~130k). ARASI YOK. Opus 51k/134k daha verimli ama symphonia (rodio)
+    // opus çözemiyor → kullanılamaz.
+    //   • "low"    → 139'u tercih et (kaynaktan, kayıpsız seçim)
+    //   • "medium" → 140 indirilir, ffmpeg ile 96k AAC'ye YENİDEN KODLANIR
+    //                (aşağıdaki remux adımı). Kaynakta 96k olmadığı için tek yol
+    //                bu; çift kodlama nedeniyle kalite native 96k'dan düşüktür.
+    //   • "high"   → 140, yeniden kodlama YOK (kopyalanır).
     let fmt = if audio_quality() == "low" {
         "bestaudio[ext=m4a][abr<=70]/bestaudio[abr<=70]/bestaudio[ext=m4a]/bestaudio/best"
     } else {
@@ -730,29 +738,45 @@ pub fn ensure_audio(
         .ok_or_else(|| anyhow::anyhow!("indirilen kaynak bulunamadı ({video_id})"))?;
     let target = cache_dir.join(format!("{video_id}.aac"));
 
+    // "medium" seçiliyse KOPYALAMA yerine 96k'ya yeniden kodla. YouTube 96k
+    // sunmadığı (yalnız 49k / 130k) için orta kademe ancak böyle elde edilir.
+    // Çift kodlama olduğundan native 96k'dan bir tık kötüdür; kullanıcıya
+    // arayüzde bu açıkça yazılıyor.
+    let medium = audio_quality() == "medium";
+
     // 1) Hızlı yol: AAC akışını kopyalayarak ADTS'ye remux et.
-    let remux = ffmpeg()
-        .args([
-            "-y",
-            "-v",
-            "error",
-            "-i",
-            src.to_str().unwrap(),
-            "-vn", // video varsa (muxed best) at — sadece ses
-            "-c:a",
-            "copy",
-            "-f",
-            "adts",
-            target.to_str().unwrap(),
-        ])
-        .output();
+    //    (medium'da kopyalama atlanır → aşağıdaki transcode dalına düşer.)
+    let remux = if medium {
+        None
+    } else {
+        Some(
+            ffmpeg()
+                .args([
+                    "-y",
+                    "-v",
+                    "error",
+                    "-i",
+                    src.to_str().unwrap(),
+                    "-vn", // video varsa (muxed best) at — sadece ses
+                    "-c:a",
+                    "copy",
+                    "-f",
+                    "adts",
+                    target.to_str().unwrap(),
+                ])
+                .output(),
+        )
+    };
     let copied = match &remux {
-        Ok(o) => o.status.success(),
-        Err(e) => {
-            // ffmpeg hiç çalıştırılamadı (bulunamadı). En olası Windows kök nedeni.
-            log::error!("ffmpeg çalıştırılamadı (remux): {e}");
-            false
-        }
+        None => false, // medium → bilerek transcode
+        Some(r) => match r {
+            Ok(o) => o.status.success(),
+            Err(e) => {
+                // ffmpeg hiç çalıştırılamadı (bulunamadı). Windows'ta en olası kök neden.
+                log::error!("ffmpeg çalıştırılamadı (remux): {e}");
+                false
+            }
+        },
     };
 
     // 2) Kaynak AAC değilse (opus/webm) ya da kopyalama başarısızsa transcode et.
@@ -769,7 +793,9 @@ pub fn ensure_audio(
                 "-c:a",
                 "aac",
                 "-b:a",
-                "192k",
+                // medium → 96k (küçültme amaçlı); diğer durumlarda bu dal yalnız
+                // KURTARMA yoludur (kaynak AAC değil) → kaliteyi düşürme.
+                if medium { "96k" } else { "192k" },
                 "-f",
                 "adts",
                 target.to_str().unwrap(),
