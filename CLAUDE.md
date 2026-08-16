@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.6.2** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.6.3** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,10 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.6.3'te: **senkronda tablo başına hata yalıtımı** (bulutta `now_playing` yokken
+TÜM senkron duruyordu — tek tablo artık turu iptal etmiyor) + anlaşılır
+"şemayı yeniden çalıştır" mesajı + `scripts/sync-schema-check.py`;
+**öneri kabul oranı** (`src/lib/acceptance.ts`) öğrenmeye dördüncü katman.
 v1.6.2'de: **AYARLAR PROFİL MENÜSÜNE GİRDİ** (sidebar'dan kalktı) ve tema/dil
 Ayarlar'dan ÇIKARILDI → tek yerde: profil menüsü. ⚠️ Tema orada 3 DURUMLU
 döngüdür (koyu→açık→sistem); "sistem" başka hiçbir yerde kalmadı.
@@ -426,6 +430,18 @@ SIFIRLANMAZ; "Yeni keşif" düğmesi `{force:true}` ile yeni parti kurar.
   sinyali YAZILMAZ. Yoksa 403 indirme hatası "bu tarzı sevmedim" olarak
   öğreniliyordu.
 
+### ⭐ Öneri kabul oranı (`src/lib/acceptance.ts`, v1.6.3)
+"Önerdiğimde gerçekten dinleniyor mu?" — EKSİK OLAN GERİ BESLEME BUYDU.
+- `recommendation_history` (ne önerdim) ⨝ `play_history` (ne dinledim) →
+  sanatçı başına kabul oranı. İki tablo da senkronlanıyor → cihazlar arası ortak.
+- **Neden diğer katmanlardan farklı:** `artistAffinity` "seviyorum" der ve
+  playlist üyeliği onu güçlü besler; ama listendeki bir sanatçının RADYODAN
+  gelen şarkılarını sürekli geçiyor olabilirsin. Eski model bunu göremiyordu ve
+  o sanatçıyı tohum seçmeye devam ediyordu.
+- Az veriyle etki kısılır (<4 öneri), taban 0.4 → kimse tamamen ölmez.
+- Seed ağırlığı artık DÖRT katmanın çarpımı:
+  `kalıcı zevk × oturum modu × zaman bağlamı × kabul oranı`.
+
 ### ⭐ Zaman-bağlamlı zevk profili (`src/lib/taste.ts`, v1.5.0)
 "Hangi saat ne dinlediğime göre tahmin yapsın, tutmazsa onu da öğrensin."
 - **YENİ TABLO YOK** — profil `play_history` + `tracks`'ten TÜRETİLİR. Bu iki tablo
@@ -477,6 +493,11 @@ uygulama %100 yerel). ⛔ `service_role` anahtarı ASLA kullanılmaz (RLS'i bypa
   - `synced_at` (timestamptz, **SUNUCU** saati, Postgres trigger) → yalnız **pull penceresi**.
   **Neden:** iki cihazın saati tutmaz; pencere cihaz saatine bağlansaydı saati geri kalan
   cihaz diğerinin satırlarını "gördüm" sanıp SONSUZA DEK atlardı.
+- **⭐ TABLO BAŞINA HATA YALITIMI** (v1.6.3): `syncNow` her tabloyu ayrı
+  try/catch ile işler. Eskiden düz `await` döngüsüydü → bulutta olmayan TEK
+  tablo (`now_playing`) sonraki push'ları VE BÜTÜN PULL'LARI iptal ediyordu.
+  Yeni sürüm tablo eklerse `docs/supabase-schema.sql` YENİDEN çalıştırılmalı;
+  `scripts/sync-schema-check.py` sapmayı önceden yakalar.
 - **⭐ SİLME = TOMBSTONE** (`deleted = 1`), hard delete YOK. Hard delete diğer cihaza
   "bu satır hiç yoktu" gibi görünür → silinen satır geri gelir.
   **Sonuç: HER OKUMA `deleted = 0` FİLTRELEMEK ZORUNDA.** (playlists.ts, recommender.ts,

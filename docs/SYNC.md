@@ -22,6 +22,17 @@ aynı motor kullanılacak (`docs/MOBILE.md`).
    - Supabase'de e-posta onayı açıksa ilk kayıtta gelen maili onayla.
 5. **İlk senkron yönünü seç** (aşağıda).
 
+### ⚠️ Uygulama güncellenince ŞEMAYI DA GÜNCELLE
+
+Yeni sürüm senkrona tablo/sütun eklemiş olabilir (ör. v1.6.0 `now_playing`).
+Supabase'de o tablo yoksa PostgREST **"Could not find the table … in the schema
+cache"** der. Çözüm: `docs/supabase-schema.sql`'i SQL Editor'de YENİDEN çalıştır
+(idempotent). Denetim: `python3 scripts/sync-schema-check.py` motorun beklediği
+sütunlarla şema dosyasını karşılaştırır.
+
+v1.6.3'ten beri tek tablonun hatası turu iptal ETMEZ — diğer tablolar
+senkronlanmaya devam eder ve arayüz ne yapman gerektiğini yazar.
+
 ## İlk senkron — yön seçimi
 
 İki cihazda da veri varsa çakışmayı kullanıcı çözer. Giriş yapınca sihirbaz çıkar:

@@ -179,6 +179,7 @@ Masaüstünde çalışan ve mobilde **yeniden yazılmaması gereken** parçalar:
 | Tür/ruh hali filtreleri | `src/lib/filters.ts` | Saf veri + string; olduğu gibi taşınır. |
 | Oturum modu | `src/lib/mood.ts` | Saf TS, bağımlılıksız. |
 | Zaman-bağlamlı zevk | `src/lib/taste.ts` | Saf TS + tek SQL sorgusu. |
+| Öneri kabul oranı | `src/lib/acceptance.ts` | Saf TS + tek SQL. İki senkron tablodan türer → mobil hiçbir şey eklemeden aynı öğrenmeyi devralır. |
 | **Çapraz cihaz devam** | `src/lib/nowPlaying.ts` + `now_playing` tablosu | ⭐ Mobilin en görünür kazancı: PC'de bırak, telefonda devam et. Şema HAZIR. |
 
 **Mobilde platforma özel kalan tek şey SES**: yt-dlp gömülemez (§2).

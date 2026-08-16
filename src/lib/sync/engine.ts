@@ -336,17 +336,39 @@ export async function syncNow(): Promise<void> {
   try {
     let pushed = 0;
     let pulled = 0;
+    const errors: string[] = [];
+
+    // ⭐ TABLO BAŞINA HATA YALITIMI. Eskiden döngü doğrudan `await` ediyordu:
+    // TEK bir tablonun hatası (ör. bulutta o tablo yok) tüm turu iptal
+    // ediyordu — sonraki push'lar VE BÜTÜN PULL'LAR hiç çalışmıyordu.
+    // Gerçekte yaşandı: `now_playing` bulutta olmayınca senkron komple durdu.
+    // Artık bir tablo patlasa da diğerleri taşınır; hata toplanıp bildirilir.
+    const guard = async (label: string, fn: () => Promise<number>) => {
+      try {
+        return await fn();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[sync] ${label} başarısız:`, e);
+        errors.push(msg);
+        return 0;
+      }
+    };
+
     // ÖNCE PUSH: yereldeki değişiklik buluta çıkmadan pull edilirse, gelen
     // eski satır LWW'de kaybeder ama gereksiz iş olur. Push→pull daha temiz.
-    for (const spec of TABLES) pushed += await pushTable(spec, userId);
-    for (const spec of TABLES) pulled += await pullTable(spec, userId);
+    for (const spec of TABLES) {
+      pushed += await guard(`${spec.name} push`, () => pushTable(spec, userId));
+    }
+    for (const spec of TABLES) {
+      pulled += await guard(`${spec.name} pull`, () => pullTable(spec, userId));
+    }
 
     setState({
-      status: "idle",
+      status: errors.length > 0 ? "error" : "idle",
       lastSyncAt: Date.now(),
       pushed,
       pulled,
-      lastError: null,
+      lastError: errors.length > 0 ? describeSyncError(errors) : null,
     });
     if (pulled > 0) notifyRemoteApplied();
   } catch (e) {
@@ -361,6 +383,30 @@ export async function syncNow(): Promise<void> {
     }
   }
 }
+
+/**
+ * Hata mesajlarını kullanıcının ANLAYACAĞI bir cümleye çevirir.
+ *
+ * En sık karşılaşılan: sunucu şeması eski (uygulama yeni bir tablo ekledi ama
+ * Supabase'de o tablo yok) → PostgREST "Could not find the table … in the
+ * schema cache" der. Kullanıcının yapması gereken tek şey
+ * `docs/supabase-schema.sql`'i yeniden çalıştırmak; dosya idempotent.
+ */
+function describeSyncError(errors: string[]): string {
+  const missing = errors.find(
+    (e) => /could not find the table/i.test(e) || /PGRST205/.test(e)
+  );
+  if (missing) {
+    const m = /public\.([a-z_]+)/i.exec(missing);
+    return `${SCHEMA_OUTDATED}${m ? ` (${m[1]})` : ""}`;
+  }
+  // Birden çok farklı hata varsa ilkini göster, sayıyı ekle.
+  return errors.length > 1 ? `${errors[0]} (+${errors.length - 1})` : errors[0];
+}
+
+// UI'da gösterilecek metin i18n'den gelmeli ama engine React dışı → t() kullan.
+const SCHEMA_OUTDATED = "__SCHEMA_OUTDATED__";
+export { SCHEMA_OUTDATED };
 
 // ── Tetikleyiciler ─────────────────────────────────────────────────────────
 

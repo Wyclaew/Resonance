@@ -9,6 +9,7 @@ import { notifyLocalChange } from "./sync/engine";
 import { isProbeCandidate, moodMultiplier } from "./mood";
 import { queriesFor } from "./filters";
 import { buildTasteProfile, tasteBoost } from "./taste";
+import { acceptanceBoost, buildAcceptance } from "./acceptance";
 
 // Resonance öneri motoru (M4).
 // "Hangi gün/saat hangi şarkıya oy verdin" sinyalinden sanatçı yakınlığı
@@ -326,8 +327,8 @@ async function computeRecommendations(
   const trackKarma = new Map<string, number>();
   // Favori dönüşü için: her parçanın ŞU ANKİ gün/saate en iyi uyumu (0..1).
   const trackContext = new Map<string, number>();
-  // Zaman-bağlamlı zevk profilini tazele (10 dk'da bir; ucuz).
-  await buildTasteProfile();
+  // Öğrenme katmanlarını tazele (10 dk'da bir; ikisi de tek sorgu).
+  await Promise.all([buildTasteProfile(), buildAcceptance()]);
 
   const bumpContext = (id: string, m: number) =>
     trackContext.set(id, Math.max(trackContext.get(id) ?? 0, m));
@@ -602,14 +603,16 @@ async function computeRecommendations(
         .map((x) => x.t);
 
     // ⭐ Üç katman çarpılır:
-    //   score        → KALICI zevk (oy + dinleme + playlist üyeliği)
-    //   moodMultiplier → BU OTURUMDAKİ mod (lib/mood.ts)
-    //   tasteBoost   → BU SAAT/GÜN bağlamı, güvene göre ölçekli (lib/taste.ts)
-    const moodSeeds = sampleWeighted(
-      pool,
-      12,
-      (x) => x.score * moodMultiplier(x.t.artist) * tasteBoost(x.t.artist)
-    );
+    //   score           → KALICI zevk (oy + dinleme + playlist üyeliği)
+    //   moodMultiplier  → BU OTURUMDAKİ mod (lib/mood.ts)
+    //   tasteBoost      → BU SAAT/GÜN bağlamı, güvene göre (lib/taste.ts)
+    //   acceptanceBoost → ÖNERİNCE TUTUYOR MU (lib/acceptance.ts) — listende
+    //                     olup da radyodan gelince hep geçtiğin sanatçıyı
+    //                     geriletir; diğer üç katmanın göremediği tek şey bu.
+    const seedWeight = (a: string) =>
+      moodMultiplier(a) * tasteBoost(a) * acceptanceBoost(a);
+
+    const moodSeeds = sampleWeighted(pool, 12, (x) => x.score * seedWeight(x.t.artist));
 
     // Zaten sevilen sanatçılar — yeni sanatçı keşiflerini işaretlemek için.
     const knownArtists = new Set(
@@ -654,7 +657,7 @@ async function computeRecommendations(
       for (const t of sampleWeighted(
         mineInGenre,
         1,
-        (x) => x.score * moodMultiplier(x.t.artist) * tasteBoost(x.t.artist)
+        (x) => x.score * seedWeight(x.t.artist)
       )) {
         pushSeed({ sourceId: t.source_id, artist: t.artist });
       }

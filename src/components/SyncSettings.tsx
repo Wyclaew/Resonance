@@ -22,6 +22,7 @@ import {
   signUp,
 } from "../lib/sync/client";
 import {
+  SCHEMA_OUTDATED,
   firstSyncPullReplace,
   firstSyncPushAll,
   hasSyncedBefore,
@@ -477,7 +478,12 @@ export default function SyncSettings() {
         </div>
 
         {sync?.lastError && (
-          <p className="mt-2 break-words text-xs text-down">{sync.lastError}</p>
+          <p className="mt-2 break-words text-xs text-down">
+            {sync.lastError.startsWith(SCHEMA_OUTDATED)
+              ? t("sync.schemaOutdated") +
+                sync.lastError.slice(SCHEMA_OUTDATED.length)
+              : sync.lastError}
+          </p>
         )}
 
         <button

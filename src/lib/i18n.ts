@@ -457,6 +457,8 @@ const tr = {
   "sync.resetApply": "Şifreyi değiştir",
   "sync.resetDone": "Şifre değiştirildi. Yeni şifreyle giriş yapabilirsin.",
   "sync.resetLinkBad": "Bağlantı geçersiz görünüyor — tamamını kopyaladığından emin ol.",
+  "sync.schemaOutdated":
+    "Sunucu şeması eski: uygulama yeni bir tablo ekledi ama Supabase'de yok. Supabase → SQL Editor'de docs/supabase-schema.sql dosyasını yeniden çalıştır (tekrar çalıştırmak güvenli). Diğer tablolar senkronlanmaya devam ediyor.",
   "discover.filtersShow": "Filtreleri göster",
   "discover.filtersHide": "Filtreleri gizle",
   "discover.filtersActive": "{count} filtre",
@@ -982,6 +984,8 @@ const en: Record<TrKey, string> = {
   "sync.resetApply": "Change password",
   "sync.resetDone": "Password changed. You can sign in with the new one.",
   "sync.resetLinkBad": "That link looks invalid — make sure you copied all of it.",
+  "sync.schemaOutdated":
+    "Server schema is out of date: the app added a table that Supabase doesn't have yet. Re-run docs/supabase-schema.sql in Supabase → SQL Editor (safe to run again). The other tables keep syncing.",
   "discover.filtersShow": "Show filters",
   "discover.filtersHide": "Hide filters",
   "discover.filtersActive": "{count} filter(s)",
