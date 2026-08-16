@@ -107,3 +107,53 @@ export async function pruneAudioCache(): Promise<void> {
     console.error("[resonance] önbellek budanamadı:", e);
   }
 }
+
+/**
+ * EN ÇOK DİNLENEN N ŞARKIYI otomatik indir (çevrimdışı hazırlık).
+ *
+ * ⚠️ İndirilenler önbellek budamasından MUAF (`downloaded=1`) — yani bu ayar
+ * diski kalıcı doldurur. Bu yüzden varsayılan KAPALI ve seçenekler sınırlı.
+ *
+ * Sıralama `play_history`'den gelir ve o tablo senkronlandığı için "en çok
+ * dinlediklerim" tüm cihazlarda aynıdır → yeni cihaz da doğru şarkıları indirir.
+ */
+export async function autoDownloadTopTracks(
+  download: (t: Track) => Promise<void>
+): Promise<void> {
+  if (!isTauri()) return;
+  const n = useSettingsStore.getState().autoDownloadTop;
+  if (!n || n <= 0) return;
+  try {
+    const db = await getDb();
+    const rows = await db.select<DownloadDbRow[]>(
+      `SELECT t.id, t.source, t.source_id AS sourceId, t.title, t.artist, t.album,
+              t.duration_ms AS durationMs, t.thumbnail, t.added_at AS addedAt
+         FROM play_history h
+         JOIN tracks t ON t.id = h.track_id
+        WHERE t.id NOT IN (SELECT track_id FROM cache WHERE downloaded = 1)
+        GROUP BY t.id
+        ORDER BY SUM(h.ms_played) DESC
+        LIMIT $1`,
+      [n]
+    );
+    if (rows.length === 0) return;
+    console.info(`[resonance] otomatik indirme: ${rows.length} şarkı`);
+    // Sırayla indir — toplu indirme zaten eşzamanlılık sınırlı; arka planda
+    // sessizce ilerlesin, hata olursa sonraki açılışta tekrar denenir.
+    for (const r of rows) {
+      await download({
+        id: r.id,
+        source: r.source as Track["source"],
+        sourceId: r.sourceId,
+        title: r.title,
+        artist: r.artist,
+        album: r.album ?? undefined,
+        durationMs: r.durationMs,
+        thumbnail: r.thumbnail ?? undefined,
+        addedAt: r.addedAt,
+      });
+    }
+  } catch (e) {
+    console.error("[resonance] otomatik indirme başarısız:", e);
+  }
+}

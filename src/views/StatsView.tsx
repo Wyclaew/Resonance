@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BarChart3, Clock, Music2, User } from "lucide-react";
+import { BarChart3, Clock, Music2, User, Sparkles } from "lucide-react";
 import ViewHeader from "../components/ViewHeader";
 import { useT } from "../lib/i18n";
 import { getDb, isTauri } from "../lib/db";
@@ -20,6 +20,7 @@ export default function StatsView() {
   const [tracks, setTracks] = useState<TopRow[]>([]);
   const [byHour, setByHour] = useState<number[]>([]);
   const [recent, setRecent] = useState<DayRow[]>([]);
+  const [newArtists, setNewArtists] = useState(0);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -63,7 +64,25 @@ export default function StatsView() {
           [since]
         );
 
+        // ⭐ "Bu aralıkta KEŞFETTİĞİN sanatçı": aralıkta dinlenmiş ama
+        // aralıktan ÖNCE hiç dinlenmemiş sanatçılar. Wrapped'in özü bu sayı.
+        const fresh = await db.select<{ c: number }[]>(
+          `SELECT COUNT(*) AS c FROM (
+             SELECT t.artist
+               FROM play_history h JOIN tracks t ON t.id = h.track_id
+              WHERE h.played_at >= $1 AND t.artist <> ''
+              GROUP BY t.artist
+             EXCEPT
+             SELECT t.artist
+               FROM play_history h JOIN tracks t ON t.id = h.track_id
+              WHERE h.played_at < $1 AND t.artist <> ''
+              GROUP BY t.artist
+           )`,
+          [since]
+        );
+
         if (!alive) return;
+        setNewArtists(fresh[0]?.c ?? 0);
         setTotalMs(tot[0]?.ms ?? 0);
         setTotalPlays(tot[0]?.c ?? 0);
         setArtists(art);
@@ -125,7 +144,17 @@ export default function StatsView() {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-3 gap-3">
+            {/* Özet cümlesi — sayıların anlamını tek satırda söyler. */}
+            <p className="mb-4 text-sm leading-relaxed text-muted">
+              {t("stats.summary", {
+                hours,
+                plays: totalPlays,
+                artists: newArtists,
+                top: artists[0]?.name ?? "—",
+              })}
+            </p>
+
+            <div className="grid grid-cols-4 gap-3">
               <Stat
                 icon={<Clock size={15} />}
                 value={`${hours} ${t("stats.hoursShort")}`}
@@ -140,6 +169,11 @@ export default function StatsView() {
                 icon={<User size={15} />}
                 value={String(artists.length)}
                 label={t("stats.artists")}
+              />
+              <Stat
+                icon={<Sparkles size={15} />}
+                value={String(newArtists)}
+                label={t("stats.newArtists")}
               />
             </div>
 

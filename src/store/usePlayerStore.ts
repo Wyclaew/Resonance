@@ -51,6 +51,9 @@ interface PlayerState {
   discoverySeedArtists: string[];
   /** Keşfet filtreleri (lib/filters.ts id'leri). Boş = saf öğrenme algoritması. */
   discoveryFilters: string[];
+  /** ⭐ TARZ KİLİDİ: bu tohum sanatçı sabitlenirse yeni partiler ağırlıklı
+   *  ondan beslenir ("bu tarzda devam et"). null = kilit yok. */
+  lockedSeedArtist: string | null;
 
   // Uyku zamanlayıcı
   sleepTimerEndsAt: number | null;
@@ -69,6 +72,7 @@ interface PlayerState {
   startDiscovery: (opts?: { force?: boolean }) => Promise<void>;
   rerollDiscovery: () => Promise<void>;
   setDiscoveryFilters: (ids: string[]) => void;
+  setLockedSeedArtist: (artist: string | null) => void;
   restoreState: (track: Track, positionMs: number) => void;
   restoreDiscovery: (state: DiscoveryResume) => void;
   toggle: () => void;
@@ -458,6 +462,8 @@ export async function prewarmDiscovery() {
     const recs = await getRecommendations({
       playlistId: DISCOVERY_ID,
       filters: usePlayerStore.getState().discoveryFilters,
+      lockedSeedArtist:
+        usePlayerStore.getState().lockedSeedArtist ?? undefined,
       excludeIds: new Set(recommendedThisSession),
       excludeCores: buildExcludeCores(),
       limit: 20,
@@ -517,6 +523,10 @@ async function refillRadio(playAfter = false) {
       // ilerledikçe seçtiğin tür sessizce kaybolurdu.
       filters:
         playlistId === DISCOVERY_ID ? st.discoveryFilters : undefined,
+      lockedSeedArtist:
+        playlistId === DISCOVERY_ID
+          ? st.lockedSeedArtist ?? undefined
+          : undefined,
       excludeIds: exclude,
       excludeCores: buildExcludeCores(),
       limit: needed,
@@ -590,6 +600,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   skippedRecIds: new Set(),
   discoverySeedArtists: [],
   discoveryFilters: [],
+  lockedSeedArtist: null,
   discovering: false,
 
   sleepTimerEndsAt: null,
@@ -685,6 +696,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         recs = await getRecommendations({
           playlistId: DISCOVERY_ID,
           filters: get().discoveryFilters,
+          lockedSeedArtist: get().lockedSeedArtist ?? undefined,
           // Bir önceki partinin seed sanatçılarını dışla → ardışık partiler
           // aynı sanatçı kümesinden beslenmesin ("hep aynı sanatçılar").
           excludeSeedArtists: new Set(
@@ -753,6 +765,12 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   // Filtreleri değiştir. Hazır bekleyen prewarm partisi ESKİ filtrelerle
   // kurulduğu için ÇÖPE ATILIR — yoksa kullanıcı "rock" seçtiğinde önüne
   // filtresiz hazırlanmış eski parti gelirdi.
+  // Tarz kilidi değişince hazır prewarm partisi ESKİ tarzla kurulmuş olur.
+  setLockedSeedArtist: (artist) => {
+    set({ lockedSeedArtist: artist ? artist.toLowerCase() : null });
+    discoveryPrewarm = null;
+  },
+
   setDiscoveryFilters: (ids) => {
     set({ discoveryFilters: ids });
     discoveryPrewarm = null;
@@ -771,6 +789,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       const recs = await getRecommendations({
         playlistId: DISCOVERY_ID,
         filters: get().discoveryFilters,
+        lockedSeedArtist: get().lockedSeedArtist ?? undefined,
         excludeIds: new Set<string>([
           ...get().skippedRecIds,
           ...recommendedThisSession,

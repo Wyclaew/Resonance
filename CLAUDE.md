@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.6.3** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.7.0** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,11 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.7.0'da: **"bu sanatçıyı önerme"** (migration v7 `blocked_artists`, SENKRONLANIR →
+PC'de engellediğin telefonda da gelmez; Ayarlar → Resonance Önerisi'nden geri alınır),
+**tarz kilidi** (`lockedSeedArtist`, tohum ağırlığı ×8), **otomatik çevrimdışı indirme**
+(en çok dinlenen N şarkı; varsayılan KAPALI çünkü indirilenler budamadan muaf),
+istatistiklerde **haftalık özet + "yeni keşfedilen sanatçı"** sayacı.
 v1.6.3'te: **senkronda tablo başına hata yalıtımı** (bulutta `now_playing` yokken
 TÜM senkron duruyordu — tek tablo artık turu iptal etmiyor) + anlaşılır
 "şemayı yeniden çalıştır" mesajı + `scripts/sync-schema-check.py`;
@@ -111,7 +116,8 @@ sonra `cd src-tauri && cargo check --target x86_64-pc-windows-gnu`. Bitince saht
 - **DB tabloları:** tracks, playlists, playlist_tracks(+vote), votes (olay günlüğü), play_history,
   cache(+downloaded), settings, **recommendation_history**, **sync_state**.
   Migration'lar: v1 ilk şema, v2 downloaded,
-  v3 current_vote, v4 recommendation_history, **v5 senkron iskeleti**, **v6 now_playing**.
+  v3 current_vote, v4 recommendation_history, **v5 senkron iskeleti**, **v6 now_playing**,
+  **v7 blocked_artists**.
 
 ## Öneri motoru (`src/lib/recommender.ts`) — nasıl çalışır
 Tüm sinyaller tek skorda birleşir:

@@ -11,7 +11,7 @@ import WindowControls from "./components/WindowControls";
 import Toasts from "./components/Toasts";
 import { getDb, isTauri } from "./lib/db";
 import { onRemoteApplied, startSync } from "./lib/sync/engine";
-import { pruneAudioCache } from "./lib/library";
+import { autoDownloadTopTracks, pruneAudioCache } from "./lib/library";
 import {
   initPlayer,
   usePlayerStore,
@@ -179,6 +179,11 @@ export default function App() {
             void pruneAudioCache();
             // Ses kalitesi tercihini indirme motoruna bildir (Rust global).
             invoke("set_audio_quality", { quality: s.audioQuality }).catch(() => {});
+            // Çevrimdışı hazırlık: en çok dinlenenleri arka planda indir.
+            // Budamadan SONRA çağrılır — önce yer açılsın, sonra doldurulsun.
+            void autoDownloadTopTracks((tr) =>
+              useLibraryStore.getState().download(tr)
+            );
           });
         // Veri varsa otomatik yedek al (kazara kayba karşı güvenlik ağı).
         const hasData =

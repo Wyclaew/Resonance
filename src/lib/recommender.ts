@@ -10,6 +10,7 @@ import { isProbeCandidate, moodMultiplier } from "./mood";
 import { queriesFor } from "./filters";
 import { buildTasteProfile, tasteBoost } from "./taste";
 import { acceptanceBoost, buildAcceptance } from "./acceptance";
+import { isBlocked, loadBlockedArtists } from "./blocked";
 
 // Resonance öneri motoru (M4).
 // "Hangi gün/saat hangi şarkıya oy verdin" sinyalinden sanatçı yakınlığı
@@ -272,6 +273,8 @@ export interface RecommendOpts {
    * Boş/undefined → filtre yok, saf öğrenme algoritması çalışır.
    */
   filters?: string[];
+  /** Tarz kilidi: bu sanatçının tohum olma ağırlığı çok yükseltilir. */
+  lockedSeedArtist?: string;
 }
 
 // Önerilen parçaları kalıcı geçmişe yaz (45 gün tekrar önlenir).
@@ -328,7 +331,7 @@ async function computeRecommendations(
   // Favori dönüşü için: her parçanın ŞU ANKİ gün/saate en iyi uyumu (0..1).
   const trackContext = new Map<string, number>();
   // Öğrenme katmanlarını tazele (10 dk'da bir; ikisi de tek sorgu).
-  await Promise.all([buildTasteProfile(), buildAcceptance()]);
+  await Promise.all([buildTasteProfile(), buildAcceptance(), loadBlockedArtists()]);
 
   const bumpContext = (id: string, m: number) =>
     trackContext.set(id, Math.max(trackContext.get(id) ?? 0, m));
@@ -586,7 +589,9 @@ async function computeRecommendations(
     // tarzlar öne çıkar, hemen geçtiklerin geriler (taban 0.35 → hiçbiri
     // tamamen ölmez, yoksa keşif kapanır). Bkz. lib/mood.ts.
     const pool = [...bestPerArtist.values()].filter(
-      (x) => !opts.excludeSeedArtists?.has(x.t.artist.toLowerCase())
+      (x) =>
+        !opts.excludeSeedArtists?.has(x.t.artist.toLowerCase()) &&
+        !isBlocked(x.t.artist) // "bu sanatçıyı önerme"
     );
     const sampleWeighted = (
       items: typeof pool,
@@ -609,8 +614,15 @@ async function computeRecommendations(
     //   acceptanceBoost → ÖNERİNCE TUTUYOR MU (lib/acceptance.ts) — listende
     //                     olup da radyodan gelince hep geçtiğin sanatçıyı
     //                     geriletir; diğer üç katmanın göremediği tek şey bu.
-    const seedWeight = (a: string) =>
-      moodMultiplier(a) * tasteBoost(a) * acceptanceBoost(a);
+    const seedWeight = (a: string) => {
+      const base = moodMultiplier(a) * tasteBoost(a) * acceptanceBoost(a);
+      // Tarz kilidi: kilitli sanatçı neredeyse kesin seçilsin (×8), ama diğer
+      // katmanlar tamamen susturulmasın — çeşitlilik bir miktar kalsın.
+      return opts.lockedSeedArtist &&
+        a.toLowerCase() === opts.lockedSeedArtist.toLowerCase()
+        ? base * 8
+        : base;
+    };
 
     const moodSeeds = sampleWeighted(pool, 12, (x) => x.score * seedWeight(x.t.artist));
 
@@ -761,6 +773,8 @@ async function computeRecommendations(
           if (playlistKeys.has(normKey(r.title, r.artist))) continue;
           if (takenCores.has(songCore(r.title, r.artist))) continue; // versiyon kopyası
           if (!isLikelySong(r)) continue; // radyoda da nadiren uzun içerik çıkar
+          // Engellenen sanatçı: tohum olmasa bile radyodan gelebilir → ele.
+          if (isBlocked(effectiveArtist(r))) continue;
           // Parti başına SANATÇI BAŞINA 1 PARÇA (eskiden 2'ydi; kullanıcı
           // "2 sanatçıdan 4 şarkı geldi" dedi). effectiveArtist: YT Music liste
           // girdilerinde artist alanı KANAL adıdır, gerçek sanatçı başlıkta.

@@ -27,6 +27,8 @@ export interface Settings {
   audioQuality: "high" | "medium" | "low";
   /** Profil avatarı (data URI). YERELDE kalır — settings senkronlanmıyor. */
   avatarDataUrl: string;
+  /** En çok dinlenen kaç şarkı otomatik indirilsin (çevrimdışı). 0 = kapalı. */
+  autoDownloadTop: number;
   resumeState: string; // son çalan şarkı + pozisyon (JSON) — kaldığın yerden devam
   language: Lang; // arayüz dili ("tr" | "en")
   theme: Theme; // "dark" | "light" | "system"
@@ -50,6 +52,7 @@ const DEFAULTS: Settings = {
   cacheLimitGb: 2,
   audioQuality: "high" as "high" | "medium" | "low",
   avatarDataUrl: "",
+  autoDownloadTop: 0,
   resumeState: "",
   language: detectLang(),
   theme: "system", // sistem tercihini izle (kullanıcının isteği)
@@ -74,6 +77,7 @@ const KEYS: Record<keyof Settings, string> = {
   cacheLimitGb: "storage.cacheLimitGb",
   audioQuality: "storage.audioQuality",
   avatarDataUrl: "profile.avatarDataUrl",
+  autoDownloadTop: "storage.autoDownloadTop",
   resumeState: "playback.resumeState",
   language: "appearance.language",
   theme: "appearance.theme",

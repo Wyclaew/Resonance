@@ -100,6 +100,14 @@ const TABLES: TableSpec[] = [
     ],
   },
   {
+    // "Bu sanatçıyı önerme" — anahtar sanatçı ADI (cihazdan bağımsız) →
+    // iki cihaz aynı sanatçıyı engellese tek satırda birleşir.
+    name: "blocked_artists",
+    conflict: "artist",
+    cloudConflict: "user_id,artist",
+    cols: ["artist", "created_at", "updated_at", "deleted", "device_id"],
+  },
+  {
     name: "recommendation_history",
     conflict: "uid",
     cloudConflict: "user_id,uid",
@@ -527,6 +535,7 @@ export async function firstSyncPullReplace(): Promise<void> {
   await db.execute(`DELETE FROM play_history`);
   await db.execute(`DELETE FROM recommendation_history`);
   await db.execute(`DELETE FROM now_playing`);
+  await db.execute(`DELETE FROM blocked_artists`);
   // Her şeyi baştan çek; push terazisini de sıfırla ki yerelde KALAN
   // (silinmemiş) tracks satırları da buluta gitsin.
   for (const spec of TABLES) {

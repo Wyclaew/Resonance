@@ -9,6 +9,7 @@ import {
   Brain,
   Info,
   ChevronDown,
+  X,
 
   Trash2,
   Download,
@@ -31,6 +32,7 @@ import { usePlaylistStore } from "../store/usePlaylistStore";
 import { getDb, isTauri } from "../lib/db";
 import { formatBytes } from "../lib/format";
 import { importBackup, type ImportResult } from "../lib/backup";
+import { loadBlockedArtists, unblockArtist } from "../lib/blocked";
 
 // label yerine çeviri ANAHTARI — dil değişince kategori adları da değişsin.
 const categories = [
@@ -73,6 +75,41 @@ function SettingRow({
       </div>
       <div className="shrink-0">{children}</div>
     </div>
+  );
+}
+
+// Engellenen sanatçılar — "bu sanatçıyı önerme" dediklerini geri alabilmek
+// için tek yer. Liste senkronlanır (blocked_artists tablosu).
+function BlockedArtists() {
+  const t = useT();
+  const [list, setList] = useState<string[]>([]);
+  useEffect(() => {
+    void loadBlockedArtists(true).then((s) => setList([...s].sort()));
+  }, []);
+  if (list.length === 0) return null;
+  return (
+    <>
+      <div className="mt-6 mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">
+        {t("settings.blockedHeader")}
+      </div>
+      <p className="mb-2 text-xs text-muted">{t("settings.blockedDesc")}</p>
+      <div className="flex flex-wrap gap-1.5">
+        {list.map((a) => (
+          <button
+            key={a}
+            onClick={async () => {
+              await unblockArtist(a);
+              setList((l) => l.filter((x) => x !== a));
+            }}
+            title={t("settings.unblock")}
+            className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:border-down hover:text-down"
+          >
+            {a}
+            <X size={11} />
+          </button>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -155,6 +192,8 @@ function AlgorithmSettings() {
           <span className="text-xs text-muted">{t("settings.days")}</span>
         </div>
       </SettingRow>
+
+      <BlockedArtists />
     </div>
   );
 }
@@ -343,6 +382,7 @@ function StorageSettings() {
   const [cleared, setCleared] = useState<string | null>(null);
   const cacheLimitGb = useSettingsStore((st) => st.cacheLimitGb);
   const audioQuality = useSettingsStore((st) => st.audioQuality);
+  const autoDownloadTop = useSettingsStore((st) => st.autoDownloadTop);
   const updateSetting = useSettingsStore((st) => st.update);
 
   async function load() {
@@ -412,6 +452,24 @@ function StorageSettings() {
           <option value="high">{t("settings.qualityHigh")}</option>
           <option value="medium">{t("settings.qualityMedium")}</option>
           <option value="low">{t("settings.qualityLow")}</option>
+        </select>
+      </SettingRow>
+      <SettingRow
+        label={t("settings.autoDownload")}
+        description={t("settings.autoDownloadDesc")}
+      >
+        <select
+          value={autoDownloadTop}
+          onChange={(e) =>
+            updateSetting("autoDownloadTop", Number(e.target.value))
+          }
+          className="rounded-md border border-border bg-surface px-2 py-1.5 text-sm"
+        >
+          {[0, 20, 50, 100].map((n) => (
+            <option key={n} value={n}>
+              {n === 0 ? t("settings.off") : t("settings.topN", { n })}
+            </option>
+          ))}
         </select>
       </SettingRow>
       <SettingRow

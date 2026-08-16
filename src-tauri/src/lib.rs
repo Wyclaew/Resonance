@@ -226,6 +226,28 @@ fn migrations() -> Vec<Migration> {
                   );
                   CREATE INDEX IF NOT EXISTS idx_np_upd ON now_playing(updated_at);",
         },
+        Migration {
+            version: 7,
+            description: "blocked_artists",
+            kind: MigrationKind::Up,
+            // ⭐ "Bu sanatçıyı bir daha önerme" (v1.7.0).
+            //
+            // Eskiden olumsuz sinyal yalnız DOLAYLIYDI (geçersen yakınlık
+            // düşer). Açık bir "istemiyorum" yoktu; sevmediğin bir sanatçı
+            // yeterince güçlü sinyale sahipse dönüp duruyordu.
+            //
+            // ⚠️ ANAHTAR = SANATÇI ADI (küçük harf), uid DEĞİL. Ad cihazdan
+            // bağımsız olduğu için iki cihaz aynı sanatçıyı engellese bile
+            // TEK satırda birleşir — olay günlüklerindeki uid derdi burada yok.
+            sql: "CREATE TABLE IF NOT EXISTS blocked_artists (
+                    artist     TEXT PRIMARY KEY,   -- küçük harf
+                    created_at INTEGER NOT NULL DEFAULT 0,
+                    updated_at INTEGER NOT NULL DEFAULT 0,
+                    deleted    INTEGER NOT NULL DEFAULT 0,
+                    device_id  TEXT
+                  );
+                  CREATE INDEX IF NOT EXISTS idx_blocked_upd ON blocked_artists(updated_at);",
+        },
     ]
 }
 

@@ -9,6 +9,9 @@ import {
   FlaskConical,
   ChevronDown,
   SlidersHorizontal,
+  Ban,
+  Lock,
+  Unlock,
 } from "lucide-react";
 import ViewHeader from "../components/ViewHeader";
 import { useT } from "../lib/i18n";
@@ -18,6 +21,8 @@ import { useSettingsStore } from "../store/useSettingsStore";
 import { DISCOVERY_FILTERS } from "../lib/filters";
 import { formatMs } from "../lib/format";
 import { topStyles } from "../lib/mood";
+import { blockArtist } from "../lib/blocked";
+import { useToastStore } from "../store/useToastStore";
 
 // Keşfet — kendi SAYFASI (eskiden sıra panelinin içindeydi, sağ üstte çarpı
 // vardı). Sayfa olunca: filtreler, mod bilgisi ve tüm kuyruk aynı yerde durur,
@@ -37,6 +42,23 @@ export default function DiscoverView() {
   const startDiscovery = usePlayerStore((s) => s.startDiscovery);
   const jumpTo = usePlayerStore((s) => s.jumpTo);
   const toggle = usePlayerStore((s) => s.toggle);
+  const locked = usePlayerStore((s) => s.lockedSeedArtist);
+  const setLocked = usePlayerStore((s) => s.setLockedSeedArtist);
+  const removeFromQueue = usePlayerStore((s) => s.removeFromQueue);
+  const toast = useToastStore((s) => s.show);
+
+  // "Bu sanatçıyı önerme": engelle + kuyruktaki diğer parçalarını da temizle
+  // (yoksa engelledikten sonra sırada duran şarkıları yine çalardı).
+  const block = async (artist: string) => {
+    await blockArtist(artist);
+    const st = usePlayerStore.getState();
+    for (const it of st.queue.slice(st.queueIndex + 1)) {
+      if (it.artist.toLowerCase() === artist.toLowerCase()) {
+        removeFromQueue(it.uid);
+      }
+    }
+    toast(t("discover.blocked", { artist }), "info");
+  };
 
   // Seçim yerelde tutulur; "Yeni keşif"e basılınca uygulanır. Böylece her
   // tıklamada yeni bir parti kurulmaz (her parti ~6 radyo çağrısı demek).
@@ -218,6 +240,36 @@ export default function DiscoverView() {
                   </div>
                 )}
               </div>
+              {current.seedArtist && (
+                <button
+                  onClick={() =>
+                    setLocked(
+                      locked === current.seedArtist!.toLowerCase()
+                        ? null
+                        : current.seedArtist!
+                    )
+                  }
+                  title={t("discover.lockHint")}
+                  className={`grid h-9 w-9 shrink-0 place-items-center rounded-full border transition-colors ${
+                    locked === current.seedArtist.toLowerCase()
+                      ? "border-accent bg-accent/15 text-accent"
+                      : "border-border text-muted hover:text-text"
+                  }`}
+                >
+                  {locked === current.seedArtist.toLowerCase() ? (
+                    <Lock size={15} />
+                  ) : (
+                    <Unlock size={15} />
+                  )}
+                </button>
+              )}
+              <button
+                onClick={() => void block(current.artist)}
+                title={t("discover.blockHint")}
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-border text-muted transition-colors hover:border-down hover:text-down"
+              >
+                <Ban size={15} />
+              </button>
               <button
                 onClick={toggle}
                 className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-text text-bg transition-transform hover:scale-105"
@@ -231,6 +283,18 @@ export default function DiscoverView() {
               </button>
             </div>
 
+            {locked && (
+              <p className="mt-3 flex items-center gap-1.5 text-xs text-accent">
+                <Lock size={11} />
+                {t("discover.lockedOn", { artist: locked })}
+                <button
+                  onClick={() => setLocked(null)}
+                  className="underline underline-offset-2 hover:text-text"
+                >
+                  {t("discover.unlock")}
+                </button>
+              </p>
+            )}
             {mood.length > 0 && (
               <p className="mt-3 text-xs text-faint">
                 {t("discover.moodNow", { styles: mood.join(", ") })}

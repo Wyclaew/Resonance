@@ -124,6 +124,17 @@ create table if not exists public.now_playing (
   primary key (user_id, device_id)
 );
 
+create table if not exists public.blocked_artists (
+  user_id    uuid not null default auth.uid(),
+  artist     text not null,
+  created_at bigint not null default 0,
+  updated_at bigint not null default 0,
+  deleted    smallint not null default 0,
+  device_id  text,
+  synced_at  timestamptz not null default now(),
+  primary key (user_id, artist)
+);
+
 -- ── synced_at trigger'ı (sunucu saati) ────────────────────────────────────
 
 create or replace function public.touch_synced_at()
@@ -141,7 +152,8 @@ declare tbl text;
 begin
   foreach tbl in array array[
     'tracks','playlists','playlist_tracks',
-    'votes','play_history','recommendation_history','now_playing'
+    'votes','play_history','recommendation_history','now_playing',
+    'blocked_artists'
   ] loop
     execute format('drop trigger if exists trg_touch_%1$s on public.%1$I', tbl);
     execute format(
@@ -159,6 +171,7 @@ create index if not exists idx_votes_sync    on public.votes(user_id, synced_at)
 create index if not exists idx_hist_sync     on public.play_history(user_id, synced_at);
 create index if not exists idx_rechist_sync  on public.recommendation_history(user_id, synced_at);
 create index if not exists idx_np_sync       on public.now_playing(user_id, synced_at);
+create index if not exists idx_blocked_sync  on public.blocked_artists(user_id, synced_at);
 
 -- ── RLS: herkes yalnız KENDİ satırını görür/yazar ─────────────────────────
 
@@ -167,7 +180,8 @@ declare tbl text;
 begin
   foreach tbl in array array[
     'tracks','playlists','playlist_tracks',
-    'votes','play_history','recommendation_history','now_playing'
+    'votes','play_history','recommendation_history','now_playing',
+    'blocked_artists'
   ] loop
     execute format('alter table public.%I enable row level security', tbl);
 
@@ -200,7 +214,8 @@ declare tbl text;
 begin
   foreach tbl in array array[
     'tracks','playlists','playlist_tracks',
-    'votes','play_history','recommendation_history','now_playing'
+    'votes','play_history','recommendation_history','now_playing',
+    'blocked_artists'
   ] loop
     -- Zaten ekliyse hata verir; yoksay.
     begin

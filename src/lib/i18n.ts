@@ -107,6 +107,11 @@ const tr = {
   "discover.start": "Keşfi başlat",
   "discover.preparing": "Keşif hazırlanıyor…",
   "discover.moodNow": "Şu anki modun: {styles}",
+  "discover.blockHint": "Bu sanatçıyı bir daha önerme",
+  "discover.blocked": "{artist} artık önerilmeyecek",
+  "discover.lockHint": "Bu tarzda devam et (tarz kilidi)",
+  "discover.lockedOn": "Tarz kilidi: {artist}",
+  "discover.unlock": "kaldır",
 
   // — Keşfet filtreleri
   "filter.calm": "Sakin",
@@ -125,6 +130,13 @@ const tr = {
   "filter.metal": "Metal",
   "filter.acoustic": "Akustik",
   "filter.classical": "Klasik",
+  "settings.blockedHeader": "Engellenen sanatçılar",
+  "settings.blockedDesc": "Keşfette \"önerme\" dediklerin. Kaldırmak için tıkla.",
+  "settings.unblock": "Engeli kaldır",
+  "settings.autoDownload": "Otomatik çevrimdışı indirme",
+  "settings.autoDownloadDesc":
+    "En çok dinlediğin şarkılar açılışta arka planda indirilir → internet yokken hazır. İndirilenler önbellek sınırından MUAFTIR, yani diski kalıcı doldurur.",
+  "settings.topN": "En çok {n} şarkı",
   "settings.audioQuality": "Ses kalitesi",
   "settings.audioQualityDesc":
     "YouTube yalnız iki kademe sunuyor: ~130 kbps ve ~49 kbps. Orta seçeneği bunun arasını ffmpeg ile yeniden kodlayarak üretir (~%26 küçülme, çift kodlama nedeniyle bir tık kalite kaybı). Değişiklik yalnız YENİ indirilenlere uygulanır.",
@@ -169,6 +181,9 @@ const tr = {
   "stats.hoursShort": "saat",
   "stats.plays": "çalma",
   "stats.artists": "sanatçı",
+  "stats.newArtists": "yeni sanatçı",
+  "stats.summary":
+    "Bu aralıkta {hours} saat müzik dinledin, {plays} çalma yaptın ve {artists} yeni sanatçı keşfettin. En çok dinlediğin: {top}.",
   "stats.byHour": "Saate göre dağılım",
   "stats.topArtists": "En çok dinlenen sanatçılar",
   "stats.topTracks": "En çok dinlenen şarkılar",
@@ -649,6 +664,11 @@ const en: Record<TrKey, string> = {
   "discover.start": "Start discovery",
   "discover.preparing": "Preparing discovery…",
   "discover.moodNow": "Your mood right now: {styles}",
+  "discover.blockHint": "Never recommend this artist again",
+  "discover.blocked": "{artist} won't be recommended anymore",
+  "discover.lockHint": "Keep this style coming (style lock)",
+  "discover.lockedOn": "Style locked: {artist}",
+  "discover.unlock": "remove",
 
   "filter.calm": "Calm",
   "filter.energetic": "Energetic",
@@ -666,6 +686,13 @@ const en: Record<TrKey, string> = {
   "filter.metal": "Metal",
   "filter.acoustic": "Acoustic",
   "filter.classical": "Classical",
+  "settings.blockedHeader": "Blocked artists",
+  "settings.blockedDesc": "Artists you told Discover not to recommend. Click to unblock.",
+  "settings.unblock": "Unblock",
+  "settings.autoDownload": "Auto offline downloads",
+  "settings.autoDownloadDesc":
+    "Your most-played tracks are downloaded in the background at startup, so they're ready offline. Downloads are EXEMPT from the cache limit, so this fills disk permanently.",
+  "settings.topN": "Top {n} tracks",
   "settings.audioQuality": "Audio quality",
   "settings.audioQualityDesc":
     "YouTube only offers two tiers: ~130 kbps and ~49 kbps. Medium re-encodes to fill the gap (~26% smaller, slightly lossier because it's a second encode). Only applies to NEW downloads.",
@@ -709,6 +736,9 @@ const en: Record<TrKey, string> = {
   "stats.hoursShort": "h",
   "stats.plays": "plays",
   "stats.artists": "artists",
+  "stats.newArtists": "new artists",
+  "stats.summary":
+    "In this range you listened for {hours} hours across {plays} plays and discovered {artists} new artists. Most played: {top}.",
   "stats.byHour": "By hour of day",
   "stats.topArtists": "Top artists",
   "stats.topTracks": "Top tracks",
