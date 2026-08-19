@@ -11,6 +11,9 @@ import { queriesFor } from "./filters";
 import { buildTasteProfile, tasteBoost } from "./taste";
 import { acceptanceBoost, buildAcceptance } from "./acceptance";
 import { isBlocked, loadBlockedArtists } from "./blocked";
+import { loadArtistPrefs, prefWeight } from "./prefs";
+import { loadGraph, neighborSeeds, noteRadioResults } from "./graph";
+import { noteGenrePool } from "./tags";
 
 // Resonance öneri motoru (M4).
 // "Hangi gün/saat hangi şarkıya oy verdin" sinyalinden sanatçı yakınlığı
@@ -308,15 +311,39 @@ export async function getRecommendations(
   return recs;
 }
 
-async function computeRecommendations(
-  opts: RecommendOpts
-): Promise<Recommendation[]> {
-  if (!isTauri()) return [];
+/** Kalıcı öğrenme sinyalleri — tek geçişte kurulur. */
+export interface Signals {
+  /** "KİMİ seviyorum" → hangi radyoları açacağımızı seçer. */
+  artistAffinity: Map<string, number>;
+  /** "HANGİ PARÇAYI seviyorum" → yalnız favori dönüşünde kullanılır. */
+  trackKarma: Map<string, number>;
+  /** Parçanın ŞU ANKİ gün/saate en iyi uyumu (0..1). */
+  trackContext: Map<string, number>;
+}
+
+/**
+ * Oy + playlist üyeliği + dinleme davranışından sinyal haritalarını kurar.
+ *
+ * ⭐ AYRI FONKSİYON (v1.8.0): eskiden computeRecommendations'ın içindeydi.
+ * Zevk Profili sayfası (TasteView) modelin öğrendiğini GÖSTERİYOR; aynı
+ * hesabı kopyalasaydı iki kod yolu kaçınılmaz olarak birbirinden sapardı ve
+ * ekranda gösterilen model, öneriyi üreten model olmazdı.
+ */
+export async function buildSignals(
+  halfLifeDays: number,
+  curHour: number = new Date().getHours(),
+  curDow: number = new Date().getDay()
+): Promise<Signals> {
+  if (!isTauri()) {
+    return {
+      artistAffinity: new Map(),
+      trackKarma: new Map(),
+      trackContext: new Map(),
+    };
+  }
   const db = await getDb();
   const now = Date.now();
-  const d = new Date();
-  const curHour = d.getHours();
-  const curDow = d.getDay();
+  const opts = { halfLifeDays };
 
   // --- SİNYAL KATMANLARI ---
   // İki ayrı harita, BİLEREK farklı besleniyor (bu ayrım kritik):
@@ -330,8 +357,6 @@ async function computeRecommendations(
   const trackKarma = new Map<string, number>();
   // Favori dönüşü için: her parçanın ŞU ANKİ gün/saate en iyi uyumu (0..1).
   const trackContext = new Map<string, number>();
-  // Öğrenme katmanlarını tazele (10 dk'da bir; ikisi de tek sorgu).
-  await Promise.all([buildTasteProfile(), buildAcceptance(), loadBlockedArtists()]);
 
   const bumpContext = (id: string, m: number) =>
     trackContext.set(id, Math.max(trackContext.get(id) ?? 0, m));
@@ -400,9 +425,34 @@ async function computeRecommendations(
               t.artist, t.duration_ms
        FROM play_history h JOIN tracks t ON t.id = h.track_id`
     );
+    // ⭐ TEKRAR DİNLEME (v1.8.0) — model bunu HİÇ GÖRMÜYORDU.
+    // Her dinleme ayrı satır olarak aynı +0.4'ü veriyordu; yani "bu şarkıyı
+    // bugün üç kez üst üste dinledim" ile "üç ayrı gün birer kez dinledim"
+    // model için AYNIYDI. Oysa aynı gün tekrar tekrar dinlemek, elde olan en
+    // güçlü pozitif sinyallerden biridir (oy vermekten bile samimi).
+    // parça → gün → { kaç kez tamamlandı, o günkü son dinleme }
+    const repeats = new Map<
+      string,
+      Map<number, { count: number; lastAt: number; artist: string }>
+    >();
+    const DAY_MS = 24 * 3600 * 1000;
+
     for (const p of plays) {
       const ratio =
         p.duration_ms > 0 ? Math.min(1, p.ms_played / p.duration_ms) : 0;
+      if (ratio > 0.7) {
+        const day = Math.floor(p.played_at / DAY_MS);
+        const perDay = repeats.get(p.track_id) ?? new Map();
+        const info = perDay.get(day) ?? {
+          count: 0,
+          lastAt: 0,
+          artist: p.artist,
+        };
+        info.count += 1;
+        info.lastAt = Math.max(info.lastAt, p.played_at);
+        perDay.set(day, info);
+        repeats.set(p.track_id, perDay);
+      }
       // Kademeli sinyal (kaba "beğendi/atladı"dan daha ince):
       //  • < 5 sn çalındı → çok hızlı geçildi, güçlü olumsuz (−0.35)
       //  • oran < %15 → atlama, olumsuz (−0.25)
@@ -431,9 +481,54 @@ async function computeRecommendations(
         bumpContext(p.track_id, contextMatch(p.hour, p.dow, curHour, curDow));
       }
     }
+
+    // Tekrarları puana çevir. İlk tam dinleme yukarıda zaten sayıldı; buradaki
+    // yalnız EK dinlemelerdir. Üst sınır 3: "tek şarkı döngüsünde açık unuttum"
+    // durumu bütün zevk profilini tek parçaya kilitlemesin.
+    const REPEAT_BONUS = 0.3;
+    for (const [trackId, perDay] of repeats) {
+      for (const info of perDay.values()) {
+        const extra = Math.min(3, info.count - 1);
+        if (extra <= 0) continue;
+        const w =
+          REPEAT_BONUS * extra * decayWeight(now - info.lastAt, opts.halfLifeDays);
+        trackKarma.set(trackId, (trackKarma.get(trackId) ?? 0) + w);
+        artistAffinity.set(
+          info.artist,
+          (artistAffinity.get(info.artist) ?? 0) + w
+        );
+      }
+    }
   } catch {
     /* play_history yoksa yoksay */
   }
+
+  return { artistAffinity, trackKarma, trackContext };
+}
+
+async function computeRecommendations(
+  opts: RecommendOpts
+): Promise<Recommendation[]> {
+  if (!isTauri()) return [];
+  const db = await getDb();
+  const now = Date.now();
+  const d = new Date();
+  const curHour = d.getHours();
+  const curDow = d.getDay();
+
+  // Öğrenme katmanlarını tazele (her biri kendi içinde 10 dk önbellekli).
+  await Promise.all([
+    buildTasteProfile(),
+    buildAcceptance(),
+    loadBlockedArtists(),
+    loadArtistPrefs(),
+    loadGraph(),
+  ]);
+  const { artistAffinity, trackKarma, trackContext } = await buildSignals(
+    opts.halfLifeDays,
+    curHour,
+    curDow
+  );
 
   const recs: Recommendation[] = [];
   // SERT dışlama: bu oturumda/kuyrukta zaten var → asla tekrar.
@@ -614,8 +709,12 @@ async function computeRecommendations(
     //   acceptanceBoost → ÖNERİNCE TUTUYOR MU (lib/acceptance.ts) — listende
     //                     olup da radyodan gelince hep geçtiğin sanatçıyı
     //                     geriletir; diğer üç katmanın göremediği tek şey bu.
+    //   prefWeight      → KULLANICININ ELLE KARARI (lib/prefs.ts). Diğer dördü
+    //                     davranıştan çıkarım yapar; bu, doğrudan söylenmiş
+    //                     olandır → en son çarpan, hepsini ezebilir.
     const seedWeight = (a: string) => {
-      const base = moodMultiplier(a) * tasteBoost(a) * acceptanceBoost(a);
+      const base =
+        moodMultiplier(a) * tasteBoost(a) * acceptanceBoost(a) * prefWeight(a);
       // Tarz kilidi: kilitli sanatçı neredeyse kesin seçilsin (×8), ama diğer
       // katmanlar tamamen susturulmasın — çeşitlilik bir miktar kalsın.
       return opts.lockedSeedArtist &&
@@ -675,8 +774,31 @@ async function computeRecommendations(
       }
     } else {
       // FİLTRESİZ: saf öğrenme + mod.
-      for (const t of moodSeeds.slice(0, 5)) {
+      for (const t of moodSeeds.slice(0, 4)) {
         pushSeed({ sourceId: t.source_id, artist: t.artist });
+      }
+
+      // ⭐ KOMŞU TOHUMU (v1.8.0, lib/graph.ts): sevdiğin sanatçının radyosunda
+      // sık çıkan ama SENDE HİÇ SİNYALİ OLMAYAN sanatçı.
+      //
+      // Neden gerekli: yukarıdaki `pool` yalnızca `tracks` tablosunda parçası
+      // OLAN ve puanı > 0 sanatçılardan kuruluyor → model ancak zaten tanıdığı
+      // sanatçıların radyosunu açabiliyordu. Havuzu kütüphanenin dışına taşıyan
+      // tek yol bu. Tohum videosu grafikteki `sample_id`'den gelir.
+      const nbExclude = new Set(seenSeedArtist);
+      for (const a of opts.excludeSeedArtists ?? []) nbExclude.add(a);
+      const nbPicked = neighborSeeds(artistAffinity, nbExclude)
+        .slice(0, 30)
+        .map((n) => ({
+          n,
+          key: -Math.log(Math.random() || 1e-9) / Math.max(0.02, n.score),
+        }))
+        .sort((a, b) => a.key - b.key)[0];
+      if (nbPicked) {
+        pushSeed({
+          sourceId: nbPicked.n.sourceId,
+          artist: nbPicked.n.artist,
+        });
       }
       // ⭐ PROB: modu ölçülmemiş bir tarzdan tohum ekle → "modun değişti mi?"
       // testi. Bundan gelen parçalar isProbe işaretlenir; kullanıcı bunları
@@ -730,6 +852,15 @@ async function computeRecommendations(
         })
       );
       radios.push(...wave);
+      // ⭐ Grafiği besle: kuyruğa yalnız 3-4 parça giriyor, geri kalan ~46
+      // sonuç şimdiye kadar ÇÖPE GİDİYORDU. "Bu radyoda şu sanatçı çıktı"
+      // bilgisi bir benzerlik kenarıdır (lib/graph.ts). Beklemiyoruz —
+      // öneri gecikmesine eklenmesin; hatası kendi içinde yutuluyor.
+      for (const r of wave) {
+        if (r.seed.sourceId && r.results.length > 0) {
+          void noteRadioResults(r.seed.artist, r.results);
+        }
+      }
     }
 
     // ⭐ Tür havuzunu İKİ sahte radyo olarak ekle. Round-robin her kaynaktan
@@ -861,6 +992,10 @@ async function genrePoolFor(filterIds: string[]): Promise<Track[]> {
       out.push(t);
     }
   }
+  // ⭐ Havuzdaki sanatçıları filtre kimlikleriyle etiketle (lib/tags.ts):
+  // veritabanında tür alanı olmadığı için sanatçı → "sakin/rock" eşlemesinin
+  // TEK kaynağı bu havuz. Beklemiyoruz, öneri gecikmesine eklenmesin.
+  void noteGenrePool(filterIds, out);
   return out;
 }
 

@@ -152,3 +152,23 @@ cihaza özel şeyler içeriyor; seçmeli senkron ileride eklenebilir.
 - **Mobil (Android)** — aynı şema + aynı motor mantığı (`docs/MOBILE.md`).
 - Seçmeli ayar senkronu (tema/dil) — şu an kapsam dışı.
 - Web (opsiyonel): iframe player + aynı Supabase.
+
+## v1.8.0 — yeni tablolar ve sıklık değişikliği
+
+| Tablo | Senkron | Neden |
+| --- | --- | --- |
+| `artist_prefs` | ✅ | "Daha çok / daha az öner" — kullanıcı KARARI (türetilmiş veri değil). Anahtar sanatçı adı → cihazdan bağımsız birleşir. |
+| `settings` | ✅ **seçmeli** | Yalnız `SYNCED_SETTING_KEYS` beyaz listesi (tema, dil, vurgu, öneri ayarları, kalite, ön yükleme, ses eşitleme). ⛔ Dışarıda: `playback.resumeState`, `playback.savedVolume`, `profile.avatarDataUrl`, `yt.cookiesBrowser`, `spotify.*`, `app.onboardingDone`. |
+| `device_queue` | ✅ | Cihaz başına TÜM kuyruk (Keşfet partisi dahil). `now_playing` yalnız tek parça taşıyordu → "Windows'taki Keşfet Mac'e gelmedi" sorunu buydu. |
+| `artist_edges` | ⛔ | SAYAÇ. LWW iki cihazın saydığını ezer, toplam kaybolur. Veri bedava yeniden üretilir (her radyo çağrısı). |
+| `artist_tags` | ⛔ | Aynı gerekçe (sayaç). |
+| `track_loudness` | ⛔ | Dosyadan türer; her cihaz kendi indirdiğini saniyeler içinde ölçer. |
+
+**Sıklık (v1.8.0'da değişti):** yerel değişiklik → 8 sn debounce + **yalnız
+PUSH**; realtime bildirimi → 4 sn debounce + **yalnız PULL**; tam tur yalnız
+periyodik (10 dk), açılış ve pencere odağında. Eskiden her yerel değişiklik tam
+tur atıyordu ve pull tarafı tablo başına bir istek yaptığı için bir şarkı
+dinlemek bile 10+ gereksiz istek üretiyordu.
+
+⚠️ **Yeni tablo eklenince `docs/supabase-schema.sql` YENİDEN çalıştırılmalı.**
+`scripts/sync-schema-check.py` sapmayı önceden yakalar.

@@ -4,6 +4,7 @@ import ViewHeader from "../components/ViewHeader";
 import { useT } from "../lib/i18n";
 import { getDb, isTauri } from "../lib/db";
 import { formatMs } from "../lib/format";
+import { useAppStore } from "../store/useAppStore";
 
 // Dinleme etkinliği & analiz. Kaynak: `play_history` (senkronlanıyor) →
 // istatistikler CİHAZLAR ARASI ORTAK. Ayrı bir analiz tablosu tutulmuyor.
@@ -13,6 +14,7 @@ type DayRow = { day: string; title: string; artist: string; at: number };
 
 export default function StatsView() {
   const t = useT();
+  const navigate = useAppStore((s) => s.navigate);
   const [range, setRange] = useState<7 | 30 | 365>(30);
   const [totalMs, setTotalMs] = useState(0);
   const [totalPlays, setTotalPlays] = useState(0);
@@ -121,6 +123,13 @@ export default function StatsView() {
   return (
     <div className="flex h-full flex-col">
       <ViewHeader title={t("stats.title")} subtitle={t("stats.subtitle")}>
+        <button
+          onClick={() => navigate("wrapped")}
+          className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-bg transition-opacity hover:opacity-90"
+        >
+          <Sparkles size={13} />
+          {t("wrapped.open")}
+        </button>
         <div className="flex gap-1 rounded-md bg-surface-2 p-1">
           {([7, 30, 365] as const).map((r) => (
             <button

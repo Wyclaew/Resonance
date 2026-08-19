@@ -364,6 +364,15 @@ function PlaybackSettings() {
         />
       </SettingRow>
       <SettingRow
+        label={t("settings.normalize")}
+        description={t("settings.normalizeDesc")}
+      >
+        <Toggle
+          checked={s.normalizeVolume}
+          onChange={(v) => s.update("normalizeVolume", v)}
+        />
+      </SettingRow>
+      <SettingRow
         label={t("settings.autostart")}
         description={t("settings.autostartDesc")}
       >

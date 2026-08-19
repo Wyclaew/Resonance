@@ -5,14 +5,16 @@ import {
   Sparkles,
   GripVertical,
   ListMusic,
-  Dice5,
-  Loader2,
+  ListPlus,
 } from "lucide-react";
 import { usePlayerStore, DISCOVERY_ID } from "../store/usePlayerStore";
 import { useT } from "../lib/i18n";
 import { reasonText } from "../lib/recommender";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { useAppStore } from "../store/useAppStore";
+import { usePlaylistStore } from "../store/usePlaylistStore";
+import { useToastStore } from "../store/useToastStore";
+import { savePlaylistFromTracks } from "../lib/playlists";
 import { formatMs } from "../lib/format";
 
 // Sıra (Queue) paneli — çalan kuyruğu gör/yönet: tıkla→atla, sürükle-bırak
@@ -30,13 +32,31 @@ export default function QueuePanel() {
   const toggleQueue = useAppStore((s) => s.toggleQueue);
   // Keşif modundaysa "başka tarz" (reroll) butonu göster.
   const radioPlaylistId = usePlayerStore((s) => s.radioPlaylistId);
-  const rerollDiscovery = usePlayerStore((s) => s.rerollDiscovery);
-  const discovering = usePlayerStore((s) => s.discovering);
-  const seedArtists = usePlayerStore((s) => s.discoverySeedArtists);
   const inDiscovery = radioPlaylistId === DISCOVERY_ID;
 
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [overIdx, setOverIdx] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+  const refreshPlaylists = usePlaylistStore((s) => s.refresh);
+  const toast = useToastStore((s) => s.show);
+
+  const saveQueue = async () => {
+    if (queue.length === 0 || saving) return;
+    setSaving(true);
+    try {
+      const name = `${t(
+        inDiscovery ? "discover.savedName" : "queue.title"
+      )} — ${new Date().toLocaleDateString()}`;
+      const { added } = await savePlaylistFromTracks(name, queue);
+      await refreshPlaylists();
+      toast(t("discover.saveQueueDone", { count: added, name }), "success");
+    } catch (e) {
+      console.error("[resonance] kuyruk kaydedilemedi:", e);
+      toast(t("discover.saveQueueFailed"), "error");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const upcoming = queue
     .map((item, idx) => ({ item, idx }))
@@ -57,30 +77,25 @@ export default function QueuePanel() {
           <span className="text-sm text-faint">
             {t("queue.upcomingCount", { count: upcoming.length })}
           </span>
-          {/* Keşifte: sıranın hangi tarzlardan geldiğini göster. */}
-          {inDiscovery && seedArtists.length > 0 && (
-            <span className="hidden truncate text-sm text-faint sm:inline">
-              · {t("queue.styleOf", { artists: seedArtists.join(", ") })}
-            </span>
-          )}
+
         </div>
         <div className="flex items-center gap-1">
-          {/* Tarzı beğenmediysen: başka sanatçıların radyolarından yeni parti. */}
-          {inDiscovery && (
-            <button
-              onClick={() => void rerollDiscovery()}
-              disabled={discovering}
-              title={t("queue.rerollHint")}
-              className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-muted hover:bg-surface hover:text-text disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {discovering ? (
-                <Loader2 size={15} className="animate-spin" />
-              ) : (
-                <Dice5 size={15} />
-              )}
-              {t("queue.reroll")}
-            </button>
-          )}
+          {/* ⭐ Keşfet'e özel "başka tarz"/tarz etiketi BURADAN KALDIRILDI
+              (v1.8.0): Keşfet'in kendi sayfası varken bu panel ikinci bir
+              keşfet arayüzü gibi davranıyordu — kullanıcı buradan tarzı
+              değiştirip iki ekranın farklı şey göstermesine yol açıyordu.
+              Panel artık yalnız kuyruğu gösterir. */}
+          {/* Kuyruk geçicidir (akıllı karışık/keşif onu sürekli tazeler) →
+              beğenilen seti kalıcılaştırmanın tek yolu. */}
+          <button
+            onClick={() => void saveQueue()}
+            disabled={saving || queue.length === 0}
+            title={t("discover.saveQueue")}
+            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-muted hover:bg-surface hover:text-text disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <ListPlus size={15} />
+            {t("discover.saveQueue")}
+          </button>
           <button
             onClick={toggleQueue}
             title={t("common.close")}

@@ -26,11 +26,14 @@ interface NavItemProps {
   active: boolean;
   collapsed: boolean;
   onClick: () => void;
+  /** İlk açılış turunun bu düğmeyi bulup vurgulaması için (Onboarding.tsx). */
+  tour?: string;
 }
 
-function NavItem({ icon, label, active, collapsed, onClick }: NavItemProps) {
+function NavItem({ icon, label, active, collapsed, onClick, tour }: NavItemProps) {
   return (
     <button
+      data-tour={tour}
       onClick={onClick}
       title={collapsed ? label : undefined}
       className={`group relative flex w-full items-center rounded-md text-sm transition-all ${
@@ -143,10 +146,12 @@ export default function Sidebar() {
               active={view === n.id}
               collapsed={collapsed}
               onClick={() => navigate(n.id)}
+              tour={`nav-${n.id}`}
             />
             {/* "Şu An"dan hemen sonra: Keşfet (aksiyon — keşif çalmasını başlatır). */}
             {n.id === "now" && (
               <button
+                data-tour="nav-discover"
                 onClick={handleDiscover}
                 disabled={discovering}
                 title={collapsed ? (discovering ? t("nav.preparing") : t("nav.discover")) : undefined}

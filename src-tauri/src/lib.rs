@@ -248,6 +248,103 @@ fn migrations() -> Vec<Migration> {
                   );
                   CREATE INDEX IF NOT EXISTS idx_blocked_upd ON blocked_artists(updated_at);",
         },
+        Migration {
+            version: 8,
+            description: "taste_controls_graph_loudness",
+            kind: MigrationKind::Up,
+            // v1.8.0 — üç ayrı ihtiyaç, üç tablo:
+            //
+            // 1) `artist_prefs` — kullanıcının ELLE ayarı ("daha çok / daha az").
+            //    SENKRONLANIR: bu bir KARAR, türetilmiş veri değil; anahtar
+            //    sanatçı adı olduğu için iki cihazda tek satırda birleşir
+            //    (blocked_artists ile aynı gerekçe).
+            //
+            // 2) `artist_edges` — sanatçı komşuluk grafiği ("X radyosunda Y
+            //    çıktı"). ⛔ SENKRONLANMAZ, BİLEREK: bu bir SAYAÇ. Senkron LWW
+            //    (last-write-wins) çalışır; iki cihazın saydığı birbirini EZER
+            //    ve toplam kaybolur (aynı gerekçeyle taste.ts de kendi tablosunu
+            //    tutmuyor). Üstelik veri bedava: her radyo çağrısında yeniden
+            //    üretiliyor, cihaz kendi grafiğini birkaç günde kurar.
+            //    `sample_id`: o sanatçıdan görülmüş bir video kimliği →
+            //    kullanıcının hiç dinlemediği sanatçı bile RADYO TOHUMU olabilir
+            //    (tohum video id ister; tracks'te olmayan sanatçı aksi hâlde
+            //    asla tohum olamazdı).
+            //
+            // 3) `track_loudness` — ölçülen ses yüksekliği (LUFS + tepe).
+            //    Senkronlanmaz: dosyadan türetilir, her cihaz kendi indirdiğini
+            //    saniyeler içinde ölçer; buluta taşımaya değmez.
+            sql: r#"CREATE TABLE IF NOT EXISTS artist_prefs (
+                    artist     TEXT PRIMARY KEY,   -- küçük harf
+                    weight     REAL NOT NULL DEFAULT 1,
+                    created_at INTEGER NOT NULL DEFAULT 0,
+                    updated_at INTEGER NOT NULL DEFAULT 0,
+                    deleted    INTEGER NOT NULL DEFAULT 0,
+                    device_id  TEXT
+                  );
+                  CREATE INDEX IF NOT EXISTS idx_prefs_upd ON artist_prefs(updated_at);
+
+                  CREATE TABLE IF NOT EXISTS artist_edges (
+                    seed       TEXT NOT NULL,      -- küçük harf
+                    neighbor   TEXT NOT NULL,      -- küçük harf
+                    weight     REAL NOT NULL DEFAULT 0,
+                    sample_id  TEXT,               -- komşudan bir video kimliği
+                    updated_at INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (seed, neighbor)
+                  );
+                  CREATE INDEX IF NOT EXISTS idx_edges_seed ON artist_edges(seed);
+                  CREATE INDEX IF NOT EXISTS idx_edges_nb   ON artist_edges(neighbor);
+
+                  -- ⭐ SANATÇI ETİKETLERİ: veritabanında TÜR ALANI YOK. Küratörlü
+                  -- tür/ruh hali havuzu (music_genre_pool) çekildiğinde, o havuzda
+                  -- görülen sanatçılara filtre kimliği etiket olarak yazılır.
+                  -- Böylece "şu anki modun" satırı sanatçı adı yerine ANLAŞILIR
+                  -- kelime gösterebilir ("sakin · rock"). Yerel: türetilmiş sayaç.
+                  CREATE TABLE IF NOT EXISTS artist_tags (
+                    artist     TEXT NOT NULL,      -- küçük harf
+                    tag        TEXT NOT NULL,      -- lib/filters.ts kimliği
+                    weight     REAL NOT NULL DEFAULT 0,
+                    updated_at INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (artist, tag)
+                  );
+                  CREATE INDEX IF NOT EXISTS idx_tags_artist ON artist_tags(artist);
+
+                  -- ⭐ SEÇMELİ AYAR SENKRONU (v1.8.0): `settings` bugüne kadar
+                  -- HİÇ senkronlanmıyordu, çünkü içinde cihaza özel şeyler var
+                  -- (resumeState, avatar, ses seviyesi). Ama kullanıcı tema/dil/
+                  -- öneri ayarlarının cihazlar arası aynı olmasını istiyor.
+                  -- Çözüm: tabloya senkron alanları eklenir, BEYAZ LİSTEDEKİ
+                  -- anahtarlar taşınır (bkz. SYNCED_SETTING_KEYS, engine.ts).
+                  ALTER TABLE settings ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
+                  ALTER TABLE settings ADD COLUMN deleted    INTEGER NOT NULL DEFAULT 0;
+                  ALTER TABLE settings ADD COLUMN device_id  TEXT;
+
+                  -- ⭐ CİHAZLAR ARASI KUYRUK (v1.8.0). now_playing yalnız TEK
+                  -- parçayı taşıyordu; kullanıcı "Windows'taki Keşfet kuyruğu
+                  -- Mac'e gelmedi, yeni keşif açtı" dedi. Kuyruğun kendisi
+                  -- `settings.resumeState` içindeydi ve settings senkronlanmıyordu.
+                  -- Cihaz başına satır → çakışma yok (now_playing ile aynı desen).
+                  CREATE TABLE IF NOT EXISTS device_queue (
+                    device_id    TEXT PRIMARY KEY,
+                    device_name  TEXT,
+                    mode         TEXT,     -- 'discovery' | 'normal'
+                    playlist_id  TEXT,
+                    queue_json   TEXT NOT NULL DEFAULT '',
+                    queue_index  INTEGER NOT NULL DEFAULT 0,
+                    position_ms  INTEGER NOT NULL DEFAULT 0,
+                    filters_json TEXT,
+                    seeds_json   TEXT,
+                    updated_at   INTEGER NOT NULL DEFAULT 0,
+                    deleted      INTEGER NOT NULL DEFAULT 0
+                  );
+                  CREATE INDEX IF NOT EXISTS idx_dq_upd ON device_queue(updated_at);
+
+                  CREATE TABLE IF NOT EXISTS track_loudness (
+                    track_id    TEXT PRIMARY KEY,
+                    lufs        REAL NOT NULL,
+                    peak_db     REAL NOT NULL,
+                    measured_at INTEGER NOT NULL DEFAULT 0
+                  );"#,
+        },
     ]
 }
 
@@ -297,6 +394,7 @@ pub fn run() {
             commands::cache_files,
             commands::delete_cache_except,
             commands::prune_cache,
+            commands::measure_loudness,
             commands::export_data,
             commands::backup_db,
             commands::list_backups,

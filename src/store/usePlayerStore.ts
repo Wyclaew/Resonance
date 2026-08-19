@@ -19,6 +19,8 @@ import {
 import { recordPlay } from "../lib/history";
 import { noteListen } from "../lib/mood";
 import { publishNowPlaying } from "../lib/nowPlaying";
+import { publishDeviceQueue } from "../lib/deviceQueue";
+import { gainForTrack } from "../lib/loudness";
 import { useSettingsStore } from "./useSettingsStore";
 import { useToastStore } from "./useToastStore";
 import { useAppStore } from "./useAppStore";
@@ -39,6 +41,8 @@ interface PlayerState {
   durationMs: number;
   volume: number;
   muted: boolean;
+  /** Çalan parçanın ses eşitleme kazancı (lib/loudness.ts). 1 = düzeltme yok. */
+  trackGain: number;
   shuffleMode: ShuffleMode;
   repeat: RepeatMode;
 
@@ -68,12 +72,16 @@ interface PlayerState {
     /** Bu milisaniyeden başlat (cihazlar arası "kaldığın yerden devam"). */
     startMs?: number
   ) => void;
+  /** Saf rastgele çalma (öneri serpiştirmesi YOK) — listedeki şarkılar karışır. */
+  playShuffled: (tracks: Track[], playlistId?: string) => void;
   startSmartShuffle: (tracks: KarmaTrack[], playlistId: string) => Promise<void>;
   startDiscovery: (opts?: { force?: boolean }) => Promise<void>;
   rerollDiscovery: () => Promise<void>;
   setDiscoveryFilters: (ids: string[]) => void;
   setLockedSeedArtist: (artist: string | null) => void;
   restoreState: (track: Track, positionMs: number) => void;
+  /** Tam kuyruğu duraklatılmış olarak geri yükler (cihazlar arası devam). */
+  restoreQueue: (queue: QueueItem[], index: number, positionMs: number) => void;
   restoreDiscovery: (state: DiscoveryResume) => void;
   toggle: () => void;
   next: () => void;
@@ -221,10 +229,43 @@ let resumeMsPending = 0;
 // şarkı geçti" bug'ı).
 let currentLoadToken = 0;
 
+// ⭐ SES SEVİYESİ EŞİTLEME (v1.8.0). Kazanç, kullanıcının ses düzeyiyle
+// ÇARPILIR — kullanıcının sesi tek gerçek referans, kazanç yalnız düzeltmedir.
+// Ölçüm dosya indikten sonra yapıldığı için gecikmeli gelir; bu yüzden
+// uygulanmadan önce "hâlâ aynı parça mı" diye bakılır.
+function pushVolume(): void {
+  if (!isTauri()) return;
+  const { volume, muted, trackGain } = usePlayerStore.getState();
+  const v = muted ? 0 : Math.max(0, Math.min(2, volume * trackGain));
+  invoke("audio_set_volume", { volume: v }).catch(() => {});
+}
+
+async function applyTrackGain(item: QueueItem): Promise<void> {
+  if (!useSettingsStore.getState().normalizeVolume) {
+    if (usePlayerStore.getState().trackGain !== 1) {
+      usePlayerStore.setState({ trackGain: 1 });
+      pushVolume();
+    }
+    return;
+  }
+  const gain = await gainForTrack(item.id, item.sourceId);
+  // Ölçüm sürerken kullanıcı başka şarkıya geçmiş olabilir.
+  if (usePlayerStore.getState().current?.uid !== item.uid) return;
+  usePlayerStore.setState({ trackGain: gain });
+  pushVolume();
+}
+
 function loadAndPlay(item: QueueItem, startMs = 0) {
   if (!isTauri()) return;
   hasLoaded = true;
   const myToken = ++currentLoadToken;
+  // Yeni parçada eski kazancı hemen bırak: ölçüm gelene kadar kullanıcının
+  // kendi seviyesi geçerli olsun (aksi hâlde önceki şarkının düzeltmesi
+  // yenisine uygulanır ve ses fırlar).
+  if (usePlayerStore.getState().trackGain !== 1) {
+    usePlayerStore.setState({ trackGain: 1 });
+    pushVolume();
+  }
   invoke("play_track", {
     input: {
       sourceId: item.sourceId,
@@ -233,26 +274,34 @@ function loadAndPlay(item: QueueItem, startMs = 0) {
       resumeMs: Math.floor(startMs),
     },
     cookiesBrowser: useSettingsStore.getState().cookiesBrowser,
-  }).catch((e) => {
-    // Bu yükleme hâlâ güncel mi? Değilse (kullanıcı başka şarkıya geçti) DOKUNMA.
-    if (myToken !== currentLoadToken) return;
-    // İndirilemeyen şarkı (silinmiş/geçici hata) kuyruğu TIKAMASIN: sıradaki varsa
-    // atla. Art arda çok hata olursa dur ki sonsuz döngü olmasın.
-    console.error("[resonance] play_track hatası:", e);
-    const st = usePlayerStore.getState();
-    loadFailCount++;
-    if (
-      loadFailCount <= 5 &&
-      st.queue.length > 1 &&
-      st.queueIndex < st.queue.length - 1
-    ) {
-      useToastStore.getState().show(t("player.loadFailed"), "error");
-      st.next();
-    } else {
-      useToastStore.getState().show(`Şarkı yüklenemedi — ${String(e)}`, "error");
-      usePlayerStore.setState({ status: "idle", error: String(e) });
-    }
-  });
+  })
+    .then(() => {
+      // play_track döndüyse dosya cache'te hazır demektir → ölçülebilir.
+      if (myToken !== currentLoadToken) return;
+      void applyTrackGain(item);
+    })
+    .catch((e) => {
+      // Bu yükleme hâlâ güncel mi? Değilse (kullanıcı başka şarkıya geçti) DOKUNMA.
+      if (myToken !== currentLoadToken) return;
+      // İndirilemeyen şarkı (silinmiş/geçici hata) kuyruğu TIKAMASIN: sıradaki
+      // varsa atla. Art arda çok hata olursa dur ki sonsuz döngü olmasın.
+      console.error("[resonance] play_track hatası:", e);
+      const st = usePlayerStore.getState();
+      loadFailCount++;
+      if (
+        loadFailCount <= 5 &&
+        st.queue.length > 1 &&
+        st.queueIndex < st.queue.length - 1
+      ) {
+        useToastStore.getState().show(t("player.loadFailed"), "error");
+        st.next();
+      } else {
+        useToastStore
+          .getState()
+          .show(`Şarkı yüklenemedi — ${String(e)}`, "error");
+        usePlayerStore.setState({ status: "idle", error: String(e) });
+      }
+    });
 }
 // Art arda yükleme (indirme) hatası sayacı — başarılı çalmada sıfırlanır.
 let loadFailCount = 0;
@@ -334,6 +383,19 @@ function persistPlaybackState(force = false) {
         positionMs: st.positionMs,
       });
   useSettingsStore.getState().update("resumeState", payload);
+
+  // ⭐ Aynı durumu BULUTA da yaz (lib/deviceQueue.ts). resumeState cihaza özel
+  // kalır (settings senkronlanmıyor); cihazlar arası devam bu tablodan gelir.
+  void publishDeviceQueue(
+    isDiscovery ? "discovery" : "normal",
+    st.queue,
+    st.queueIndex,
+    st.positionMs,
+    isDiscovery ? null : st.radioPlaylistId ?? c.playlistId ?? null,
+    st.discoveryFilters,
+    st.discoverySeedArtists,
+    force
+  );
 }
 
 // Sıradaki parçaları arka planda indir/hazırla → hızlı arka arkaya geçişler de
@@ -591,6 +653,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   positionMs: 0,
   durationMs: 0,
   volume: 0.9,
+  trackGain: 1,
   muted: false,
   shuffleMode: "off",
   repeat: "off",
@@ -624,6 +687,12 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const items = (queue ?? [track]).map((t) => toQueueItem(t, playlistId));
     const idx = Math.max(0, items.findIndex((i) => i.id === track.id));
     const current = items[idx];
+    // ⭐ BUG (v1.8.0'da düzeltildi): playNow shuffleMode'u TAMAMEN yok sayıyor,
+    // radioActive'i de false yapıyordu. Sonuç: kullanıcı alt barda "akıllı
+    // karışık" görüyor ama şarkılar sırayla çalıyordu (öneri de gelmiyordu),
+    // çünkü next() akıllı modda beslemeyi radioActive'e bağlar.
+    // Artık mod korunur: "smart" seçiliyken listeden çalmak beslemeyi açar.
+    const smart = get().shuffleMode === "smart" && !!playlistId;
     set({
       queue: items,
       queueIndex: idx,
@@ -631,11 +700,37 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       status: "loading",
       positionMs: startMs,
       durationMs: track.durationMs,
+      radioActive: smart,
+      radioPlaylistId: smart ? playlistId ?? null : null,
+      error: null,
+    });
+    scheduleLoad(current, startMs);
+    if (smart) void refillRadio();
+  },
+
+  // Saf rastgele: listedeki şarkılar karıştırılır, ÖNERİ SERPİŞTİRİLMEZ.
+  // ("Önerili rastgele" ayrı bir seçenek — startSmartShuffle.)
+  playShuffled: (tracks, playlistId) => {
+    if (tracks.length === 0) return;
+    const shuffled = [...tracks];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    const items = shuffled.map((t) => toQueueItem(t, playlistId));
+    set({
+      queue: items,
+      queueIndex: 0,
+      current: items[0],
+      status: "loading",
+      positionMs: 0,
+      durationMs: items[0].durationMs,
+      shuffleMode: "shuffle",
       radioActive: false,
       radioPlaylistId: null,
       error: null,
     });
-    scheduleLoad(current, startMs);
+    scheduleLoad(items[0]);
   },
 
   // Akıllı karışık: karma-ağırlıklı karıştırılmış kuyruk + araya Resonance
@@ -870,6 +965,26 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   // Açılışta son Keşfet kuyruğunu DURAKLATILMIŞ geri yükle (çalmaz; play'e
   // basınca kaldığı pozisyondan devam). Kuyruk aynen gelir → reroll atmadıkça
   // değişmez. Prewarm'a dokunmaz; Keşfet zaten aktif sayılır.
+  // Cihazlar arası devam: kuyruğun tamamı gelir, DURAKLATILMIŞ kurulur.
+  // Otomatik çalmaya başlamaz — kullanıcı başka bir cihazın önünde olabilir.
+  restoreQueue: (queue, index, positionMs) => {
+    if (queue.length === 0) return;
+    const items = queue.map((i) => ({ ...i, uid: crypto.randomUUID() }));
+    const idx = Math.min(Math.max(0, index), items.length - 1);
+    set({
+      queue: items,
+      queueIndex: idx,
+      current: items[idx],
+      status: "paused",
+      positionMs,
+      durationMs: items[idx].durationMs,
+      radioActive: false,
+      radioPlaylistId: null,
+      error: null,
+    });
+    resumeMsPending = positionMs;
+  },
+
   restoreDiscovery: (state) => {
     const items: QueueItem[] = state.queue.map((it) => ({
       ...it,
@@ -1066,18 +1181,13 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   setVolume: (v) => {
     const vol = Math.max(0, Math.min(1, v));
     set({ volume: vol, muted: false });
-    if (isTauri()) invoke("audio_set_volume", { volume: vol }).catch(() => {});
+    pushVolume(); // parça kazancıyla çarpılır (ses eşitleme)
     persistVolume(vol);
   },
 
   toggleMute: () => {
-    const { muted, volume } = get();
-    const nextMuted = !muted;
-    set({ muted: nextMuted });
-    if (isTauri())
-      invoke("audio_set_volume", { volume: nextMuted ? 0 : volume }).catch(
-        () => {}
-      );
+    set({ muted: !get().muted });
+    pushVolume();
   },
 
   // Karışık modunu döndür: off → shuffle → smart → off.

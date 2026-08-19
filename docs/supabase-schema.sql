@@ -135,6 +135,55 @@ create table if not exists public.blocked_artists (
   primary key (user_id, artist)
 );
 
+-- "Daha çok / daha az öner" — kullanıcının ELLE kararı (v1.8.0).
+-- weight varsayılanı 1'dir (0 DEĞİL): 0 "hiç önerme" anlamına gelirdi.
+create table if not exists public.artist_prefs (
+  user_id    uuid not null default auth.uid(),
+  artist     text not null,
+  weight     double precision not null default 1,
+  created_at bigint not null default 0,
+  updated_at bigint not null default 0,
+  deleted    smallint not null default 0,
+  device_id  text,
+  synced_at  timestamptz not null default now(),
+  primary key (user_id, artist)
+);
+
+-- ⭐ SEÇMELİ AYAR SENKRONU (v1.8.0). Tablonun TAMAMI değil, istemcideki
+-- beyaz listedeki anahtarlar taşınır (SYNCED_SETTING_KEYS, sync/engine.ts):
+-- tema/dil/öneri ayarları gelir; ses seviyesi, avatar, çerez tarayıcısı,
+-- Spotify anahtarları ve cihazın kendi kuyruğu BİLEREK dışarıda kalır.
+create table if not exists public.settings (
+  user_id    uuid not null default auth.uid(),
+  key        text not null,
+  value      text,
+  updated_at bigint not null default 0,
+  deleted    smallint not null default 0,
+  device_id  text,
+  synced_at  timestamptz not null default now(),
+  primary key (user_id, key)
+);
+
+-- ⭐ CİHAZLAR ARASI KUYRUK (v1.8.0). now_playing yalnız tek parçayı taşıyor;
+-- bu tablo Keşfet partisinin tamamını (parçalar + index + filtreler + tohum
+-- sanatçılar) taşır. Cihaz başına tek satır → çakışma yok.
+create table if not exists public.device_queue (
+  user_id      uuid not null default auth.uid(),
+  device_id    text not null,
+  device_name  text,
+  mode         text,
+  playlist_id  text,
+  queue_json   text not null default '',
+  queue_index  integer not null default 0,
+  position_ms  bigint not null default 0,
+  filters_json text,
+  seeds_json   text,
+  updated_at   bigint not null default 0,
+  deleted      smallint not null default 0,
+  synced_at    timestamptz not null default now(),
+  primary key (user_id, device_id)
+);
+
 -- ── synced_at trigger'ı (sunucu saati) ────────────────────────────────────
 
 create or replace function public.touch_synced_at()
@@ -153,7 +202,7 @@ begin
   foreach tbl in array array[
     'tracks','playlists','playlist_tracks',
     'votes','play_history','recommendation_history','now_playing',
-    'blocked_artists'
+    'blocked_artists','artist_prefs','settings','device_queue'
   ] loop
     execute format('drop trigger if exists trg_touch_%1$s on public.%1$I', tbl);
     execute format(
@@ -172,6 +221,9 @@ create index if not exists idx_hist_sync     on public.play_history(user_id, syn
 create index if not exists idx_rechist_sync  on public.recommendation_history(user_id, synced_at);
 create index if not exists idx_np_sync       on public.now_playing(user_id, synced_at);
 create index if not exists idx_blocked_sync  on public.blocked_artists(user_id, synced_at);
+create index if not exists idx_prefs_sync    on public.artist_prefs(user_id, synced_at);
+create index if not exists idx_settings_sync on public.settings(user_id, synced_at);
+create index if not exists idx_dq_sync       on public.device_queue(user_id, synced_at);
 
 -- ── RLS: herkes yalnız KENDİ satırını görür/yazar ─────────────────────────
 
@@ -181,7 +233,7 @@ begin
   foreach tbl in array array[
     'tracks','playlists','playlist_tracks',
     'votes','play_history','recommendation_history','now_playing',
-    'blocked_artists'
+    'blocked_artists','artist_prefs','settings','device_queue'
   ] loop
     execute format('alter table public.%I enable row level security', tbl);
 
@@ -215,7 +267,7 @@ begin
   foreach tbl in array array[
     'tracks','playlists','playlist_tracks',
     'votes','play_history','recommendation_history','now_playing',
-    'blocked_artists'
+    'blocked_artists','artist_prefs','settings','device_queue'
   ] loop
     -- Zaten ekliyse hata verir; yoksay.
     begin

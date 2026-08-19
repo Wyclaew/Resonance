@@ -8,6 +8,8 @@ import {
   Settings,
   ListMusic,
   CornerDownLeft,
+  Brain,
+  BarChart3,
 } from "lucide-react";
 import type { ViewId } from "../types";
 import { useAppStore } from "../store/useAppStore";
@@ -31,6 +33,8 @@ const VIEWS: { view: ViewId; labelKey: TrKey; icon: typeof Search }[] = [
   { view: "library", labelKey: "nav.library", icon: Library },
   { view: "downloads", labelKey: "nav.downloads", icon: Download },
   { view: "import", labelKey: "nav.import", icon: Import },
+  { view: "taste", labelKey: "profile.taste", icon: Brain },
+  { view: "stats", labelKey: "profile.stats", icon: BarChart3 },
   { view: "settings", labelKey: "nav.settings", icon: Settings },
 ];
 

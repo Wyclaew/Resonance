@@ -11,6 +11,7 @@ import {
   Monitor,
   Languages,
   Settings,
+  Brain,
 } from "lucide-react";
 import { useT, type Lang } from "../lib/i18n";
 import type { Theme } from "../store/useSettingsStore";
@@ -106,12 +107,17 @@ export default function ProfileMenu({ collapsed }: { collapsed: boolean }) {
   return (
     <div ref={boxRef} className="relative">
       <button
+        data-tour="profile"
         onClick={() => setOpen((v) => !v)}
         title={collapsed ? email ?? t("profile.title") : undefined}
         className={`group relative mb-0.5 flex w-full items-center rounded-md text-sm transition-colors ${
           collapsed ? "justify-center px-0 py-2" : "gap-2.5 px-2 py-2"
         } ${
-          open || view === "account" || view === "stats" || view === "settings"
+          open ||
+          view === "account" ||
+          view === "stats" ||
+          view === "taste" ||
+          view === "settings"
             ? "bg-surface-2 text-text"
             : "text-muted hover:bg-surface hover:text-text"
         }`}
@@ -184,6 +190,14 @@ export default function ProfileMenu({ collapsed }: { collapsed: boolean }) {
             label={t("profile.stats")}
             onClick={() => {
               navigate("stats");
+              setOpen(false);
+            }}
+          />
+          <MenuItem
+            icon={<Brain size={15} />}
+            label={t("profile.taste")}
+            onClick={() => {
+              navigate("taste");
               setOpen(false);
             }}
           />

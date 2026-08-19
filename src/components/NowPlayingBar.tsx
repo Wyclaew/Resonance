@@ -18,7 +18,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { usePlayerStore } from "../store/usePlayerStore";
+import { usePlayerStore, DISCOVERY_ID } from "../store/usePlayerStore";
 import { useAppStore } from "../store/useAppStore";
 import { useToastStore } from "../store/useToastStore";
 import { useLibraryStore } from "../store/useLibraryStore";
@@ -64,6 +64,9 @@ export default function NowPlayingBar() {
   const toggleLyrics = useAppStore((s) => s.toggleLyrics);
   const queueOpen = useAppStore((s) => s.queueOpen);
   const toggleQueue = useAppStore((s) => s.toggleQueue);
+  const radioPlaylistId = usePlayerStore((s) => s.radioPlaylistId);
+  const inDiscovery = radioPlaylistId === DISCOVERY_ID;
+  const showQueueButton = !inDiscovery && shuffleMode !== "off";
   const navigate = useAppStore((s) => s.navigate);
   const showToast = useToastStore((s) => s.show);
 
@@ -195,11 +198,13 @@ export default function NowPlayingBar() {
           <AddToPlaylistButton track={current} always openUp />
         )}
         {karma && (
-          <KarmaControl
-            karma={karma.karma}
-            lastVoteAt={karma.lastVoteAt}
-            onVote={handleVote}
-          />
+          <span data-tour="vote">
+            <KarmaControl
+              karma={karma.karma}
+              lastVoteAt={karma.lastVoteAt}
+              onVote={handleVote}
+            />
+          </span>
         )}
       </div>
 
@@ -326,13 +331,21 @@ export default function NowPlayingBar() {
             )}
           </button>
         )}
-        <button
-          onClick={toggleQueue}
-          title={t("player.queue")}
-          className={queueOpen ? "text-accent" : "text-muted hover:text-text"}
-        >
-          <ListMusic size={16} />
-        </button>
+        {/* ⭐ SIRA DÜĞMESİ KOŞULLU (v1.8.0).
+            • Keşfet'te GİZLİ: sıra zaten Keşfet sayfasının kendisi; buradan
+              açılan panel ikinci bir (eski) keşfet arayüzü gibi davranıyordu.
+            • Sıralı çalmada GİZLİ: listeyi zaten görüyorsun.
+            • Yalnız karışık / akıllı karışıkta görünür — sıradakinin ne
+              olduğu orada gerçekten bilinmiyor. */}
+        {showQueueButton && (
+          <button
+            onClick={toggleQueue}
+            title={t("player.queue")}
+            className={queueOpen ? "text-accent" : "text-muted hover:text-text"}
+          >
+            <ListMusic size={16} />
+          </button>
+        )}
         <button
           onClick={toggleLyrics}
           title={t("player.lyrics")}

@@ -6,6 +6,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, OnceLock};
 
 // Aynı video_id için eşzamanlı ensure_audio çağrılarını SERİLEŞTİRİR. Play +
@@ -560,6 +561,74 @@ fn ffmpeg() -> Command {
     c
 }
 
+/// Ses dosyasının ENTEGRE YÜKSEKLİĞİNİ (LUFS) ve tepe seviyesini (dBTP) ölçer.
+///
+/// Neden gerekiyor: kaynaklar YouTube'dan geldiği için parçalar arası seviye
+/// farkı çok büyük (bir şarkı patlıyor, diğeri fısıldıyor). Ölçüm bir kez
+/// yapılır, sonuç DB'ye yazılır ve çalarken kazanç olarak uygulanır.
+///
+/// ⚠️ `loudnorm` ANALİZ modu (print_format=json) kullanılıyor, `ebur128`
+/// özet metni DEĞİL: ebur128 çıktısında "Peak:" satırı sürüme göre birden çok
+/// bölümde (sample peak / true peak) geçiyor → sessizce yanlış değer
+/// ayrıştırma riski var. JSON'da böyle bir belirsizlik yok.
+///
+/// Maliyet: tam dosya taranır, 3-4 dakikalık parçada ~1-2 sn (tek çekirdek).
+pub fn measure_loudness(cache_dir: &Path, video_id: &str) -> anyhow::Result<(f64, f64)> {
+    let path = find_cached(cache_dir, video_id)
+        .ok_or_else(|| anyhow::anyhow!("dosya önbellekte yok ({video_id})"))?;
+    let out = ffmpeg()
+        .args([
+            "-hide_banner",
+            "-nostats",
+            "-i",
+            path.to_str().unwrap(),
+            "-af",
+            "loudnorm=print_format=json",
+            "-f",
+            "null",
+            "-",
+        ])
+        .output()?;
+
+    // JSON bloğu stderr'in SONUNDADIR (ffmpeg'in kendi logları önce gelir).
+    let err = String::from_utf8_lossy(&out.stderr);
+    let start = err
+        .rfind('{')
+        .ok_or_else(|| anyhow::anyhow!("loudnorm çıktısı okunamadı"))?;
+    let end = err
+        .rfind('}')
+        .ok_or_else(|| anyhow::anyhow!("loudnorm çıktısı okunamadı"))?;
+    if end <= start {
+        anyhow::bail!("loudnorm çıktısı bozuk");
+    }
+    let v: serde_json::Value = serde_json::from_str(&err[start..=end])?;
+    let num = |k: &str| -> Option<f64> { v.get(k)?.as_str()?.parse::<f64>().ok() };
+
+    let lufs = num("input_i").ok_or_else(|| anyhow::anyhow!("input_i yok"))?;
+    // Sessiz/bozuk dosyada loudnorm "-inf" döndürür → kazanç hesabı çökerdi.
+    if !lufs.is_finite() || !(-70.0..=5.0).contains(&lufs) {
+        anyhow::bail!("ölçüm anlamsız (I={lufs})");
+    }
+    let peak = num("input_tp").filter(|p| p.is_finite()).unwrap_or(0.0);
+    Ok((lufs, peak))
+}
+
+
+/// En son başarılı indirme yolu (STRATEGIES indeksi). Bkz. ensure_audio.
+static LAST_GOOD_STRATEGY: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// Log'u şişirmemek için hata çıktısının ilk anlamlı satırı.
+fn first_line(s: &str) -> String {
+    s.lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("")
+        .chars()
+        .take(160)
+        .collect()
+}
+
 // İndirilen geçici kaynak dosyasını (<id>.src.<ext>) bulur.
 fn find_src(cache_dir: &Path, video_id: &str) -> Option<PathBuf> {
     let prefix = format!("{video_id}.src.");
@@ -662,66 +731,87 @@ pub fn ensure_audio(
     }
     args.extend(["-o", dl_tmpl_str, "--", &url]);
 
-    // ⭐ TAZE-ÇIKARIM RETRY (v1.2.3): asıl ses baytlarını indirirken YouTube
-    // çok sayıda eşzamanlı istek (Keşfet prefetch + radyo besleme + toplu
-    // indirme) altında GEÇİCİ "HTTP 403 Forbidden" döndürüyor. Format çözülür
-    // (--simulate geçer) ama bayt indirme reddedilir → "indirilemedi". Ölçüldü:
-    // 403 veren videolar birkaç saniye/dakika sonra AYNI argümanla iniyor,
-    // çünkü her yeni yt-dlp çağrısı TAZE format URL'si üretir. O yüzden geçici
-    // hatada kısa (artan) bekleyip yeniden dene — tek deneme yerine 3.
+    // ⭐⭐ ÇOK YOLLU İNDİRME (v1.8.0) — "ilk yol olmazsa ikincisi denesin".
     //
-    // Çerez: kullanıcı tarayıcı seçtiyse İLK başarısızlıkta bir kez çerezle de
-    // dene (yaş/bölge kısıtlı içerik için; 403 throttle'a etkisi yok, zararsız).
-    const MAX_ATTEMPTS: usize = 3;
+    // KÖK NEDEN: YouTube bot doğrulaması + PO Token zorunluluğu getirdi.
+    // Varsayılan istemci artık ya "Sign in to confirm you're not a bot" ya da
+    // bayt indirmede "HTTP 403 Forbidden" döndürüyor. Tek istemciye bağlı
+    // kalmak, kullanıcının gördüğü "şarkı indirilemedi"nin KÖK SEBEBİYDİ
+    // (v1.2.3'teki taze-çıkarım retry'ı bunu çözemez: aynı duvara 3 kez vurur).
+    //
+    // ÖLÇÜM (2026-08-19, uygulama logunda 403/bot veren 5 video):
+    //   default (android_vr) → 403 / bot                          ❌
+    //   tv                   → "Requested format is not available" ❌
+    //   ios                  → "Requested format is not available" ❌
+    //   web_embedded         → 4/4 indi, AUDIO-ONLY m4a (2.3–4.0 MB) ✅ EN İYİ
+    //   mweb                 → indi ama MUXED mp4 (11.4 MB = 3× veri) ✅
+    //   tv_simply            → indi ama MUXED mp4                     ✅
+    //
+    // ⚠️ "Kendi ham indiricimizi yazalım" ÇÖZÜM DEĞİL: bu duvarı aşan şey
+    // yt-dlp'nin imza/nsig JS çözücüsü ve istemci taklididir; elle yazılmış bir
+    // HTTP indirici aynı 403'ü alır ve YouTube her değişiklikte kırılır.
+    // Doğru çözüm YOL ÇEŞİTLİLİĞİ + taze çıkarımdır (aşağısı).
+    //
+    // Sıra: audio-only veren yol önce, muxed olanlar sonra (gereksiz video
+    // baytı inmesin), çerez en sonda (yavaş + bot moduna sokabilir).
+    const STRATEGIES: [(&str, Option<&str>, bool); 5] = [
+        ("web_embedded", Some("youtube:player_client=web_embedded"), false),
+        ("default", None, false),
+        ("mweb", Some("youtube:player_client=mweb"), false),
+        ("tv_simply", Some("youtube:player_client=tv_simply"), false),
+        ("cookies", None, true),
+    ];
+
+    // ⭐ ÖĞRENEN SIRA: en son işe yarayan yol bir sonraki indirmede İLK denenir.
+    // YouTube'un hangi yolu kapattığı zamanla değişiyor; sabit sıra her seferinde
+    // ölü yola çarpıp saniyeler kaybettirirdi.
+    let start = LAST_GOOD_STRATEGY.load(Ordering::Relaxed) % STRATEGIES.len();
     let mut out: Option<std::process::Output> = None;
     let mut last_err = String::new();
-    for attempt in 0..MAX_ATTEMPTS {
-        let o = run_yt_dlp(&args, None)?;
-        if o.status.success() {
-            out = Some(o);
-            break;
-        }
-        let err = String::from_utf8_lossy(&o.stderr).into_owned();
-        // Kalıcı hata (silinmiş/özel/erişilemez): ne çerez ne retry kurtarır.
-        if is_permanent_error(&err) {
-            log::error!("kalıcı hata {video_id}: {}", err.trim());
-            anyhow::bail!("Bu video kullanılamıyor (kaldırılmış/özel/kısıtlı).");
-        }
-        // İlk denemede çerezli tek deneme (yaş/bölge kısıtı için).
-        if attempt == 0 {
-            if let Some(c) = cookies {
-                if !c.is_empty() {
-                    log::info!("çerezsiz başarısız, çerezle deneniyor: {video_id}");
-                    let oc = run_yt_dlp(&args, Some(c))?;
-                    if oc.status.success() {
-                        out = Some(oc);
-                        break;
-                    }
-                    let errc = String::from_utf8_lossy(&oc.stderr).into_owned();
-                    if is_permanent_error(&errc) {
-                        anyhow::bail!("Bu video kullanılamıyor (kaldırılmış/özel/kısıtlı).");
-                    }
+
+    'outer: for round in 0..2 {
+        for k in 0..STRATEGIES.len() {
+            let idx = (start + k) % STRATEGIES.len();
+            let (name, extra, use_cookies) = STRATEGIES[idx];
+            // Çerez yolu yalnız kullanıcı tarayıcı seçtiyse anlamlı.
+            if use_cookies && cookies.map(|c| c.is_empty()).unwrap_or(true) {
+                continue;
+            }
+            let mut a = args.clone();
+            if let Some(e) = extra {
+                a.insert(0, "--extractor-args");
+                a.insert(1, e);
+            }
+            let o = run_yt_dlp(&a, if use_cookies { cookies } else { None })?;
+            if o.status.success() {
+                LAST_GOOD_STRATEGY.store(idx, Ordering::Relaxed);
+                if k > 0 || round > 0 {
+                    log::info!("indirme kurtarıldı {video_id} — yol: {name}");
                 }
+                out = Some(o);
+                break 'outer;
+            }
+            let err = String::from_utf8_lossy(&o.stderr).into_owned();
+            // Kalıcı hata (silinmiş/özel/erişilemez): hiçbir yol kurtarmaz.
+            if is_permanent_error(&err) {
+                log::error!("kalıcı hata {video_id}: {}", err.trim());
+                anyhow::bail!("Bu video kullanılamıyor (kaldırılmış/özel/kısıtlı).");
+            }
+            log::info!("yol '{name}' başarısız ({video_id}): {}", first_line(&err));
+            last_err = err;
+            // Yarım kalan dosya sonraki yolu bozmasın (416 / "invalid data").
+            if let Some(p) = find_src(cache_dir, video_id) {
+                let _ = std::fs::remove_file(p);
             }
         }
-        last_err = err;
-        // Son deneme değilse: artan bekleme (throttle'ı azdırmamak için), sonra
-        // TAZE çıkarımla yeniden. 1.2sn, 2.4sn.
-        if attempt + 1 < MAX_ATTEMPTS {
-            let backoff = std::time::Duration::from_millis(1200 * (attempt as u64 + 1));
-            log::info!(
-                "geçici indirme hatası {video_id} (deneme {}/{}), {}ms sonra yeniden: {}",
-                attempt + 1,
-                MAX_ATTEMPTS,
-                backoff.as_millis(),
-                last_err.trim()
-            );
-            std::thread::sleep(backoff);
+        // Tüm yollar tükendi: kısa bekleyip TAZE format URL'leriyle bir tur daha.
+        // (Ölçüldü: 403 veren video saniyeler sonra aynı argümanla iniyor.)
+        if round == 0 {
+            std::thread::sleep(std::time::Duration::from_millis(1500));
         }
     }
 
-    // Tüm denemeler geçici hatayla tükendiyse: teşhis logu + vazgeç. (Başarıda
-    // indirilen dosya diskte; aşağıda find_src ile bulunup remux edilir.)
+    // Her iki tur da tükendiyse: teşhis logu + vazgeç.
     if out.is_none() {
         log::error!("yt-dlp indirme hata {video_id}: {}", last_err.trim());
         // Teşhis: YouTube hangi formatları sunuyor?

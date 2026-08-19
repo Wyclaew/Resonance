@@ -11,6 +11,9 @@ import WindowControls from "./components/WindowControls";
 import Toasts from "./components/Toasts";
 import { getDb, isTauri } from "./lib/db";
 import { onRemoteApplied, startSync } from "./lib/sync/engine";
+import { latestRemoteQueue, localQueueUpdatedAt } from "./lib/deviceQueue";
+import { t } from "./lib/i18n";
+import { useToastStore } from "./store/useToastStore";
 import { autoDownloadTopTracks, pruneAudioCache } from "./lib/library";
 import {
   initPlayer,
@@ -26,6 +29,8 @@ import PlaylistView from "./views/PlaylistView";
 import ImportView from "./views/ImportView";
 import SettingsView from "./views/SettingsView";
 import StatsView from "./views/StatsView";
+import TasteView from "./views/TasteView";
+import WrappedView from "./views/WrappedView";
 import AccountView from "./views/AccountView";
 import { useAppStore } from "./store/useAppStore";
 import { useLibraryStore } from "./store/useLibraryStore";
@@ -53,6 +58,10 @@ function CurrentView() {
       return <ImportView />;
     case "stats":
       return <StatsView />;
+    case "taste":
+      return <TasteView />;
+    case "wrapped":
+      return <WrappedView />;
     case "account":
       return <AccountView />;
     case "settings":
@@ -60,6 +69,46 @@ function CurrentView() {
     default:
       return <HomeView />;
   }
+}
+
+// ⭐ CİHAZLAR ARASI DEVAM (v1.8.0): başka cihazın kuyruğu bu cihazınkinden
+// YENİYSE doğrudan oynatıcıya yükle (duraklatılmış, kaldığı saniyeden).
+//
+// Kullanıcının şikâyeti: "Windows'taki çalan şarkı yalnız Şu An sayfasında bir
+// kart olarak görünüyordu, ben doğrudan oynatıcıya gelsin istemiştim" — ayrıca
+// Keşfet kuyruğu hiç gelmiyordu (settings senkronlanmadığı için).
+//
+// ⚠️ GÜVENLİK KOŞULU: kullanıcı bu cihazda zaten bir şey çaldıysa DOKUNMA.
+// Kuyruğu ayağının altından çekmek en sinir bozucu senkron hatasıdır.
+let adoptedRemote = false;
+async function adoptRemoteQueue(): Promise<void> {
+  if (adoptedRemote) return;
+  const st = usePlayerStore.getState();
+  if (st.status === "playing" || st.status === "loading") return;
+
+  const [remote, localAt] = await Promise.all([
+    latestRemoteQueue(),
+    localQueueUpdatedAt(),
+  ]);
+  if (!remote || remote.updatedAt <= localAt) return;
+  adoptedRemote = true;
+
+  if (remote.mode === "discovery") {
+    usePlayerStore.getState().restoreDiscovery({
+      queue: remote.queue,
+      queueIndex: remote.queueIndex,
+      seedArtists: remote.seeds,
+      filters: remote.filters,
+      positionMs: remote.positionMs,
+    });
+  } else {
+    usePlayerStore
+      .getState()
+      .restoreQueue(remote.queue, remote.queueIndex, remote.positionMs);
+  }
+  useToastStore
+    .getState()
+    .show(t("sync.resumedFrom", { device: remote.deviceName }), "info");
 }
 
 // Windows mı? (çerçevesiz pencerede sol boşluk/buton yerleşimi için)
@@ -205,6 +254,8 @@ export default function App() {
       onRemoteApplied(() => {
         void useLibraryStore.getState().refresh();
         void usePlaylistStore.getState().refresh();
+        void useSettingsStore.getState().load(); // senkronlanan ayarlar (tema/dil…)
+        void adoptRemoteQueue();
       }),
     []
   );

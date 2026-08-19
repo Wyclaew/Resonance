@@ -663,6 +663,29 @@ pub fn is_cached(app: AppHandle, source_id: String) -> bool {
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct LoudnessResult {
+    pub lufs: f64,
+    pub peak_db: f64,
+}
+
+/// Önbellekteki ses dosyasının yüksekliğini ölçer (şarkılar arası seviye
+/// eşitleme için). Dosya inmemişse hata döner — çağıran taraf sessizce geçer.
+#[tauri::command]
+pub async fn measure_loudness(
+    app: AppHandle,
+    source_id: String,
+) -> Result<LoudnessResult, String> {
+    let cache = audio_cache_dir(&app).map_err(|e| e.to_string())?;
+    let (lufs, peak_db) =
+        tauri::async_runtime::spawn_blocking(move || ytdlp::measure_loudness(&cache, &source_id))
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
+    Ok(LoudnessResult { lufs, peak_db })
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AudioStatus {
     position_ms: u64,
     duration_ms: u64,

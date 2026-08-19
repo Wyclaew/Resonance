@@ -185,8 +185,34 @@ Masaüstünde çalışan ve mobilde **yeniden yazılmaması gereken** parçalar:
 | Otomatik çevrimdışı indirme | `autoDownloadTopTracks` | ⚠️ MOBİLDE DAHA KRİTİK: depolama sınırlı ve mobil veri var. Mobilde varsayılan KAPALI + "yalnız Wi-Fi" koşulu eklenmeli. |
 | Dinleme özeti / istatistik | `src/views/StatsView.tsx` sorguları | Saf SQL; RN'de aynı sorgular, farklı görsel. |
 | **Çapraz cihaz devam** | `src/lib/nowPlaying.ts` + `now_playing` tablosu | ⭐ Mobilin en görünür kazancı: PC'de bırak, telefonda devam et. Şema HAZIR. |
+| **Cihazlar arası KUYRUK** | `src/lib/deviceQueue.ts` + `device_queue` tablosu | ⭐ v1.8.0. now_playing yalnız TEK parçayı taşıyordu; bu tablo Keşfet partisinin tamamını taşır (parçalar + index + filtreler + tohumlar). Mobil açılışta `latestRemoteQueue()` çağırıp PC'deki sırayı DURAKLATILMIŞ kurmalı. |
+| **Seçmeli ayar senkronu** | `settings` tablosu + `SYNCED_SETTING_KEYS` | ⭐ v1.8.0. Tablonun tamamı DEĞİL, beyaz liste senkronlanır (tema/dil/öneri ayarları). Mobil aynı beyaz listeyi kullanmalı; `playback.savedVolume`, `profile.avatarDataUrl`, `yt.cookiesBrowser`, `spotify.*` ASLA senkronlanmaz. |
+| **Elle ağırlık kararı** | `src/lib/prefs.ts` + `artist_prefs` tablosu | ⭐ v1.8.0. "Daha çok / daha az öner". Senkronlanır (karar, türetilmiş veri değil). Mobil UI'da sanatçı satırında ± düğmesi olmalı. |
+| **Sanatçı komşuluk grafiği** | `src/lib/graph.ts` + `artist_edges` | ⭐ v1.8.0 ama ⛔ SENKRONLANMAZ (sayaç → LWW ezer). Mobil kendi grafiğini kendi radyo sonuçlarından kurar; veri bedava. |
+| **Sanatçı tür etiketleri** | `src/lib/tags.ts` + `artist_tags` | ⭐ v1.8.0, yerel. Tür alanı olmadığı için "şu anki modun: sakin · rock" bilgisinin TEK kaynağı. Filtre havuzu çekildikçe birikir. |
+| **Ses seviyesi eşitleme** | `src/lib/loudness.ts` + `track_loudness` + Rust `measure_loudness` | ⭐ v1.8.0. Yerel (dosyadan türer). ⚠️ MOBİLDE ffmpeg yok → ExoPlayer'ın kendi `LoudnessCodecController`'ı (Android 14+) ya da ReplayGain benzeri bir kütüphane kullanılmalı; ölçüm mantığı (hedef −14 LUFS, tepe koruması) aynen taşınır. |
+| **Yıllık özet (Wrapped)** | `src/views/WrappedView.tsx` | v1.8.0. Saf SQL; RN'de aynı sorgular. Mobilde paylaşım (Story) için görsel dışa aktarma DAHA değerli — `react-native-view-shot` ile ekran görüntüsü üretilebilir. |
+| **İnteraktif tur** | `src/components/Onboarding.tsx` | v1.8.0: spotlight + `data-tour` işaretleri. RN'de `measureInWindow()` ile aynı desen kurulur; adım listesi aynen taşınabilir. |
 
 **Mobilde platforma özel kalan tek şey SES**: yt-dlp gömülemez (§2).
+
+> ⭐⭐ **v1.8.0 — İNDİRME ARTIK ÇOK YOLLU, MOBİL DE AYNISINI YAPMALI.**
+> YouTube 2026'da bot doğrulaması + PO Token zorunluluğu getirdi. Masaüstünde
+> ÖLÇÜLDÜ (log'da 403/bot veren 5 video):
+>
+> | istemci | sonuç |
+> | --- | --- |
+> | default (android_vr) | ❌ 403 / "Sign in to confirm you're not a bot" |
+> | tv, ios | ❌ "Requested format is not available" |
+> | **web_embedded** | ✅ 4/4 indi, **audio-only m4a** (2.3–4.0 MB) |
+> | mweb, tv_simply | ✅ indi ama **muxed mp4** (11.4 MB = 3× veri) |
+>
+> Masaüstü çözümü: `web_embedded → default → mweb → tv_simply → çerez` sırası +
+> "en son işe yarayan yolu ilk dene" (öğrenen sıra) + iki tur taze çıkarım.
+> **Mobilde `youtubei.js` kullanılırken de aynı client çeşitliliği ŞART**
+> (`WEB_EMBEDDED` istemcisi öncelikli). Tek istemciye bağlanan mobil sürüm
+> aynı duvara çarpar. Mobil veri kotası nedeniyle **muxed yollar en sona**
+> alınmalı; mümkünse yalnız Wi-Fi'da denenmeli.
 `music_radio` / `music_genre_pool` / `search_youtube` şu an Rust'ta yt-dlp
 sarmalayıcısı; mobilde bunların `youtubei.js` karşılığı yazılmalı ve aynı
 `Track` şeklini döndürmelidir. Öneri motoru bu üç fonksiyonun ARKASINI bilmez.
@@ -202,10 +228,15 @@ mobile taşınırken `packages/core`'a çıkarılacak (§4).
   `synced_at > last_pulled`) → LWW merge.
 - **Çakışma**: satır başına **last-write-wins** (`updated_at`); olay günlükleri
   `uid` ile idempotent upsert.
-- **Canlı**: Supabase Realtime aboneliği + periyodik (5 dk) + odak yedeği.
+- **Canlı**: Supabase Realtime aboneliği + periyodik (10 dk) + odak yedeği.
 - **Mobil özel iş**: OS uygulamayı öldürebilir → bekleyen push'lar için `outbox`
   gerekebilir (masaüstünde gerekmedi).
-- **Tetik**: açılış, değişiklikte (debounce ~3sn), periyodik (~5dk), foreground'a dönüş.
+- **Tetik**: açılış, değişiklikte (debounce ~8sn, **yalnız PUSH**), realtime
+  bildirimi (**yalnız PULL**, ~4sn debounce), periyodik tam tur (~10dk),
+  foreground'a dönüş.
+  ⚠️ v1.8.0 dersi: her yerel değişiklikte TAM tur atmak (her çalınan şarkı
+  `play_history` yazar) tablo başına bir pull isteği demekti → şarkı başına 10+
+  gereksiz istek. Mobilde bu ayrım pil ve veri açısından DAHA kritik.
 - **Mobil özel**: OS uygulamayı öldürebilir → push'u kuyruğa yaz (`outbox`), sonra tamamla.
 
 ---

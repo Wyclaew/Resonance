@@ -25,6 +25,8 @@ export interface Settings {
   cacheLimitGb: number;
   /** İndirme ses kalitesi. "low" ≈ 48k (dosyalar ~3 kat küçük), "high" ≈ 128k. */
   audioQuality: "high" | "medium" | "low";
+  /** Şarkılar arası ses seviyesi farkını eşitle (ReplayGain mantığı). */
+  normalizeVolume: boolean;
   /** Profil avatarı (data URI). YERELDE kalır — settings senkronlanmıyor. */
   avatarDataUrl: string;
   /** En çok dinlenen kaç şarkı otomatik indirilsin (çevrimdışı). 0 = kapalı. */
@@ -51,6 +53,7 @@ const DEFAULTS: Settings = {
   screensaverSeconds: 90,
   cacheLimitGb: 2,
   audioQuality: "high" as "high" | "medium" | "low",
+  normalizeVolume: true,
   avatarDataUrl: "",
   autoDownloadTop: 0,
   resumeState: "",
@@ -76,6 +79,7 @@ const KEYS: Record<keyof Settings, string> = {
   screensaverSeconds: "appearance.screensaverSeconds",
   cacheLimitGb: "storage.cacheLimitGb",
   audioQuality: "storage.audioQuality",
+  normalizeVolume: "playback.normalizeVolume",
   avatarDataUrl: "profile.avatarDataUrl",
   autoDownloadTop: "storage.autoDownloadTop",
   resumeState: "playback.resumeState",

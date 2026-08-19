@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.7.0** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.8.0** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,26 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.8.0'da: ⭐⭐ **İNDİRME ÇOK YOLLU** (YouTube bot doğrulaması + PO Token →
+varsayılan istemci 403/"not a bot" veriyordu; ÖLÇÜLDÜ: `web_embedded` audio-only
+m4a ile 4/4 kurtardı → sıra `web_embedded → default → mweb → tv_simply → çerez`
++ "en son işe yarayan yolu ilk dene"); **ZEVK PROFİLİ SAYFASI** (`TasteView`,
+modelin içi + sanatçı başına daha çok/az/engelle, migration v8 `artist_prefs`
+SENKRONLANIR); **öneri kalitesi ölçümü** (haftalık kabul oranı — ölçüldü: %35);
+**sanatçı komşuluk grafiği** (`artist_edges`, radyo sonuçlarının %90'ı çöpe
+gidiyordu → yakınlık komşulara yayılıyor, havuz kütüphane dışına çıktı);
+**tekrar dinleme sinyali**; **ses seviyesi eşitleme** (`measure_loudness`,
+ffmpeg loudnorm, hedef −14 LUFS + tepe koruması); **kuyruğu listeye kaydet**;
+**SEÇMELİ AYAR SENKRONU** (`settings` beyaz liste) + **`device_queue`**
+(Keşfet kuyruğu cihazlar arası; artık açılışta doğrudan oynatıcıya yüklenir);
+**senkron sıklığı düştü** (yerel değişiklik yalnız PUSH/8sn, realtime yalnız
+PULL/4sn, tam tur 10dk); **İNTERAKTİF TUR** (spotlight + sayfa gezdirme);
+**YILLIK ÖZET** (`WrappedView`, paylaşılabilir); Keşfet UX (sıra düğmesi
+Keşfet'te gizli, eski keşfet paneli kaldırıldı, "Yeni keşif" filtresizken gri,
+"Rastgele" filtre seçiliyken pasif, mod etiketi sanatçı yerine tür/ruh hali);
+playlist'te **3 seçenekli oynat çekmecesi** (sıralı/rastgele/önerili) +
+`playNow` artık `shuffleMode`'u yok saymıyor (BUG'DI: akıllı karışık seçiliyken
+sırayla çalıyordu).
 v1.7.0'da: **"bu sanatçıyı önerme"** (migration v7 `blocked_artists`, SENKRONLANIR →
 PC'de engellediğin telefonda da gelmez; Ayarlar → Resonance Önerisi'nden geri alınır),
 **tarz kilidi** (`lockedSeedArtist`, tohum ağırlığı ×8), **otomatik çevrimdışı indirme**
@@ -117,7 +137,8 @@ sonra `cd src-tauri && cargo check --target x86_64-pc-windows-gnu`. Bitince saht
   cache(+downloaded), settings, **recommendation_history**, **sync_state**.
   Migration'lar: v1 ilk şema, v2 downloaded,
   v3 current_vote, v4 recommendation_history, **v5 senkron iskeleti**, **v6 now_playing**,
-  **v7 blocked_artists**.
+  **v7 blocked_artists**, **v8 artist_prefs + artist_edges + artist_tags +
+  track_loudness + device_queue + settings senkron alanları**.
 
 ## Öneri motoru (`src/lib/recommender.ts`) — nasıl çalışır
 Tüm sinyaller tek skorda birleşir:
@@ -243,6 +264,15 @@ Tüm sinyaller tek skorda birleşir:
     ölü bir öneri hata verince O AN çalan şarkı atlanıyordu ("durup dururken şarkı geçti" bug'ı).
 11. **`is_permanent_error`**: "Video unavailable/private/removed" → çerez retry'ı ve `-F` yapma, hemen bırak.
     DİKKAT: "requested format is not available" **geçicidir**, buraya ASLA ekleme.
+11c. **⭐⭐ İNDİRME ÇOK YOLLU OLMALI — TEK İSTEMCİ YETMEZ** (v1.8.0, `ensure_audio`):
+    YouTube bot doğrulaması + PO Token zorunluluğu getirdi; varsayılan istemci
+    ya "Sign in to confirm you're not a bot" ya da bayt indirmede 403 döndürüyor.
+    **ÖLÇÜM (2026-08-19):** default(android_vr) ❌ · tv ❌ · ios ❌ ·
+    **web_embedded ✅ (audio-only m4a, 4/4)** · mweb ✅ (muxed 11MB) · tv_simply ✅.
+    Sıra: `web_embedded → default → mweb → tv_simply → çerez`, + LAST_GOOD_STRATEGY
+    ("en son işe yarayan yolu ilk dene") + 2 tur taze çıkarım.
+    ⛔ **"Kendi ham indiricimizi yazalım" ÇÖZÜM DEĞİL**: duvarı aşan şey yt-dlp'nin
+    imza/nsig JS çözücüsü ve istemci taklidi; elle HTTP indirici aynı 403'ü alır.
 11b. **⭐ İNDİRME 403 = GEÇİCİ THROTTLE, RETRY GEREKİR** (v1.2.3, `ensure_audio`): asıl ses baytlarını
     indirirken YouTube çok sayıda eşzamanlı istek altında "unable to download video data: HTTP Error 403
     Forbidden" döndürüyor. **Format ÇÖZÜLÜR** (`--simulate` geçer, `-F` liste verir) ama bayt indirme

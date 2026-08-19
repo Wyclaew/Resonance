@@ -174,6 +174,28 @@ export async function importTracks(
   }
 }
 
+/**
+ * Kuyruğu yeni bir çalma listesine kaydeder ("bu seti beğendim, kalsın").
+ *
+ * Keşfet kuyruğu doğası gereği GEÇİCİDİR: reroll ya da yeni parti onu siler.
+ * Beğenilen bir keşif setini kalıcı hâle getirmenin başka yolu yoktu —
+ * kullanıcı parçaları tek tek listeye eklemek zorundaydı.
+ *
+ * Aynı şarkı kuyrukta iki kez olabilir (QueueItem.uid farklı, track id aynı);
+ * `addTrackToPlaylist` zaten üye olanı atlar, ekleme sayısı ona göre döner.
+ */
+export async function savePlaylistFromTracks(
+  name: string,
+  tracks: Track[]
+): Promise<{ playlist: Playlist; added: number }> {
+  const playlist = await createPlaylist(name);
+  let added = 0;
+  for (const t of tracks) {
+    if (await addTrackToPlaylist(playlist.id, t)) added++;
+  }
+  return { playlist, added };
+}
+
 export async function removeTrackFromPlaylist(
   playlistId: string,
   trackId: string

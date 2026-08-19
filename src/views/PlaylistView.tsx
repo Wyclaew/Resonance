@@ -14,6 +14,9 @@ import {
   Loader2,
   Search,
   X,
+  ChevronDown,
+  Shuffle,
+  Sparkles,
 } from "lucide-react";
 import ViewHeader from "../components/ViewHeader";
 import TrackRow from "../components/TrackRow";
@@ -47,6 +50,8 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
   const current = usePlayerStore((s) => s.current);
   const status = usePlayerStore((s) => s.status);
   const playNow = usePlayerStore((s) => s.playNow);
+  const playShuffled = usePlayerStore((s) => s.playShuffled);
+  const startSmartShuffle = usePlayerStore((s) => s.startSmartShuffle);
 
   const rename = usePlaylistStore((s) => s.rename);
   const removePlaylist = usePlaylistStore((s) => s.remove);
@@ -215,14 +220,12 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
         </div>
 
         <div className="flex items-center gap-1">
-          <button
-            onClick={() => tracks.length && playNow(tracks[0], tracks)}
+          <PlayMenu
             disabled={tracks.length === 0}
-            title={t("playlist.playAll")}
-            className="mr-1 flex items-center gap-2 rounded-full bg-accent px-4 py-2 text-sm font-medium text-bg transition-transform hover:scale-105 disabled:opacity-30 disabled:hover:scale-100"
-          >
-            <Play size={16} fill="currentColor" /> {t("player.play")}
-          </button>
+            onOrdered={() => playNow(tracks[0], tracks, playlistId)}
+            onShuffle={() => playShuffled(tracks, playlistId)}
+            onSmart={() => void startSmartShuffle(tracks, playlistId)}
+          />
           <button
             onClick={downloadAll}
             disabled={tracks.length === 0 || allDownloaded || !!batch}
@@ -457,5 +460,114 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
         </div>
       )}
     </div>
+  );
+}
+
+// ⭐ ÇALMA ÇEKMECESİ (v1.8.0). Tek "Oynat" düğmesi yerine üç açık seçenek.
+//
+// NEDEN: eskiden tek düğme vardı ve alt bardaki karışık moduna göre farklı
+// davranıyordu — kullanıcı "akıllı karışık açıkken sırayla çaldı" diye
+// bildirdi (playNow modu yok sayıyordu). Modu düğmenin İÇİNE almak, gizli
+// duruma bağlı sürprizi tamamen kaldırır.
+function PlayMenu({
+  disabled,
+  onOrdered,
+  onShuffle,
+  onSmart,
+}: {
+  disabled: boolean;
+  onOrdered: () => void;
+  onShuffle: () => void;
+  onSmart: () => void;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const pick = (fn: () => void) => {
+    setOpen(false);
+    fn();
+  };
+
+  return (
+    <div ref={boxRef} className="relative mr-1">
+      <div className="flex items-stretch overflow-hidden rounded-full bg-accent text-bg">
+        <button
+          onClick={onOrdered}
+          disabled={disabled}
+          title={t("playlist.playOrdered")}
+          className="flex items-center gap-2 py-2 pl-4 pr-3 text-sm font-medium transition-opacity hover:opacity-90 disabled:opacity-30"
+        >
+          <Play size={16} fill="currentColor" /> {t("player.play")}
+        </button>
+        <button
+          onClick={() => setOpen((v) => !v)}
+          disabled={disabled}
+          title={t("playlist.playOptions")}
+          className="grid w-8 place-items-center border-l border-bg/20 transition-opacity hover:opacity-90 disabled:opacity-30"
+        >
+          <ChevronDown size={15} />
+        </button>
+      </div>
+
+      {open && (
+        <div className="absolute right-0 z-50 mt-1 w-60 overflow-hidden rounded-lg border border-border bg-surface shadow-xl">
+          <PlayOption
+            icon={<ListOrdered size={15} />}
+            label={t("playlist.playOrdered")}
+            hint={t("playlist.playOrderedHint")}
+            onClick={() => pick(onOrdered)}
+          />
+          <PlayOption
+            icon={<Shuffle size={15} />}
+            label={t("playlist.playShuffled")}
+            hint={t("playlist.playShuffledHint")}
+            onClick={() => pick(onShuffle)}
+          />
+          <PlayOption
+            icon={<Sparkles size={15} />}
+            label={t("playlist.playSmart")}
+            hint={t("playlist.playSmartHint")}
+            onClick={() => pick(onSmart)}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlayOption({
+  icon,
+  label,
+  hint,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  hint: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-surface-2"
+    >
+      <span className="mt-0.5 text-accent">{icon}</span>
+      <span className="min-w-0">
+        <span className="block text-sm">{label}</span>
+        <span className="block text-xs text-muted">{hint}</span>
+      </span>
+    </button>
   );
 }

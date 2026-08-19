@@ -36,7 +36,44 @@ type TableSpec = {
   cloudConflict: string;
   /** Senkronlanan sütunlar (yerel = bulut isimleri birebir aynı). */
   cols: string[];
+  /**
+   * Yalnız belirli satırları taşı (settings için ŞART: tablonun tamamı değil,
+   * beyaz listedeki anahtarlar senkronlanır). Push'ta SQL koşulu, pull'da aynı
+   * kararı veren JS süzgeci — İKİSİ DE olmalı, yoksa bulutta duran cihaza özel
+   * bir satır geri sızar.
+   */
+  pushWhere?: string;
+  pullKeep?: (row: Record<string, unknown>) => boolean;
 };
+
+// ⭐ SENKRONLANAN AYARLAR (v1.8.0) — beyaz liste, kara liste DEĞİL.
+// Yeni bir ayar eklendiğinde varsayılan davranış "senkronlanmaz" olmalı:
+// cihaza özel bir ayarı yanlışlıkla senkronlamak (ör. ses seviyesi, avatar,
+// cihaz kimliği) sessiz ve can sıkıcı hatalar üretir.
+export const SYNCED_SETTING_KEYS = new Set([
+  "appearance.theme",
+  "appearance.language",
+  "appearance.accent",
+  "appearance.screensaverSeconds",
+  "rec.enabled",
+  "rec.source.youtube",
+  "rec.source.library",
+  "rec.everyN",
+  "karma.halfLifeDays",
+  "storage.audioQuality",
+  "storage.cacheLimitGb",
+  "storage.autoDownloadTop",
+  "playback.prefetch",
+  "playback.normalizeVolume",
+]);
+// ⛔ BİLEREK DIŞARIDA: playback.resumeState (cihazın kendi kuyruğu —
+// device_queue tablosu taşır), playback.savedVolume / rememberVolume,
+// profile.avatarDataUrl, yt.cookiesBrowser (tarayıcı cihaza göre değişir),
+// spotify.clientId/Secret (gizli anahtar buluta düz metin gitmesin),
+// app.onboardingDone (yeni cihazda rehber görünsün).
+const SETTINGS_WHERE = `key IN (${[...SYNCED_SETTING_KEYS]
+  .map((k) => `'${k}'`)
+  .join(", ")})`;
 
 // ⚠️ SIRA ÖNEMLİ — yabancı anahtar bağımlılığı:
 // playlist_tracks → playlists(id) ve tracks(id). Ebeveynler önce gelmeli,
@@ -108,6 +145,34 @@ const TABLES: TableSpec[] = [
     cols: ["artist", "created_at", "updated_at", "deleted", "device_id"],
   },
   {
+    // "Daha çok / daha az öner" — kullanıcının ELLE kararı. Türetilmiş veri
+    // değil, bu yüzden senkronlanır (blocked_artists ile aynı gerekçe).
+    name: "artist_prefs",
+    conflict: "artist",
+    cloudConflict: "user_id,artist",
+    cols: ["artist", "weight", "created_at", "updated_at", "deleted", "device_id"],
+  },
+  {
+    // Seçmeli ayar senkronu — yalnız beyaz listedeki anahtarlar.
+    name: "settings",
+    conflict: "key",
+    cloudConflict: "user_id,key",
+    cols: ["key", "value", "updated_at", "deleted", "device_id"],
+    pushWhere: SETTINGS_WHERE,
+    pullKeep: (r) => SYNCED_SETTING_KEYS.has(String(r.key ?? "")),
+  },
+  {
+    // Cihazlar arası KUYRUK (Keşfet partisi dahil). Cihaz başına satır.
+    name: "device_queue",
+    conflict: "device_id",
+    cloudConflict: "user_id,device_id",
+    cols: [
+      "device_id", "device_name", "mode", "playlist_id", "queue_json",
+      "queue_index", "position_ms", "filters_json", "seeds_json",
+      "updated_at", "deleted",
+    ],
+  },
+  {
     name: "recommendation_history",
     conflict: "uid",
     cloudConflict: "user_id,uid",
@@ -119,8 +184,13 @@ const TABLES: TableSpec[] = [
 const NUM_DEFAULT_0 = new Set([
   "updated_at", "deleted", "position", "vote", "duration_ms", "ms_played",
   "value", "hour", "dow", "added_at", "created_at", "played_at",
-  "recommended_at", "position_ms", "playing",
+  "recommended_at", "position_ms", "playing", "queue_index",
 ]);
+
+// Varsayılanı 0 OLMAYAN sayısal sütunlar. `artist_prefs.weight` yerelde
+// NOT NULL DEFAULT 1: NULL yazılsaydı satır hiç uygulanamaz, pull su terazisi
+// o satırda takılır ve her turda aynı hatayı tekrarlardı.
+const NUM_DEFAULT_1 = new Set(["weight"]);
 
 const PAGE = 500; // pull sayfa boyutu
 const CHUNK = 400; // push yığın boyutu
@@ -227,7 +297,11 @@ function upsertSql(spec: TableSpec): string {
 function valuesFor(spec: TableSpec, row: Record<string, unknown>): unknown[] {
   return spec.cols.map((c) => {
     const v = row[c];
-    if (v === undefined || v === null) return NUM_DEFAULT_0.has(c) ? 0 : null;
+    if (v === undefined || v === null) {
+      if (NUM_DEFAULT_0.has(c)) return 0;
+      if (NUM_DEFAULT_1.has(c)) return 1;
+      return null;
+    }
     return v;
   });
 }
@@ -265,6 +339,12 @@ async function pullTable(spec: TableSpec, userId: string): Promise<number> {
 
     for (const row of rows as Record<string, unknown>[]) {
       try {
+        // Beyaz liste dışı satırı yerele YAZMA (bulutta eski bir sürümden
+        // kalmış olabilir); yine de su terazisi ilerlesin, yoksa takılırdı.
+        if (spec.pullKeep && !spec.pullKeep(row)) {
+          if (!stopAdvancing) safeWatermark = String(row.synced_at);
+          continue;
+        }
         await db.execute(sql, valuesFor(spec, row));
         applied++;
         if (!stopAdvancing) safeWatermark = String(row.synced_at);
@@ -297,7 +377,8 @@ async function pushTable(spec: TableSpec, userId: string): Promise<number> {
 
   const rows = await db.select<Record<string, unknown>[]>(
     `SELECT ${spec.cols.join(", ")} FROM ${spec.name}
-     WHERE updated_at > $1 ORDER BY updated_at ASC`,
+     WHERE updated_at > $1${spec.pushWhere ? ` AND ${spec.pushWhere}` : ""}
+     ORDER BY updated_at ASC`,
     [lastPushed]
   );
   if (rows.length === 0) return 0;
@@ -326,7 +407,17 @@ async function pushTable(spec: TableSpec, userId: string): Promise<number> {
 let running = false;
 let rerunRequested = false;
 
-export async function syncNow(): Promise<void> {
+/**
+ * @param mode "full" (varsayılan) | "push" | "pull"
+ *
+ * ⭐ NEDEN AYRIM VAR (v1.8.0): her yerel değişiklik (her çalınan şarkı bile
+ * play_history yazar) TAM tur tetikliyordu. Push tarafı ucuz — değişmemiş
+ * tablo hiç ağ isteği yapmaz — ama PULL her tablo için mutlaka bir istek
+ * atar: şarkı başına 10+ gereksiz istek. Kullanıcı "sürekli senkronlayıp
+ * duruyor" diye bildirdi. Artık yerel değişiklik yalnız PUSH eder; pull
+ * realtime bildirimi, periyodik tur ve pencere odağıyla gelir.
+ */
+export async function syncNow(mode: "full" | "push" | "pull" = "full"): Promise<void> {
   if (!isTauri() || !isSyncConfigured()) return;
   const userId = await getUserId();
   if (!userId) {
@@ -364,11 +455,15 @@ export async function syncNow(): Promise<void> {
 
     // ÖNCE PUSH: yereldeki değişiklik buluta çıkmadan pull edilirse, gelen
     // eski satır LWW'de kaybeder ama gereksiz iş olur. Push→pull daha temiz.
-    for (const spec of TABLES) {
-      pushed += await guard(`${spec.name} push`, () => pushTable(spec, userId));
+    if (mode !== "pull") {
+      for (const spec of TABLES) {
+        pushed += await guard(`${spec.name} push`, () => pushTable(spec, userId));
+      }
     }
-    for (const spec of TABLES) {
-      pulled += await guard(`${spec.name} pull`, () => pullTable(spec, userId));
+    if (mode !== "push") {
+      for (const spec of TABLES) {
+        pulled += await guard(`${spec.name} pull`, () => pullTable(spec, userId));
+      }
     }
 
     setState({
@@ -428,10 +523,13 @@ let changeTimer: ReturnType<typeof setTimeout> | null = null;
 export function notifyLocalChange(): void {
   if (!isSyncConfigured()) return;
   if (changeTimer) clearTimeout(changeTimer);
+  // 3sn → 8sn ve TAM tur yerine yalnız PUSH: bir şarkı dinlemek bile
+  // play_history yazdığı için eski hâli dakikada birkaç kez tam tur
+  // çalıştırıyordu (her turda tablo başına bir pull isteği).
   changeTimer = setTimeout(() => {
     changeTimer = null;
-    void syncNow();
-  }, 3000);
+    void syncNow("push");
+  }, 8000);
 }
 
 // Uzaktan veri geldiğinde UI'ın kendini tazelemesi için (playlist listesi vb.).
@@ -442,6 +540,17 @@ export function onRemoteApplied(fn: () => void): () => void {
 }
 function notifyRemoteApplied() {
   for (const fn of remoteListeners) fn();
+}
+
+// Uzaktan değişiklik bildirimi geldi → yalnız PULL (bizim push'umuz zaten
+// olan biteni buluta yazdı; tam tur atmak gereksiz ikinci tur demek).
+let remotePullTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleRemotePull(): void {
+  if (remotePullTimer) clearTimeout(remotePullTimer);
+  remotePullTimer = setTimeout(() => {
+    remotePullTimer = null;
+    void syncNow("pull");
+  }, 4000);
 }
 
 let channel: RealtimeChannel | null = null;
@@ -469,14 +578,15 @@ export async function startSync(): Promise<void> {
           table: spec.name,
           filter: `user_id=eq.${userId}`,
         },
-        () => notifyLocalChange()
+        () => scheduleRemotePull()
       );
     }
     channel.subscribe();
   }
 
   // Yedek tetikler: realtime kopabilir (uyku, ağ değişimi).
-  periodic = setInterval(() => void syncNow(), 5 * 60 * 1000);
+  // Yedek tam tur: realtime kopabilir (uyku, ağ değişimi).
+  periodic = setInterval(() => void syncNow("full"), 10 * 60 * 1000);
   window.addEventListener("focus", onFocus);
 
   void syncNow();

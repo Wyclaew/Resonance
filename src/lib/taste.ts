@@ -188,3 +188,34 @@ export function currentConfidence(): number {
 export function currentBucketPlays(): number {
   return current().plays;
 }
+
+/** Kovanın gün dilimi anahtarı — UI çevirisi için ("wd-morning" → wd, morning). */
+export function splitBucket(b: Bucket): { weekend: boolean; part: string } {
+  const [wk, part] = b.split("-");
+  return { weekend: wk === "we", part: part ?? "morning" };
+}
+
+/**
+ * TÜM kovaların özeti — Zevk Profili sayfası için ("hangi saatte ne
+ * dinliyorum, buna ne kadar güveniyorum").
+ */
+export function allBuckets(): {
+  bucket: Bucket;
+  plays: number;
+  confidence: number;
+  top: string[];
+}[] {
+  return [...profiles.entries()]
+    .map(([bucket, p]) => ({
+      bucket,
+      plays: p.plays,
+      confidence: p.confidence,
+      top: [...p.scores.entries()]
+        .filter(([, v]) => v > 0)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([k]) => k),
+    }))
+    .filter((b) => b.plays > 0)
+    .sort((a, b) => b.plays - a.plays);
+}
