@@ -16,6 +16,7 @@ import {
   Upload,
   Check,
   RefreshCw,
+  Stethoscope,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
@@ -224,6 +225,8 @@ function IntegrationsSettings() {
   const update = useSettingsStore((s) => s.update);
   const [updating, setUpdating] = useState(false);
   const [ytdlpMsg, setYtdlpMsg] = useState<string | null>(null);
+  const [diagRunning, setDiagRunning] = useState(false);
+  const [diag, setDiag] = useState<string | null>(null);
 
   async function updateYtdlp() {
     if (!isTauri()) return;
@@ -236,6 +239,25 @@ function IntegrationsSettings() {
       setYtdlpMsg(`Hata: ${String(e)}`);
     } finally {
       setUpdating(false);
+    }
+  }
+
+  // ⭐ TEŞHİS: "hiçbir şarkı açılmıyor" durumunda zinciri baştan sona dener ve
+  // hangi adımın kırıldığını düz metin olarak söyler. Arayüzde log ekranı
+  // olmadığı için (kaldırıldı) kullanıcının tek teşhis aracı bu.
+  async function runDiagnostics() {
+    if (!isTauri()) return;
+    setDiagRunning(true);
+    setDiag(null);
+    try {
+      const report = await invoke<string>("diagnose_download", {
+        cookiesBrowser,
+      });
+      setDiag(report);
+    } catch (e) {
+      setDiag(`Hata: ${String(e)}`);
+    } finally {
+      setDiagRunning(false);
     }
   }
 
@@ -292,6 +314,33 @@ function IntegrationsSettings() {
         >
           {ytdlpMsg}
         </p>
+      )}
+
+      <SettingRow
+        label={t("settings.diagnose")}
+        description={t("settings.diagnoseDesc")}
+      >
+        <button
+          onClick={runDiagnostics}
+          disabled={diagRunning}
+          className="flex items-center gap-2 rounded-md bg-surface-2 px-3 py-1.5 text-sm font-medium text-text hover:bg-surface-3 disabled:opacity-40"
+        >
+          <Stethoscope size={14} className={diagRunning ? "animate-pulse" : ""} />
+          {diagRunning ? t("settings.diagnoseRunning") : t("settings.diagnoseRun")}
+        </button>
+      </SettingRow>
+      {diag && (
+        <div className="mt-2">
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-surface p-3 text-[11px] leading-relaxed text-muted">
+            {diag}
+          </pre>
+          <button
+            onClick={() => void navigator.clipboard.writeText(diag)}
+            className="mt-1.5 text-xs text-muted underline underline-offset-2 hover:text-text"
+          >
+            {t("settings.diagnoseCopy")}
+          </button>
+        </div>
       )}
 
       <div className="mt-6 mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">

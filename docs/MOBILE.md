@@ -207,6 +207,24 @@ Masaüstünde çalışan ve mobilde **yeniden yazılmaması gereken** parçalar:
 > | **web_embedded** | ✅ 4/4 indi, **audio-only m4a** (2.3–4.0 MB) |
 > | mweb, tv_simply | ✅ indi ama **muxed mp4** (11.4 MB = 3× veri) |
 >
+> ⭐ v1.8.0 EK ÖLÇÜM: kendi InnerTube çağrımız (IOS/ANDROID istemcisi) player
+> yanıtını ALIYOR ve ses URL'si veriyor, ama **ilk 1 MB'dan sonrası 403**
+> (PO Token yok). Buna karşılık yt-dlp'nin çözdüğü URL'ye elle `Range`
+> istekleri KISITSIZ çalışıyor. Yani **duvar indirmede değil URL çözümünde**.
+> Masaüstünde bu yüzden `native_dl.rs` yazıldı: 1) InnerTube ile çöz + parçalı
+> indir, 2) olmazsa URL'yi yt-dlp çözsün ama baytları BİZ indirelim,
+> 3) olmazsa yt-dlp'nin kendi indirmesi. **Mobilde de aynı üç katman
+> kurulmalı**: `youtubei.js` katman 1'i, indirme katmanı (Range + resume) saf
+> TS olarak `packages/core`'a yazılabilir ve iki platformda ortak kullanılır.
+> Mobilde resume ÖZELLİKLE kritik: şebeke kopması masaüstünden çok daha sık.
+>
+> ⭐ HIZ DERSİ (mobilde daha da geçerli): ölçümde bir şarkının hazır olma
+> süresinin **%70'i adres çözümü** (2.45 sn), indirme yalnız 0.79 sn. Paralel
+> parçalı indirme 0.29 sn kazandırıyor — yani mobilde de asıl kaldıraç
+> **adresleri önden toplu çözmek** (`prewarm_urls` karşılığı). Mobilde ayrıca
+> ekran kapalıyken/arka planda bu işi yapmak pil açısından ucuz, indirme ise
+> pahalı: ısıtma agresif, gerçek indirme muhafazakâr olmalı.
+>
 > Masaüstü çözümü: `web_embedded → default → mweb → tv_simply → çerez` sırası +
 > "en son işe yarayan yolu ilk dene" (öğrenen sıra) + iki tur taze çıkarım.
 > **Mobilde `youtubei.js` kullanılırken de aynı client çeşitliliği ŞART**

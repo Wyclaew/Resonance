@@ -400,6 +400,34 @@ function persistPlaybackState(force = false) {
 
 // Sıradaki parçaları arka planda indir/hazırla → hızlı arka arkaya geçişler de
 // anlık olur. 3 önden hazırlanır (zaten cache'tekiler yt-dlp bile çağırmaz).
+/**
+ * ⭐ ADRES ISITMA — sıradaki şarkıların indirme adreslerini ÖNDEN çöz.
+ *
+ * ÖLÇÜM (2026-08-19): bir şarkının hazır olması ~3.3 sn ve bunun 2.45 sn'si
+ * ADRES ÇÖZÜMÜ; indirmenin kendisi 0.8 sn. Yani hızlanmanın asıl kaldıracı
+ * paralel indirme değil, adresi önceden çözmüş olmak. Dosya indirmek pahalı
+ * olduğu için yalnız 2 şarkı prefetch edilir; adres çözümü ucuz ve toplu
+ * yapılabildiği için 8 şarkı ısıtılır.
+ *
+ * ⚠️ prefetchNext'e bağlı BIRAKILAMAZ: o yalnız şarkı yüklenirken çalışır.
+ * Uygulama duraklatılmış açıldığında kuyruk hazırdır ama hiç ısıtılmazdı →
+ * kullanıcı play'e bastığında yine 2.5 sn beklerdi.
+ */
+export function prewarmQueueUrls(): void {
+  if (!isTauri()) return;
+  if (!useSettingsStore.getState().prefetchEnabled) return;
+  const { queue, queueIndex } = usePlayerStore.getState();
+  const ids = queue
+    .slice(Math.max(0, queueIndex), queueIndex + 9)
+    .map((i) => i.sourceId)
+    .filter(Boolean);
+  if (ids.length === 0) return;
+  invoke("prewarm_urls", {
+    sourceIds: ids,
+    cookiesBrowser: useSettingsStore.getState().cookiesBrowser,
+  }).catch(() => {});
+}
+
 function prefetchNext() {
   if (!isTauri()) return;
   // Ekran koruyucu aktifken ağır yt-dlp çağrılarını durdur (CPU/disk tasarrufu).
@@ -407,7 +435,16 @@ function prefetchNext() {
   if (!useSettingsStore.getState().prefetchEnabled) return;
   const { queue, queueIndex } = usePlayerStore.getState();
   const cookiesBrowser = useSettingsStore.getState().cookiesBrowser;
-  for (let i = 1; i <= 3; i++) {
+  prewarmQueueUrls();
+
+  // ⭐ ÇEVRİMDIŞI TAMPON (v1.8.1): 2 → 5 şarkı.
+  // Neden artık güvenli: adresler önden çözülüyor (prewarm) ve indirmeyi
+  // kendi indiricimiz yapıyor → şarkı başına yt-dlp süreci başlatılmıyor.
+  // Eskiden 3 paralel hazırlık YouTube hız sınırını tetikliyordu; darboğaz
+  // ortadan kalkınca tamponu büyütmek ağ koptuğunda/YouTube tıkandığında
+  // müziğin devam etmesini sağlıyor. İstekler Rust tarafında sıraya giriyor
+  // (dl_semaphore), yani 5 istek aynı anda ağa çıkmıyor.
+  for (let i = 1; i <= 5; i++) {
     const item = queue[queueIndex + i];
     if (!item) break;
     invoke("prefetch_audio", {

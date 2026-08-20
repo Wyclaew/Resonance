@@ -148,6 +148,66 @@ export async function latestRemoteQueue(): Promise<RemoteQueue | null> {
   }
 }
 
+/**
+ * TÜM diğer cihazların kuyrukları (en yeniden eskiye).
+ *
+ * ⭐ Neden ayrı: `latestRemoteQueue` otomatik devralma için "en yeni"yi seçer.
+ * Ama kullanıcı hangi cihazdan devam edeceğini KENDİ seçmek isteyebilir
+ * ("Mac'teki keşfeti getir") — üç cihaz varken otomatik seçim yeterli değil.
+ */
+export async function listRemoteQueues(): Promise<RemoteQueue[]> {
+  if (!isTauri()) return [];
+  try {
+    const db = await getDb();
+    const rows = await db.select<
+      {
+        device_id: string;
+        device_name: string | null;
+        mode: string | null;
+        playlist_id: string | null;
+        queue_json: string;
+        queue_index: number;
+        position_ms: number;
+        filters_json: string | null;
+        seeds_json: string | null;
+        updated_at: number;
+      }[]
+    >(
+      `SELECT device_id, device_name, mode, playlist_id, queue_json, queue_index,
+              position_ms, filters_json, seeds_json, updated_at
+         FROM device_queue
+        WHERE deleted = 0 AND device_id <> $1 AND queue_json <> ''
+        ORDER BY updated_at DESC`,
+      [getDeviceId()]
+    );
+    const out: RemoteQueue[] = [];
+    for (const r of rows) {
+      try {
+        const queue = JSON.parse(r.queue_json) as QueueItem[];
+        if (!Array.isArray(queue) || queue.length === 0) continue;
+        out.push({
+          deviceId: r.device_id,
+          deviceName: r.device_name || "Device",
+          mode: r.mode === "discovery" ? "discovery" : "normal",
+          playlistId: r.playlist_id,
+          queue,
+          queueIndex: Math.min(Math.max(0, r.queue_index), queue.length - 1),
+          positionMs: r.position_ms,
+          filters: r.filters_json ? (JSON.parse(r.filters_json) as string[]) : [],
+          seeds: r.seeds_json ? (JSON.parse(r.seeds_json) as string[]) : [],
+          updatedAt: r.updated_at,
+        });
+      } catch {
+        /* bozuk satırı atla */
+      }
+    }
+    return out;
+  } catch (e) {
+    console.warn("[resonance] cihaz kuyrukları okunamadı:", e);
+    return [];
+  }
+}
+
 /** Bu cihazın son yazdığı kuyruk zamanı (hangisi daha yeni karşılaştırması). */
 export async function localQueueUpdatedAt(): Promise<number> {
   if (!isTauri()) return 0;

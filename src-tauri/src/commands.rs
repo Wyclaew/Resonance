@@ -280,9 +280,45 @@ static PLAY_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::ne
 // Arka plan indirme (prefetch + toplu indirme) eşzamanlılık sınırı. Çok sayıda
 // yt-dlp'yi aynı anda çalıştırmak YouTube throttle'ına (HTTP 403/416) yol
 // açıyordu. play_track bu sınıra TABİ DEĞİL (çalma her zaman öncelikli).
+/// Adres ısıtma turu için ayrı sınır: aynı anda tek tur yeter, ve bu iş
+/// gerçek indirmelerle YARIŞMAMALI (bkz. prewarm_urls).
+fn prewarm_semaphore() -> &'static tokio::sync::Semaphore {
+    static SEM: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    SEM.get_or_init(|| tokio::sync::Semaphore::new(1))
+}
+
 fn dl_semaphore() -> &'static tokio::sync::Semaphore {
     static SEM: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
-    SEM.get_or_init(|| tokio::sync::Semaphore::new(2))
+    // 2 → 3: yerel indirici sayesinde her hazırlık artık ayrı bir yt-dlp
+    // süreci başlatmıyor (adres önbellekten geliyor), yani eşzamanlılık
+    // maliyeti düştü. Tampon 5 şarkıya çıktığı için akış da hızlanmalı.
+    SEM.get_or_init(|| tokio::sync::Semaphore::new(3))
+}
+
+/// Açılışta artık kullanılmayan akış dosyalarını (`*.stream.aac`) siler.
+///
+/// İndirirken çalma yolunda bu dosyalar geçicidir: tamamlanınca nihai
+/// `<id>.aac` adına KOPYALANIR (taşınmaz, çünkü ses motoru hâlâ okuyor
+/// olabilir). Uygulama kapanınca hiçbiri kullanımda değildir → açılış,
+/// bunları silmek için tek güvenli an.
+pub fn cleanup_stream_files(app: &AppHandle) {
+    let Ok(dir) = audio_cache_dir(app) else {
+        return;
+    };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut n = 0;
+    for e in rd.flatten() {
+        if e.file_name().to_string_lossy().ends_with(".stream.aac")
+            && std::fs::remove_file(e.path()).is_ok()
+        {
+            n += 1;
+        }
+    }
+    if n > 0 {
+        log::info!("{n} geçici akış dosyası temizlendi");
+    }
 }
 
 #[tauri::command]
@@ -297,8 +333,48 @@ pub async fn play_track(
 
     let cache = audio_cache_dir(&app).map_err(|e| e.to_string())?;
     let sid = input.source_id.clone();
+    let cookies = cookies_browser.clone();
+
+    // ⭐ İNDİRİRKEN ÇALMA (v1.8.1): şarkının TAMAMINI beklemeden başla.
+    //
+    // Yalnızca gerçekten faydalı olduğu durumda denenir:
+    //  • dosya önbellekte YOKSA (varsa zaten anında çalıyor),
+    //  • baştan başlanıyorsa (resume varsa seek gerekir; yarım dosyada seek
+    //    güvenilir değil → normal yol).
+    // Herhangi bir aksilikte sessizce normal yola düşülür.
+    let cache_s = cache.clone();
+    let sid_s = sid.clone();
+    let cookies_s = cookies.clone();
+    let streamed = if input.resume_ms == 0 {
+        tauri::async_runtime::spawn_blocking(move || {
+            if ytdlp::is_cached_file(&cache_s, &sid_s) {
+                return None;
+            }
+            ytdlp::stream_audio(&cache_s, &sid_s, cookies_s.as_deref()).ok()
+        })
+        .await
+        .ok()
+        .flatten()
+    } else {
+        None
+    };
+
+    if let Some(h) = streamed {
+        if PLAY_GEN.load(Ordering::SeqCst) != my_gen {
+            return Ok(());
+        }
+        audio.send(AudioCmd::Load {
+            path: h.path,
+            duration_ms: input.duration_ms,
+            track_id: input.track_id,
+            start_ms: 0,
+            growing: Some(h.done),
+        });
+        return Ok(());
+    }
+
     let path = tauri::async_runtime::spawn_blocking(move || {
-        ytdlp::ensure_audio(&cache, &sid, cookies_browser.as_deref())
+        ytdlp::ensure_audio(&cache, &sid, cookies.as_deref())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -314,6 +390,7 @@ pub async fn play_track(
         duration_ms: input.duration_ms,
         track_id: input.track_id,
         start_ms: input.resume_ms,
+        growing: None,
     });
     Ok(())
 }
@@ -659,6 +736,48 @@ pub fn is_cached(app: AppHandle, source_id: String) -> bool {
                 .find(|p| p.exists())
         })
         .is_some()
+}
+
+/// İndirme zincirini baştan sona test eder ve okunabilir bir rapor döndürür
+/// (Ayarlar → Sorun Giderme). Arayüzde log ekranı olmadığı için Windows'taki
+/// "hiçbir şey çalmıyor" durumunun tek teşhis yolu buydu.
+#[tauri::command]
+pub async fn diagnose_download(
+    app: AppHandle,
+    cookies_browser: Option<String>,
+) -> Result<String, String> {
+    let cache = audio_cache_dir(&app).map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        ytdlp::diagnose(&cache, cookies_browser.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Sıradaki şarkıların adreslerini ARKA PLANDA çöz (dosya indirmez).
+///
+/// ⭐ Neden ayrı komut: prefetch dosyayı tam indirir ve pahalıdır (ağ + disk),
+/// bu yüzden yalnız 2 şarkı için yapılıyor. Oysa URL çözümü ucuz ve asıl
+/// bekleme sebebi O: ölçümde şarkı başına ~2.5 sn. Daha çok şarkının adresini
+/// önden çözmek, kullanıcı ileri atladığında beklemeyi sıfırlar.
+#[tauri::command]
+pub async fn prewarm_urls(
+    source_ids: Vec<String>,
+    cookies_browser: Option<String>,
+) -> Result<(), String> {
+    if source_ids.is_empty() {
+        return Ok(());
+    }
+    // ⚠️ İNDİRME SEMAFORUNU KULLANMA. Ölçümde 9 şarkının adresi 16 sn sürdü;
+    // aynı semaforu paylaşsaydı bu süre boyunca prefetch (gerçek indirme)
+    // bloke olurdu ve kullanıcı şarkı geçtiğinde beklerdi. Isıtmanın kendi
+    // sınırı var: aynı anda tek tur (üst üste yığılmasın).
+    let _permit = prewarm_semaphore().acquire().await;
+    tauri::async_runtime::spawn_blocking(move || {
+        ytdlp::prewarm_urls(&source_ids, cookies_browser.as_deref());
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[derive(serde::Serialize)]

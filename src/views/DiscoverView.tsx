@@ -15,6 +15,7 @@ import {
   ListPlus,
 } from "lucide-react";
 import ViewHeader from "../components/ViewHeader";
+import DeviceQueuePicker from "../components/DeviceQueuePicker";
 import { useT } from "../lib/i18n";
 import { usePlayerStore } from "../store/usePlayerStore";
 import { reasonText } from "../lib/recommender";
@@ -148,6 +149,8 @@ export default function DiscoverView() {
   return (
     <div className="flex h-full flex-col">
       <ViewHeader title={t("discover.title")} subtitle={t("discover.subtitle")}>
+        {/* Başka cihazdaki keşfeti getir (yalnız o cihaz varsa görünür). */}
+        <DeviceQueuePicker />
         <button
           onClick={() => void saveQueue()}
           disabled={saving || queue.length === 0}

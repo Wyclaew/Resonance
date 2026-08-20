@@ -1,9 +1,20 @@
 import { useEffect, useState } from "react";
-import { Sparkles, Clock, Radio, ListMusic, History, Play, Laptop } from "lucide-react";
+import {
+  Sparkles,
+  Clock,
+  Radio,
+  ListMusic,
+  History,
+  Play,
+  Laptop,
+  Compass,
+} from "lucide-react";
 import ViewHeader from "../components/ViewHeader";
 import TrackRow from "../components/TrackRow";
 import type { Playlist, Track } from "../types";
-import { getRecentTracks } from "../lib/history";
+import { getRecentTracks, weekDiscoveries } from "../lib/history";
+import { buildTasteProfile, predictedStyles } from "../lib/taste";
+import { isTauri } from "../lib/db";
 import { getPlaylistTracks } from "../lib/playlists";
 import { usePlayerStore } from "../store/usePlayerStore";
 import { usePlaylistStore } from "../store/usePlaylistStore";
@@ -59,6 +70,30 @@ export default function HomeView() {
 
   const hasContent = recent.length > 0 || playlists.length > 0;
 
+  // Saat profili tahmini (lib/taste.ts) — güven düşükse boş döner, o zaman
+  // kart hiç gösterilmez (yanlış tahminle yer kaplamasın).
+  const [predicted, setPredicted] = useState<string[]>([]);
+  const [fresh, setFresh] = useState<Track[]>([]);
+  const setLocked = usePlayerStore((s) => s.setLockedSeedArtist);
+  const startDiscovery = usePlayerStore((s) => s.startDiscovery);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    void (async () => {
+      await buildTasteProfile();
+      setPredicted(predictedStyles(3));
+      setFresh(await weekDiscoveries());
+    })();
+  }, []);
+
+  // "Bu tarzda keşfet": tohumu kilitleyip yeni parti kur (lockedSeedArtist
+  // ağırlığı ×8 → parti gerçekten o tarzdan beslenir).
+  const startInStyle = async (artist: string) => {
+    setLocked(artist);
+    navigate("discover");
+    await startDiscovery({ force: true });
+  };
+
   return (
     <div className="flex h-full flex-col overflow-y-auto">
       <ViewHeader
@@ -80,7 +115,32 @@ export default function HomeView() {
           </p>
         </div>
 
-        {/* Resonance Keşfi — sadece öğrenen algoritmanın önerileriyle çalar */}
+        {/* ⭐ ŞU AN SANA GÖRE (v1.8.1): saat profilinin tahmini + tek tıkla
+            o tarzda keşif. Ana sayfa bugüne kadar yalnız GEÇMİŞİ (son çalınan,
+            listeler) gösteriyordu; modelin öğrendiği şey hiç görünmüyordu. */}
+        {predicted.length > 0 && (
+          <div className="mt-4 rounded-xl border border-accent/25 bg-accent/[0.07] p-4">
+            <div className="flex items-center gap-2 text-xs text-accent">
+              <Sparkles size={13} />
+              {t("home.forNow")}
+            </div>
+            <p className="mt-1.5 text-sm leading-relaxed">
+              {t("home.forNowBody", { styles: predicted.join(" · ") })}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {predicted.slice(0, 3).map((a) => (
+                <button
+                  key={a}
+                  onClick={() => void startInStyle(a)}
+                  className="rounded-full border border-accent/40 px-3 py-1.5 text-xs text-accent transition-colors hover:bg-accent hover:text-bg"
+                >
+                  {t("home.startStyle", { artist: a })}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
 
         {/* ⭐ Başka cihazda kaldığın yer (now_playing senkronu) */}
         {other && (
@@ -124,6 +184,36 @@ export default function HomeView() {
               {t("home.otherDeviceResume")}
             </span>
           </button>
+        )}
+
+        {/* ⭐ BU HAFTANIN KEŞİFLERİ: son 7 günde İLK KEZ dinlediğin sanatçılar.
+            Keşfet'in gerçekten işe yarayıp yaramadığını görmenin en somut yolu
+            — ve beğendiklerini listeye almanın hızlı yolu. */}
+        {fresh.length > 0 && (
+          <section className="mt-8">
+            <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-faint">
+              <Compass size={13} /> {t("home.weekDiscoveries")}
+            </div>
+            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+              {fresh.map((tr) => (
+                <button
+                  key={tr.id}
+                  onClick={() => playNow(tr, fresh)}
+                  className="group flex items-center gap-2.5 rounded-lg border border-border bg-surface/60 p-2.5 text-left transition-all hover:-translate-y-0.5 hover:border-accent/40 hover:bg-surface"
+                >
+                  <div className="h-10 w-10 shrink-0 overflow-hidden rounded bg-surface-2">
+                    {tr.thumbnail && (
+                      <img src={tr.thumbnail} alt="" className="h-full w-full object-cover" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="truncate text-xs font-medium">{tr.title}</div>
+                    <div className="truncate text-[11px] text-muted">{tr.artist}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
         )}
 
         {/* Son çalınanlar */}

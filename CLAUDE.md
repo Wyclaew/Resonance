@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.8.0** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.8.1** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,7 +18,34 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
-v1.8.0'da: ⭐⭐ **İNDİRME ÇOK YOLLU** (YouTube bot doğrulaması + PO Token →
+v1.8.1'de: ⭐ **İNDİRİRKEN ÇALMA** (progressive playback, `native_dl::stream_to_adts`
++ `GrowingFile` + `AudioCmd::Load{growing}`): indirilen baytlar ffmpeg'e BORUDAN
+verilir, ffmpeg ADTS yazar, ses motoru dosyayı BÜYÜRKEN okur. ÖLÇÜLDÜ (entegrasyon
+testi `cargo test --lib progressive -- --ignored`): **ilk ses 1.1 sn → 0.33 sn**.
+⚠️ Akış yolu InnerTube adresini KULLANMAZ — test tam bunu yakaladı: o adres 1 MB'da
+403 veriyor ve akışta bu "şarkı ortasında sesin kesilmesi" demek. Yalnız kısıtsız
+adresler (önbellek/yt-dlp). ⚠️ "medium" kalite akışta desteklenmez (yeniden kodlama
+gerekir, akışta `-c:a copy` kullanılıyor) → normal yola düşer. ⚠️ Geçici
+`*.stream.aac` dosyaları AÇILIŞTA silinir (`cleanup_stream_files`) — tamamlanınca
+nihai ada kopyalanır, taşınmaz (dosya ses motorunda açık olabilir, Windows'ta
+taşıma başarısız olurdu).
+v1.8.1'de: **yt-dlp HAFTALIK OTOMATİK GÜNCELLEME** (eskiden yalnız İLK açılışta
+iniyordu; YouTube ayda birkaç kez değişiyor → eskiyen yt-dlp'de indirme sessizce
+çöküyor, Windows'ta "hiçbir şarkı açılmıyor" tablosunun en olası sebebi);
+**İNDİRME TEŞHİS PANELİ** (Ayarlar → Entegrasyonlar → "İndirme sorunu mu var?":
+yt-dlp/ffmpeg yolu+sürümü, yerel adres çözümü, gerçek test indirmesi, nerede
+kırıldığını söyleyen SONUÇ satırı — arayüzde log ekranı olmadığı için tek teşhis
+aracı); **ÇEVRİMDIŞI TAMPON 2→5 şarkı** (yerel indirici sayesinde artık şarkı
+başına yt-dlp süreci başlamıyor, eşzamanlılık maliyeti düştü);
+**CİHAZ KUYRUĞU SEÇİCİ** (`DeviceQueuePicker`, Keşfet başlığında "Başka cihaz" →
+hangi cihazın sırasını getireceğini SEÇ; otomatik devralma "en yeni"yi alıyordu,
+üç cihazda yetmiyordu); **ANA SAYFA** ("Şu an sana göre" — saat profilinin
+tahmini + tek tıkla o tarzda keşif; "Bu haftanın keşifleri" — son 7 günde İLK KEZ
+dinlenen sanatçılar).
+v1.8.0'da: ⭐⭐ **YEREL İNDİRİCİ** (`src-tauri/src/native_dl.rs`: InnerTube ile
+URL çözme + parçalı/devam eden Range indirici; yt-dlp artık yalnız URL çözücü
+rolünde, indirmeyi biz yapıyoruz — ölçüldü: duvar indirmede değil URL
+çözümünde); **İNDİRME ÇOK YOLLU** (YouTube bot doğrulaması + PO Token →
 varsayılan istemci 403/"not a bot" veriyordu; ÖLÇÜLDÜ: `web_embedded` audio-only
 m4a ile 4/4 kurtardı → sıra `web_embedded → default → mweb → tv_simply → çerez`
 + "en son işe yarayan yolu ilk dene"); **ZEVK PROFİLİ SAYFASI** (`TasteView`,
@@ -127,6 +154,7 @@ sonra `cd src-tauri && cargo check --target x86_64-pc-windows-gnu`. Bitince saht
   get_lyrics, play_track, download_audio, prefetch_audio, delete_audio, is_cached, cache_files,
   delete_cache_except, export_data, backup_db / list_backups / restore_backup, update_ytdlp, read_log,
   audio_play/pause/seek/stop/set_volume/status.
+- **Yerel indirici** (`native_dl.rs`): InnerTube URL çözümü + Range'li, devam edebilen indirici (3 katmanlı akışın 1. ve 2. katmanı).
 - **Ses motoru** (`audio.rs`): rodio Sink, AudioCmd kanalı, `catch_unwind` ile çözümleme paniğine dayanıklı.
   `Load{start_ms}` ile kaldığın yerden devam.
 - **yt-dlp/ffmpeg** (`ytdlp.rs`): `resolve_bin()` sırası → sistem → **app_data/bin (runtime güncellenen)** →
@@ -264,6 +292,48 @@ Tüm sinyaller tek skorda birleşir:
     ölü bir öneri hata verince O AN çalan şarkı atlanıyordu ("durup dururken şarkı geçti" bug'ı).
 11. **`is_permanent_error`**: "Video unavailable/private/removed" → çerez retry'ı ve `-F` yapma, hemen bırak.
     DİKKAT: "requested format is not available" **geçicidir**, buraya ASLA ekleme.
+11e. **⭐ HIZ: DARBOĞAZ İNDİRME DEĞİL, ADRES ÇÖZÜMÜ** (v1.8.0). ÖLÇÜM
+    (3.17 MB şarkı): yt-dlp ile adres çözümü **2.45 sn**, indirme yalnız
+    0.79-1.08 sn. Yani "şarkıyı 3 yerinden paralel indir" fikri gerçek sorunu
+    çözmez — ölçüldü: tek istek 0.79 sn · 1 MB sıralı 1.08 sn · **1 MB
+    paralel×4 0.79 sn** (kazanç 0.29 sn). Yapılanlar:
+    • **Tek istekte tam dosya** (≤24 MB) — parçalamanın faydası yokken istek
+      sayısını 4'e katlamak anlamsız. Parçalı+paralel (4 eşzamanlı) yol yalnız
+      tek istek reddedilirse ya da bağlantı koparsa devreye girer.
+    • **⭐ ADRES ISITMA** (`prewarm_urls` + `native_dl` URL önbelleği):
+      sıradaki 8 şarkının adresi TEK yt-dlp çağrısında önden çözülür
+      (ölçüm: ayrı ayrı 2.50 sn/video → toplu 1.91 sn/video, üstelik arka
+      planda). Kullanıcı ileri atlayınca çözüm beklemesi SIFIRA iner.
+      ⚠️ Isıtma `dl_semaphore`'u KULLANMAZ (ayrı semafor): 9 şarkılık tur
+      16 sn sürüyor, aynı semaforu paylaşsa gerçek indirmeleri bloke ederdi.
+      ⚠️ `prefetchNext`e bağlı bırakılamaz — o yalnız şarkı yüklenirken çalışır;
+      uygulama duraklatılmış açıldığında kuyruk hazır olmasına rağmen hiç
+      ısınmazdı (`prewarmQueueUrls`, App.tsx'te resume sonrası da çağrılır).
+11d. **⭐⭐ İNDİRME DÖRT KATMANLI — YEREL İNDİRİCİ ÖNCE** (v1.8.0, `native_dl.rs`):
+    Kullanıcı "neredeyse her şarkıda yüklenemedi" dedi. ÖLÇÜM (2026-08-19,
+    gerçek isteklerle):
+    • Kendi InnerTube çağrım (IOS/ANDROID): player yanıtı OK, ses URL'si geliyor,
+      ama **ilk 1 MB iniyor, sonrası 403** (PO Token yok).
+    • Kendi InnerTube (WEB_EMBEDDED/MWEB/TVHTML5): player yanıtı bile yok.
+    • **yt-dlp'nin ÇÖZDÜĞÜ URL + elle Range istekleri: p1 206, p2 206, tam 200 →
+      KISITSIZ.**
+    ⭐ ÇIKARIM: duvar İNDİRMEDE değil, **URL ÇÖZÜMÜNDE**. Buna göre sıra:
+      0. **Önbellekteki adres** (`native_dl::cached_source`) — ısıtmadan gelen
+         hazır adres. En hızlı yol; yt-dlp de çalışmaz, boşa indirme de olmaz.
+      1. `native_dl::fetch` — InnerTube ile çöz + parçalı indir (yt-dlp süreci
+         HİÇ başlamaz, ~1.5-3 sn tasarruf). Üst üste 3 başarısızlıkta 30 dk
+         askıya alınır (boşuna 1 MB indirmesin).
+      2. `resolve_url_with_ytdlp` (`-j`) + `native_dl::fetch_with_url` — URL'yi
+         yt-dlp çözer, **baytları biz indiririz**. Pratikte kurtaran yol bu.
+      3. yt-dlp'nin kendi indirmesi (aşağıdaki çok yollu strateji).
+    ⚠️ `-j` bayrağı `--`'den ÖNCE gelmeli; sonra konursa pozisyonel argüman
+    sayılır ve katman 2 SESSİZCE hiç çalışmaz (bu hata bir kez yapıldı).
+    ⚠️ `.part` (yarım indirme) + `.part.meta` (devam mührü) dosyaları
+    `<id>.src.` önekiyle eşleşiyor → `find_src` bunları ATLAMAK ZORUNDA, yoksa
+    ffmpeg yarım dosyayı kaynak sanar.
+    ⚠️ Devam (resume) YALNIZ aynı kaynakta geçerli: `.part.meta` mührü
+    (content_length + URL kuyruğu) tutmuyorsa `.part` silinir — yoksa katman 1'in
+    yarım dosyası üstüne katman 2'nin farklı baytları yazılıp ses BOZULUR.
 11c. **⭐⭐ İNDİRME ÇOK YOLLU OLMALI — TEK İSTEMCİ YETMEZ** (v1.8.0, `ensure_audio`):
     YouTube bot doğrulaması + PO Token zorunluluğu getirdi; varsayılan istemci
     ya "Sign in to confirm you're not a bot" ya da bayt indirmede 403 döndürüyor.

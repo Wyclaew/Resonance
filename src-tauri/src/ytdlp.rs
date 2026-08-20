@@ -6,6 +6,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use crate::native_dl;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -561,6 +562,343 @@ fn ffmpeg() -> Command {
     c
 }
 
+
+
+
+
+/// ⭐ İNDİRİRKEN ÇALMA: adresi çöz, indirmeyi ffmpeg'e boru ile bağla ve
+/// dosya çalınabilir hâle gelir gelmez dön (tamamlanmasını BEKLEMEZ).
+///
+/// Adres sırası `ensure_audio` ile aynı mantık: önbellek → InnerTube →
+/// yt-dlp. Herhangi bir adımda takılırsa hata döner ve çağıran taraf normal
+/// (indir → dönüştür → çal) yoluna düşer — yani bu yol yalnızca HIZLANDIRIR,
+/// hiçbir zaman tek çare değildir.
+pub fn stream_audio(
+    cache_dir: &Path,
+    video_id: &str,
+    cookies: Option<&str>,
+) -> anyhow::Result<native_dl::StreamHandle> {
+    std::fs::create_dir_all(cache_dir)?;
+    let low = audio_quality() == "low";
+
+    // "medium" yeniden kodlama istiyor (kaynakta 96k yok) → akış yolunda
+    // `-c:a copy` kullanıldığı için bu kademe desteklenmez, normal yola bırak.
+    if audio_quality() == "medium" {
+        anyhow::bail!("orta kalite akışlı çalmayı desteklemiyor");
+    }
+
+    // ⛔ InnerTube adresi BU YOLDA KULLANILMAZ — ölçüldü (entegrasyon testi):
+    // o adres PO Token olmadan 1 MB'da 403 veriyor. Normal indirmede bu yalnız
+    // "bir katman düştü" demek, ama AKIŞTA şarkı ortasında SESİN KESİLMESİ
+    // demektir. Akış yalnız kısıtsız adreslerle çalışır: önbellek (ısıtmadan,
+    // yt-dlp kaynaklı) veya taze yt-dlp çözümü.
+    let src = match native_dl::cached_source(video_id) {
+        Some(s) => s,
+        None => {
+            {
+                let url = format!("https://www.youtube.com/watch?v={video_id}");
+                let fmt = if low {
+                    "bestaudio[ext=m4a][abr<=70]/bestaudio[abr<=70]/bestaudio[ext=m4a]/bestaudio/best"
+                } else {
+                    "bestaudio[ext=m4a]/bestaudio/best[height<=480]/best"
+                };
+                let args: Vec<&str> = vec![
+                    "-f", fmt, "--no-playlist", "--no-warnings", "--", &url,
+                ];
+                let (u, ua, len) = resolve_url_with_ytdlp(
+                    &args,
+                    Some("youtube:player_client=web_embedded"),
+                    None,
+                )
+                .or_else(|| resolve_url_with_ytdlp(&args, None, None))
+                .or_else(|| {
+                    if cookies.map(|c| !c.is_empty()).unwrap_or(false) {
+                        resolve_url_with_ytdlp(&args, None, cookies)
+                    } else {
+                        None
+                    }
+                })
+                .ok_or_else(|| anyhow::anyhow!("akış için adres çözülemedi"))?;
+                native_dl::cache_url(video_id, &u, &ua, len);
+                native_dl::AudioSource {
+                    url: u,
+                    user_agent: ua,
+                    content_length: len,
+                    via: "yt-dlp".into(),
+                }
+            }
+        }
+    };
+
+    let dest = cache_dir.join(format!("{video_id}.stream.aac"));
+    let t0 = std::time::Instant::now();
+    let h = native_dl::stream_to_adts(src, dest, ffmpeg())?;
+    log::info!(
+        "akışlı çalma başladı {video_id}: ilk ses {:.2} sn",
+        t0.elapsed().as_secs_f32()
+    );
+    Ok(h)
+}
+
+/// ⭐ İNDİRME TEŞHİSİ — "neden çalmıyor?" sorusunu log okumadan yanıtlar.
+///
+/// Kullanıcının Windows'ta yaşadığı "hiçbir şarkı açılmıyor, sadece
+/// indirdiklerim çalıyor" tablosunda tek teşhis yolu log dosyasıydı ve
+/// arayüzde log ekranı yok. Bu fonksiyon zinciri gerçek bir videoyla
+/// baştan sona dener ve HANGİ ADIMDA kırıldığını söyler.
+pub fn diagnose(cache_dir: &Path, cookies: Option<&str>) -> String {
+    let mut out = String::new();
+    fn line(o: &mut String, k: &str, v: String) {
+        o.push_str(&format!("{k}: {v}\n"));
+    }
+
+    let ytp = resolve_bin("yt-dlp");
+    line(&mut out, "yt-dlp yolu", ytp.to_string_lossy().into_owned());
+    let ver = yt_dlp(None)
+        .arg("--version")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    line(
+        &mut out,
+        "yt-dlp sürümü",
+        ver.clone().unwrap_or_else(|| "ÇALIŞTIRILAMADI".into()),
+    );
+    let ff = ffmpeg_path();
+    line(
+        &mut out,
+        "ffmpeg",
+        ff.as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "BULUNAMADI".into()),
+    );
+    let ffok = ffmpeg()
+        .arg("-version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    line(
+        &mut out,
+        "ffmpeg çalışıyor",
+        if ffok { "evet".into() } else { "HAYIR".to_string() },
+    );
+
+    if ver.is_none() {
+        out.push_str(
+            "\nSONUÇ: yt-dlp çalıştırılamıyor. Ayarlar'dan yt-dlp güncellemesini              deneyin; sorun sürerse antivirüs/SmartScreen dosyayı engelliyor olabilir.\n",
+        );
+        return out;
+    }
+
+    const TEST_ID: &str = "dQw4w9WgXcQ";
+    let t0 = std::time::Instant::now();
+    let native = native_dl::resolve_innertube(TEST_ID, false);
+    line(
+        &mut out,
+        "\nyerel adres çözümü",
+        match &native {
+            Ok(s) => format!("tamam ({}, {} bayt)", s.via, s.content_length),
+            Err(e) => format!("olmadı — {e}"),
+        },
+    );
+
+    let base = format!("https://www.youtube.com/watch?v={TEST_ID}");
+    let args: Vec<&str> = vec![
+        "-f",
+        "bestaudio[ext=m4a]/bestaudio/best",
+        "--no-playlist",
+        "--no-warnings",
+        "--",
+        &base,
+    ];
+    let resolved = resolve_url_with_ytdlp(&args, Some("youtube:player_client=web_embedded"), None)
+        .or_else(|| resolve_url_with_ytdlp(&args, None, None))
+        .or_else(|| {
+            if cookies.map(|c| !c.is_empty()).unwrap_or(false) {
+                resolve_url_with_ytdlp(&args, None, cookies)
+            } else {
+                None
+            }
+        });
+    line(
+        &mut out,
+        "yt-dlp adres çözümü",
+        match &resolved {
+            Some((_, _, len)) => format!("tamam ({len} bayt)"),
+            None => "BAŞARISIZ".to_string(),
+        },
+    );
+
+    let mut downloaded = false;
+    if let Some((u, ua, len)) = &resolved {
+        match native_dl::fetch_with_url(cache_dir, "diag", u, ua, *len) {
+            Ok(p) => {
+                downloaded = true;
+                let sz = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+                line(&mut out, "test indirme", format!("tamam ({sz} bayt)"));
+                let _ = std::fs::remove_file(&p);
+            }
+            Err(e) => line(&mut out, "test indirme", format!("BAŞARISIZ — {e}")),
+        }
+    }
+    line(
+        &mut out,
+        "toplam süre",
+        format!("{:.1} sn", t0.elapsed().as_secs_f32()),
+    );
+
+    out.push_str("\nSONUÇ: ");
+    out.push_str(match (resolved.is_some(), downloaded, ffok) {
+        (true, true, true) => {
+            "her şey çalışıyor. Bir şarkı yine de açılmıyorsa sorun bu bilgisayarda değil;              o şarkı kısıtlı/kaldırılmış olabilir."
+        }
+        (true, true, false) => {
+            "indirme çalışıyor ama ffmpeg yok/çalışmıyor → ses dönüştürme başarısız olur.              Uygulamayı yeniden kurmak genelde çözer."
+        }
+        (true, false, _) => {
+            "adres çözülüyor ama baytlar indirilemiyor. Genelde güvenlik duvarı/antivirüs              ya da YouTube hız sınırı; birkaç dakika sonra tekrar deneyin."
+        }
+        (false, _, _) => {
+            "yt-dlp adresi çözemiyor. En olası sebep ESKİ yt-dlp — Ayarlar'dan yt-dlp'yi              güncelleyin."
+        }
+    });
+    out.push('\n');
+    out
+}
+
+/// ⭐ TOPLU URL ÇÖZÜMÜ — sıradaki şarkıların adreslerini ÖNDEN çöz.
+///
+/// ÖLÇÜM (2026-08-19, 4 video): ayrı ayrı 9.98 sn (2.50 sn/video), TEK
+/// yt-dlp çağrısıyla 7.63 sn (1.91 sn/video) → 1.3×. Asıl kazanç ise
+/// zamanlamada: iş ARKA PLANDA yapıldığı için kullanıcı ileri atladığında
+/// şarkı başına ~2.5 sn'lik çözüm beklemesi tamamen ortadan kalkar.
+///
+/// Sonuçlar `native_dl` URL önbelleğine yazılır; dosya İNDİRİLMEZ.
+pub fn prewarm_urls(video_ids: &[String], cookies: Option<&str>) {
+    if video_ids.is_empty() {
+        return;
+    }
+    let fmt = if audio_quality() == "low" {
+        "bestaudio[ext=m4a][abr<=70]/bestaudio[abr<=70]/bestaudio[ext=m4a]/bestaudio/best"
+    } else {
+        "bestaudio[ext=m4a]/bestaudio/best[height<=480]/best"
+    };
+    let urls: Vec<String> = video_ids
+        .iter()
+        .map(|v| format!("https://www.youtube.com/watch?v={v}"))
+        .collect();
+    let mut args: Vec<&str> = vec![
+        "--extractor-args",
+        "youtube:player_client=web_embedded",
+        "-j",
+        "-f",
+        fmt,
+        "--no-playlist",
+        "--no-warnings",
+        "--",
+    ];
+    for u in &urls {
+        args.push(u);
+    }
+
+    log::info!("adres ısıtma başlıyor: {} şarkı", video_ids.len());
+    let out = match run_yt_dlp(&args, cookies) {
+        Ok(o) => o,
+        Err(e) => {
+            log::warn!("adres ısıtma çalıştırılamadı: {e}");
+            return;
+        }
+    };
+    if !out.status.success() {
+        log::warn!(
+            "adres ısıtma başarısız: {}",
+            first_line(&String::from_utf8_lossy(&out.stderr))
+        );
+    }
+    // `-j` her video için AYRI bir JSON satırı yazar.
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut n = 0;
+    for line in text.lines() {
+        let line = line.trim();
+        if !line.starts_with('{') {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let (Some(id), Some(url)) = (v["id"].as_str(), v["url"].as_str()) else {
+            continue;
+        };
+        let len = v["filesize"]
+            .as_u64()
+            .or_else(|| v["filesize_approx"].as_u64())
+            .unwrap_or(0);
+        if len == 0 {
+            continue;
+        }
+        let ua = v["http_headers"]["User-Agent"]
+            .as_str()
+            .unwrap_or("Mozilla/5.0");
+        native_dl::cache_url(id, url, ua, len);
+        n += 1;
+    }
+    if n > 0 {
+        log::info!(
+            "{n} şarkının adresi önden çözüldü (önbellek: {})",
+            native_dl::cached_count()
+        );
+    }
+}
+
+/// yt-dlp'yi YALNIZ URL ÇÖZÜCÜ olarak kullan (`-j`): indirme yapmaz, seçilen
+/// formatın gerçek CDN adresini + gerekli User-Agent'ı verir.
+///
+/// ⭐ NEDEN: ölçüldü (2026-08-19) — yt-dlp'nin çözdüğü URL'ye elle `Range`
+/// istekleri atınca tüm parçalar 206/200 dönüyor. Yani duvar URL ÇÖZÜMÜNDE;
+/// baytları çekmek serbest. URL'yi alıp indirmeyi kendi indiricimize
+/// (native_dl) vermek, yt-dlp'nin indirme katmanındaki 403 davranışını ve
+/// yarıda kopunca baştan başlama sorununu tamamen devre dışı bırakır.
+fn resolve_url_with_ytdlp(
+    base_args: &[&str],
+    extra: Option<&str>,
+    cookies: Option<&str>,
+) -> Option<(String, String, u64)> {
+    // ⚠️ `-j` MUTLAKA `--`'den ÖNCE gelmeli: base_args `… -- <url>` ile bitiyor
+    // ve `--` sonrasındaki her şey POZİSYONEL argüman sayılır. (Bu hata bir kez
+    // yapıldı: katman 2 sessizce hiç çalışmadı.)
+    let mut a: Vec<&str> = Vec::new();
+    if let Some(e) = extra {
+        a.push("--extractor-args");
+        a.push(e);
+    }
+    a.push("-j");
+    a.extend_from_slice(base_args);
+    let out = run_yt_dlp(&a, cookies).ok()?;
+    if !out.status.success() {
+        log::info!(
+            "URL çözümü başarısız ({}): {}",
+            extra.unwrap_or("default"),
+            first_line(&String::from_utf8_lossy(&out.stderr))
+        );
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    let url = v["url"].as_str()?.to_string();
+    let len = v["filesize"]
+        .as_u64()
+        .or_else(|| v["filesize_approx"].as_u64())
+        .unwrap_or(0);
+    if len == 0 {
+        return None; // boyut bilinmeden parçalı indirme yapılamaz
+    }
+    let ua = v["http_headers"]["User-Agent"]
+        .as_str()
+        .unwrap_or("Mozilla/5.0")
+        .to_string();
+    Some((url, ua, len))
+}
+
 /// Ses dosyasının ENTEGRE YÜKSEKLİĞİNİ (LUFS) ve tepe seviyesini (dBTP) ölçer.
 ///
 /// Neden gerekiyor: kaynaklar YouTube'dan geldiği için parçalar arası seviye
@@ -633,9 +971,18 @@ fn first_line(s: &str) -> String {
 fn find_src(cache_dir: &Path, video_id: &str) -> Option<PathBuf> {
     let prefix = format!("{video_id}.src.");
     for e in std::fs::read_dir(cache_dir).ok()?.flatten() {
-        if e.file_name().to_string_lossy().starts_with(&prefix) {
-            return Some(e.path());
+        let name = e.file_name().to_string_lossy().into_owned();
+        if !name.starts_with(&prefix) {
+            continue;
         }
+        // ⚠️ YARIM/YARDIMCI DOSYALARI ASLA KAYNAK SAYMA. Yerel indirici
+        // `<id>.src.part` (yarım indirme) ve `<id>.src.part.meta` (devam mührü)
+        // dosyaları bırakabiliyor; bunlar bu önekle eşleştiği için ffmpeg'e
+        // KAYNAK olarak verilebilirdi → yarım/bozuk ses ya da remux hatası.
+        if name.ends_with(".part") || name.ends_with(".meta") {
+            continue;
+        }
+        return Some(e.path());
     }
     None
 }
@@ -656,6 +1003,10 @@ pub fn ensure_audio(
     if let Some(p) = find_cached(cache_dir, video_id) {
         return Ok(p);
     }
+    // Şarkının hazır olma süresi — "çalmaya basınca ne kadar bekliyorum"
+    // sorusunun tek güvenilir cevabı. Aşamalar (adres/indirme/remux) ayrı ayrı
+    // loglanıyor; bu toplam.
+    let t_start = std::time::Instant::now();
 
     // Aynı video için başka bir indirme sürüyorsa bekle (dosya çakışmasını önle).
     let lock = inflight_lock(video_id);
@@ -731,7 +1082,89 @@ pub fn ensure_audio(
     }
     args.extend(["-o", dl_tmpl_str, "--", &url]);
 
-    // ⭐⭐ ÇOK YOLLU İNDİRME (v1.8.0) — "ilk yol olmazsa ikincisi denesin".
+    // ═══ KATMAN 0: ÖNCEDEN ÇÖZÜLMÜŞ ADRES (önbellek) — EN HIZLI YOL ═══
+    // Prefetch sırasında sıradaki şarkıların adresleri toplu çözülüp
+    // saklanıyor (bkz. prewarm_urls). Hazır adres varken daha yavaş yolları
+    // denemek anlamsız: bu yol yt-dlp de çalıştırmaz, InnerTube'un boşa 1 MB
+    // indirmesini de yaşamaz → şarkı doğrudan inmeye başlar.
+    let mut native_ok = false;
+    if let Some(src) = native_dl::cached_source(video_id) {
+        match native_dl::fetch_with_url(
+            cache_dir,
+            video_id,
+            &src.url,
+            &src.user_agent,
+            src.content_length,
+        ) {
+            Ok(_) => {
+                log::info!("önbellekteki adresle indirildi {video_id}");
+                native_ok = true;
+            }
+            Err(e) => {
+                log::info!(
+                    "önbellek adresi tutmadı {video_id}: {}",
+                    first_line(&e.to_string())
+                );
+                if let Some(pth) = find_src(cache_dir, video_id) {
+                    let _ = std::fs::remove_file(pth);
+                }
+            }
+        }
+    }
+
+    // ═══ KATMAN 1: RESONANCE YEREL İNDİRİCİ (yt-dlp ÇALIŞTIRILMADAN) ═══
+    // Başarılıysa yt-dlp süreci hiç başlamaz → şarkı başına ~1.5-3 sn tasarruf
+    // ve yt-dlp'nin bot/403 davranışına hiç maruz kalınmaz. Ölçümde bu yol
+    // bazı videolarda 1 MB'da kısıtlanıyor (PO Token yok) — o zaman sessizce
+    // katman 2'ye düşülür.
+    let low = audio_quality() == "low";
+    if !native_ok {
+        native_ok = match native_dl::fetch(cache_dir, video_id, low) {
+            Ok(_) => true,
+            Err(e) => {
+                log::info!(
+                    "yerel indirici olmadı {video_id}: {}",
+                    first_line(&e.to_string())
+                );
+                false
+            }
+        };
+    }
+
+    // ═══ KATMAN 2: URL'yi yt-dlp ÇÖZER, baytları YEREL İNDİRİCİ çeker ═══
+    // Duvar URL çözümünde (imza/nsig/PO Token → JS çalıştırma gerekir);
+    // çözülmüş URL'den indirmek serbest (ölçüldü). Böylece yt-dlp'nin kendi
+    // indirme katmanı ve onun 403/yarıda-kesilme davranışı devre dışı kalır.
+    if !native_ok {
+        for (name, extra, use_cookies) in NATIVE_URL_STRATEGIES {
+            if use_cookies && cookies.map(|c| c.is_empty()).unwrap_or(true) {
+                continue;
+            }
+            let ck = if use_cookies { cookies } else { None };
+            let Some((u, ua, len)) = resolve_url_with_ytdlp(&args, extra, ck) else {
+                continue;
+            };
+            native_dl::cache_url(video_id, &u, &ua, len);
+            match native_dl::fetch_with_url(cache_dir, video_id, &u, &ua, len) {
+                Ok(_) => {
+                    log::info!("yerel indirici + {name} URL ile kurtarıldı {video_id}");
+                    native_ok = true;
+                    break;
+                }
+                Err(e) => {
+                    log::info!(
+                        "yerel indirme ({name}) başarısız {video_id}: {}",
+                        first_line(&e.to_string())
+                    );
+                    if let Some(pth) = find_src(cache_dir, video_id) {
+                        let _ = std::fs::remove_file(pth);
+                    }
+                }
+            }
+        }
+    }
+
+    // ⭐⭐ KATMAN 3 — ÇOK YOLLU yt-dlp İNDİRME (v1.8.0).
     //
     // KÖK NEDEN: YouTube bot doğrulaması + PO Token zorunluluğu getirdi.
     // Varsayılan istemci artık ya "Sign in to confirm you're not a bot" ya da
@@ -754,6 +1187,13 @@ pub fn ensure_audio(
     //
     // Sıra: audio-only veren yol önce, muxed olanlar sonra (gereksiz video
     // baytı inmesin), çerez en sonda (yavaş + bot moduna sokabilir).
+    // Katman 2'nin deneyeceği çözüm yolları (indirme YOK, yalnız URL).
+    const NATIVE_URL_STRATEGIES: [(&str, Option<&str>, bool); 3] = [
+        ("web_embedded", Some("youtube:player_client=web_embedded"), false),
+        ("default", None, false),
+        ("cookies", None, true),
+    ];
+
     const STRATEGIES: [(&str, Option<&str>, bool); 5] = [
         ("web_embedded", Some("youtube:player_client=web_embedded"), false),
         ("default", None, false),
@@ -770,6 +1210,9 @@ pub fn ensure_audio(
     let mut last_err = String::new();
 
     'outer: for round in 0..2 {
+        if native_ok {
+            break;
+        }
         for k in 0..STRATEGIES.len() {
             let idx = (start + k) % STRATEGIES.len();
             let (name, extra, use_cookies) = STRATEGIES[idx];
@@ -812,7 +1255,7 @@ pub fn ensure_audio(
     }
 
     // Her iki tur da tükendiyse: teşhis logu + vazgeç.
-    if out.is_none() {
+    if out.is_none() && !native_ok {
         log::error!("yt-dlp indirme hata {video_id}: {}", last_err.trim());
         // Teşhis: YouTube hangi formatları sunuyor?
         if let Ok(lf) = run_yt_dlp(&["-F", "--no-warnings", "--", &url], None) {
@@ -912,10 +1355,19 @@ pub fn ensure_audio(
 
     let _ = std::fs::remove_file(&src);
     if target.exists() {
+        log::info!(
+            "hazır {video_id}: {:.2} sn (indirme+dönüştürme)",
+            t_start.elapsed().as_secs_f32()
+        );
         Ok(target)
     } else {
         anyhow::bail!("ses dönüştürme başarısız ({video_id})");
     }
+}
+
+/// Dosya önbellekte hazır mı? (akışlı çalma yalnız hazır DEĞİLKEN denenir)
+pub fn is_cached_file(cache_dir: &Path, video_id: &str) -> bool {
+    find_cached(cache_dir, video_id).is_some()
 }
 
 fn find_cached(cache_dir: &Path, video_id: &str) -> Option<PathBuf> {

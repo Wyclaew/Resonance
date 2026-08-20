@@ -86,3 +86,70 @@ export async function recordPlay(track: Track, msPlayed: number): Promise<void> 
     console.error("[resonance] geçmiş kaydedilemedi:", e);
   }
 }
+
+/**
+ * ⭐ BU HAFTANIN KEŞİFLERİ: son 7 günde İLK KEZ dinlediğin sanatçıların
+ * parçaları. "Keşfet gerçekten yeni bir şey buldu mu?" sorusunun somut cevabı.
+ *
+ * İki düz sorgu + JS kesişimi kullanılıyor; korelasyonlu alt sorgu (parça
+ * başına geçmiş taraması) binlerce satırda O(n·m) olurdu.
+ */
+export async function weekDiscoveries(limit = 8): Promise<Track[]> {
+  if (!isTauri()) return [];
+  try {
+    const db = await getDb();
+    const since = Date.now() - 7 * 24 * 3600 * 1000;
+
+    // Aralıktan ÖNCE dinlenmiş sanatçılar (yani "yeni" sayılmayanlar).
+    const known = await db.select<{ artist: string }[]>(
+      `SELECT DISTINCT t.artist
+         FROM play_history h JOIN tracks t ON t.id = h.track_id
+        WHERE h.played_at < $1 AND t.artist <> ''`,
+      [since]
+    );
+    const seen = new Set(known.map((k) => k.artist.toLowerCase()));
+
+    const rows = await db.select<
+      {
+        id: string;
+        source: string;
+        sourceId: string;
+        title: string;
+        artist: string;
+        durationMs: number;
+        thumbnail: string | null;
+        last: number;
+      }[]
+    >(
+      `SELECT t.id, t.source, t.source_id AS sourceId, t.title, t.artist,
+              t.duration_ms AS durationMs, t.thumbnail, MAX(h.played_at) AS last
+         FROM play_history h JOIN tracks t ON t.id = h.track_id
+        WHERE h.played_at >= $1 AND h.ms_played > 30000 AND t.artist <> ''
+        GROUP BY t.id
+        ORDER BY last DESC`,
+      [since]
+    );
+
+    const out: Track[] = [];
+    const usedArtists = new Set<string>();
+    for (const r of rows) {
+      const a = r.artist.toLowerCase();
+      if (seen.has(a) || usedArtists.has(a)) continue; // yeni değil / tekrar
+      usedArtists.add(a);
+      out.push({
+        id: r.id,
+        source: r.source as Track["source"],
+        sourceId: r.sourceId,
+        title: r.title,
+        artist: r.artist,
+        durationMs: r.durationMs,
+        thumbnail: r.thumbnail ?? undefined,
+      });
+      if (out.length >= limit) break;
+    }
+    return out;
+  } catch (e) {
+    console.error("[resonance] haftanın keşifleri okunamadı:", e);
+    return [];
+  }
+}

@@ -3,6 +3,7 @@ mod commands;
 #[cfg(desktop)]
 mod media_controls;
 mod spotify;
+mod native_dl;
 mod ytdlp;
 
 use tauri::Manager;
@@ -395,6 +396,8 @@ pub fn run() {
             commands::delete_cache_except,
             commands::prune_cache,
             commands::measure_loudness,
+            commands::prewarm_urls,
+            commands::diagnose_download,
             commands::export_data,
             commands::backup_db,
             commands::list_backups,
@@ -427,16 +430,45 @@ pub fn run() {
             if let Ok(bin) = commands::ytdlp_bin_dir(&app.handle().clone()) {
                 std::env::set_var("RESONANCE_YTDLP_DIR", &bin);
                 let exe = bin.join(if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" });
-                if !exe.exists() {
+
+                // ⭐ OTOMATİK GÜNCELLEME (v1.8.1). Eskiden yt-dlp YALNIZ ilk
+                // açılışta indiriliyordu ve bir daha hiç güncellenmiyordu.
+                // YouTube çıkarım mantığını ayda birkaç kez değiştiriyor;
+                // eskiyen yt-dlp'de indirme sessizce çöküyor ("not a bot",
+                // "format not available"). Kullanıcının Windows'ta yaşadığı
+                // "hiçbir şarkı açılmıyor" tablosunun en olası sebeplerinden
+                // biri buydu — sistemde yt-dlp olmadığı için orada TEK kaynak
+                // bu dosya.
+                //
+                // Dosyanın YAŞINA bakılır (settings'e erişim Rust tarafında
+                // yok; dosya mtime'ı zaten doğru ve taşınabilir bir damga).
+                const MAX_AGE_DAYS: u64 = 7;
+                let needs_update = match std::fs::metadata(&exe) {
+                    Err(_) => true, // hiç yok → ilk indirme
+                    Ok(m) => m
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.elapsed().ok())
+                        .map(|age| age.as_secs() > MAX_AGE_DAYS * 24 * 3600)
+                        .unwrap_or(false),
+                };
+                if needs_update {
+                    let first = !exe.exists();
                     let h = app.handle().clone();
                     tauri::async_runtime::spawn(async move {
                         match commands::update_ytdlp(h).await {
-                            Ok(v) => log::info!("yt-dlp ilk indirme tamam: {v}"),
-                            Err(e) => log::error!("yt-dlp ilk indirme başarısız: {e}"),
+                            Ok(v) => log::info!(
+                                "yt-dlp {}: {v}",
+                                if first { "ilk indirme tamam" } else { "otomatik güncellendi" }
+                            ),
+                            Err(e) => log::error!("yt-dlp güncellenemedi: {e}"),
                         }
                     });
                 }
             }
+
+            // İndirirken çalma yolundan kalan geçici dosyaları temizle.
+            commands::cleanup_stream_files(&app.handle().clone());
 
             // Ses motorunu başlat ve yönetilen duruma ekle.
             let audio = audio::start(app.handle().clone());

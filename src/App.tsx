@@ -19,6 +19,7 @@ import {
   initPlayer,
   usePlayerStore,
   prewarmDiscovery,
+  prewarmQueueUrls,
 } from "./store/usePlayerStore";
 import HomeView from "./views/HomeView";
 import DiscoverView from "./views/DiscoverView";
@@ -219,6 +220,9 @@ export default function App() {
                 /* bozuk resume state — yoksay */
               }
             }
+            // Kuyruk (kaldığın yer / Keşfet partisi) geri geldiyse adreslerini
+            // hemen ısıt: kullanıcı play'e bastığında beklemesin.
+            prewarmQueueUrls();
             // Keşif önerilerini arka planda hazırla → Keşfet'e basınca anında başlasın.
             void prewarmDiscovery();
             // ⚠️ Önbellek budaması AYARLAR YÜKLENDİKTEN SONRA çalışmalı —

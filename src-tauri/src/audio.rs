@@ -20,6 +20,10 @@ pub enum AudioCmd {
         duration_ms: u64,
         track_id: String,
         start_ms: u64, // kaldığın yerden devam için başlangıç pozisyonu (0 = baştan)
+        /// ⭐ İNDİRİRKEN ÇALMA: dosya hâlâ YAZILIYORSA bu bayrak verilir.
+        /// Okuyucu sona geldiğinde EOF sanıp durmaz, bayrak true olana kadar
+        /// yeni veriyi bekler (bkz. native_dl::GrowingFile).
+        growing: Option<Arc<AtomicBool>>,
     },
     Play,
     Pause,
@@ -94,6 +98,7 @@ fn audio_loop(rx: Receiver<AudioCmd>, shared: Arc<Shared>, app: AppHandle) {
                     duration_ms,
                     track_id,
                     start_ms,
+                    growing,
                 } => {
                     sink.stop();
                     sink = Sink::try_new(&handle).expect("sink");
@@ -101,11 +106,19 @@ fn audio_loop(rx: Receiver<AudioCmd>, shared: Arc<Shared>, app: AppHandle) {
                     // Çözümlemeyi yakala: bozuk/desteklenmeyen bir dosya
                     // panikleyip tüm ses motorunu öldürmesin.
                     let decoded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-                        || open_source(&path),
+                        || -> anyhow::Result<()> {
+                            match &growing {
+                                // Yazımı süren dosya → bekleyen okuyucu.
+                                Some(done) => {
+                                    sink.append(open_growing(&path, done.clone())?)
+                                }
+                                None => sink.append(open_source(&path)?),
+                            }
+                            Ok(())
+                        },
                     ));
                     match decoded {
-                        Ok(Ok(src)) => {
-                            sink.append(src);
+                        Ok(Ok(())) => {
                             // Kaldığın yerden devam: verilen pozisyona atla.
                             if start_ms > 0 {
                                 let _ = sink.try_seek(Duration::from_millis(start_ms));
@@ -182,5 +195,15 @@ fn audio_loop(rx: Receiver<AudioCmd>, shared: Arc<Shared>, app: AppHandle) {
 fn open_source(path: &PathBuf) -> anyhow::Result<Decoder<BufReader<File>>> {
     let file = File::open(path)?;
     let dec = Decoder::new(BufReader::new(file))?;
+    Ok(dec)
+}
+
+/// İndirilmeye devam eden dosyayı çalmak için okuyucu (bkz. native_dl).
+fn open_growing(
+    path: &PathBuf,
+    done: Arc<AtomicBool>,
+) -> anyhow::Result<Decoder<BufReader<crate::native_dl::GrowingFile>>> {
+    let f = crate::native_dl::GrowingFile::open(path, done)?;
+    let dec = Decoder::new(BufReader::new(f))?;
     Ok(dec)
 }
