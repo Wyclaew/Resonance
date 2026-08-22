@@ -17,6 +17,7 @@ import {
   type Recommendation,
 } from "../lib/recommender";
 import { recordPlay } from "../lib/history";
+import { relinkTrack } from "../lib/playlists";
 import { noteListen } from "../lib/mood";
 import { publishNowPlaying } from "../lib/nowPlaying";
 import { publishDeviceQueue } from "../lib/deviceQueue";
@@ -285,6 +286,10 @@ function loadAndPlay(item: QueueItem, startMs = 0) {
       fadeMs,
       // Yerel dosya: indirme/akış yolları atlanır (bkz. lib/localFiles.ts).
       localPath: item.source === "local" ? item.sourceId : null,
+      // Alternatif kaynak araması için: bu video inmezse aynı şarkının başka
+      // yüklemesi bulunup çalınır (Rust: find_alternative).
+      title: item.title,
+      artist: item.artist,
     },
     cookiesBrowser: useSettingsStore.getState().cookiesBrowser,
   })
@@ -1522,6 +1527,26 @@ export async function initPlayer() {
     }
     st.next("ended");
   });
+
+  // ⭐ ALTERNATİF KAYNAK BULUNDU: bu şarkı artık BAŞKA bir videodan çalıyor.
+  // `tracks` satırını güncellemezsek her seferinde aynı ölü video yeniden
+  // denenir (ve her seferinde alternatif aramanın maliyeti ödenir).
+  await listen<{ trackId: string; sourceId: string; title: string }>(
+    "track-relinked",
+    (e) => {
+      const { trackId, sourceId } = e.payload;
+      void relinkTrack(trackId, sourceId);
+      // Bellekteki kuyruk da güncellensin: sıradaki çalmalar doğrudan yeni
+      // kaynağı kullansın.
+      const st = usePlayerStore.getState();
+      const patch = (i: QueueItem) =>
+        i.id === trackId ? { ...i, sourceId } : i;
+      usePlayerStore.setState({
+        queue: st.queue.map(patch),
+        current: st.current ? patch(st.current) : null,
+      });
+    }
+  );
 
   await listen<string>("playback-loading", () => {
     usePlayerStore.setState({ status: "loading" });

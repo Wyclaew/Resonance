@@ -229,6 +229,15 @@ Masaüstünde çalışan ve mobilde **yeniden yazılmaması gereken** parçalar:
 > ekran kapalıyken/arka planda bu işi yapmak pil açısından ucuz, indirme ise
 > pahalı: ısıtma agresif, gerçek indirme muhafazakâr olmalı.
 >
+> ⭐ v1.8.4 EKLERİ (mobilde de aynen geçerli):
+> • **Adres sağlık testi**: indirmeden önce dosyanın son 1 KB'ını iste —
+>   kısıtlı adres 403, kısıtsız 206, maliyeti ~0.1 sn. Mobilde bu test veri
+>   kotası açısından daha da değerli (boşa 1 MB indirmek yok).
+> • **Alternatif kaynak**: tüm yollar tükenirse aynı şarkının başka yüklemesini
+>   ara (süre ±%20 + mix/podcast filtresi) ve `tracks.source_id`'yi güncelle.
+>   ⚠️ `tracks.id` DEĞİŞMEMELİ — değişirse playlist üyelikleri, oylar ve
+>   dinleme geçmişi parçadan kopar ve senkronda iki ayrı parça oluşur.
+>
 > Masaüstü çözümü: `web_embedded → default → mweb → tv_simply → çerez` sırası +
 > "en son işe yarayan yolu ilk dene" (öğrenen sıra) + iki tur taze çıkarım.
 > **Mobilde `youtubei.js` kullanılırken de aynı client çeşitliliği ŞART**

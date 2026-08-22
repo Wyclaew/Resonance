@@ -1,5 +1,5 @@
 import type { Playlist, PlaylistTrack, Track, Vote } from "../types";
-import { getDb } from "./db";
+import { getDb, isTauri } from "./db";
 import { t } from "./i18n";
 import { computeKarma, type VoteEvent } from "./karma";
 import { getDeviceId, newUid } from "./device";
@@ -194,6 +194,34 @@ export async function savePlaylistFromTracks(
     if (await addTrackToPlaylist(playlist.id, t)) added++;
   }
   return { playlist, added };
+}
+
+/**
+ * ⭐ Bir parçanın KAYNAK VİDEOSUNU değiştirir (alternatif kaynak bulunduğunda).
+ *
+ * Video kaldırılmış/kısıtlıysa aynı şarkının başka yüklemesi bulunuyor
+ * (Rust: find_alternative). Burada kalıcılaştırılmazsa her çalışta aynı ölü
+ * video yeniden denenir.
+ *
+ * ⚠️ `tracks.id` DEĞİŞMEZ — yalnız `source_id` güncellenir. id değişseydi
+ * playlist üyelikleri, oylar ve dinleme geçmişi parçadan KOPARDI.
+ */
+export async function relinkTrack(
+  trackId: string,
+  newSourceId: string
+): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    const db = await getDb();
+    await db.execute(
+      `UPDATE tracks SET source_id = $1, updated_at = $2 WHERE id = $3`,
+      [newSourceId, Date.now(), trackId]
+    );
+    notifyLocalChange();
+    console.info("[resonance] parça yeniden bağlandı:", trackId, "→", newSourceId);
+  } catch (e) {
+    console.error("[resonance] parça yeniden bağlanamadı:", e);
+  }
 }
 
 export async function removeTrackFromPlaylist(

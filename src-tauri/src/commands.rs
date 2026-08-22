@@ -20,6 +20,12 @@ pub struct PlayInput {
     /// Yerel dosya yolu (source = "local"). Verilirse İNDİRME YAPILMAZ.
     #[serde(default)]
     pub local_path: Option<String>,
+    /// Alternatif kaynak araması için (bu video inmezse aynı şarkının başka
+    /// yüklemesi bulunur). Boşsa alternatif denenmez.
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub artist: String,
     /// Crossfade süresi (ms). 0 = anında geçiş (varsayılan davranış).
     #[serde(default)]
     pub fade_ms: u64,
@@ -521,12 +527,48 @@ pub async fn play_track(
         return Ok(());
     }
 
+    // ⭐ "HER ŞARKI BİR ŞEKİLDE İNSİN" (v1.8.4): tüm indirme katmanları
+    // tükendiyse pes etme — aynı şarkının BAŞKA bir yüklemesini bul ve onu
+    // indir. Video kaldırılmış/bölge kısıtlı/inatla 403 veriyor olabilir;
+    // eskiden bu durumda şarkı sessizce atlanıyordu.
+    let title = input.title.clone();
+    let artist = input.artist.clone();
+    let app_alt = app.clone();
+    let track_id_alt = input.track_id.clone();
     let path = tauri::async_runtime::spawn_blocking(move || {
-        ytdlp::ensure_audio(&cache, &sid, cookies.as_deref())
+        match ytdlp::ensure_audio(&cache, &sid, cookies.as_deref()) {
+            Ok(p) => Ok(p),
+            Err(first_err) => {
+                if title.trim().is_empty() {
+                    return Err(first_err);
+                }
+                let Some(alt) = ytdlp::find_alternative(
+                    &title,
+                    &artist,
+                    input.duration_ms,
+                    &sid,
+                    cookies.as_deref(),
+                ) else {
+                    return Err(first_err);
+                };
+                let p = ytdlp::ensure_audio(&cache, &alt.source_id, cookies.as_deref())?;
+                // Frontend'e bildir: `tracks` satırındaki kaynak GÜNCELLENSİN,
+                // yoksa her çalışta aynı ölü video yeniden denenir.
+                let _ = app_alt.emit(
+                    "track-relinked",
+                    serde_json::json!({
+                        "trackId": track_id_alt,
+                        "sourceId": alt.source_id,
+                        "title": alt.title,
+                    }),
+                );
+                Ok(p)
+            }
+        }
     })
     .await
     .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())?;
+    .map_err(|e: anyhow::Error| e.to_string())?;
 
     // İndirme sürerken daha yeni bir şarkı seçildiyse bu Load'u atla.
     if PLAY_GEN.load(Ordering::SeqCst) != my_gen {

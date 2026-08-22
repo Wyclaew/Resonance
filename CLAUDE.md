@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.8.3** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.8.4** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,21 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.8.4'te: ⭐ **İNDİRİCİ "HER ŞARKIYI BİR ŞEKİLDE İNDİR" SEVİYESİNE ÇIKTI**:
+• **ADRES SAĞLIK TESTİ** (`native_dl::probe_url`) — indirmeye başlamadan önce
+  dosyanın SON 1 KB'ı istenir. ÖLÇÜM: kısıtlı adres (PO Token'sız InnerTube)
+  403 (0.16 sn), kısıtsız adres 206 (0.07 sn). Eskiden bu ayrım ancak 1 MB
+  indirip 403 yiyerek anlaşılıyordu → şarkı başına 1 MB veri + ~1 sn israf,
+  artık SIFIR (log: "adres kısıtlı (sağlık testi)").
+• **ALTERNATİF KAYNAK** (`ytdlp::find_alternative`) — TÜM katmanlar tükenirse
+  şarkıyı atlamak yerine AYNI ŞARKININ BAŞKA YÜKLEMESİ aranır (başlık+sanatçı,
+  süre ±%20 + mix/podcast filtresi). Bulunursa çalınır ve `track-relinked`
+  olayıyla `tracks.source_id` GÜNCELLENİR — yoksa her çalışta aynı ölü video
+  yeniden denenirdi. ⚠️ `tracks.id` DEĞİŞMEZ: değişseydi playlist üyelikleri,
+  oylar ve dinleme geçmişi parçadan kopardı.
+• **ISITMADA TEKRAR YOK** — `prewarm_urls` artık önbellekte adresi olanları
+  süzer; eskiden `prefetchNext` her şarkıda aynı 8 şarkı için yt-dlp'yi
+  yeniden çalıştırıyordu (~16 sn boşa iş).
 v1.8.3'te: **KENDİ MÜZİK DOSYALARIN** (`localFiles.ts` + `ytdlp::scan_local`:
 dosya/klasör seç → ffprobe ile etiket oku → `source='local'` olarak tracks'e;
 dosyalar KOPYALANMAZ, yerinde çalınır. ⚠️ rodio m4a/opus çözemiyor →

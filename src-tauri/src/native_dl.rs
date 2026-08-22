@@ -374,6 +374,35 @@ pub fn health() -> (f32, f32, u32) {
     (mbps, fails, buffer)
 }
 
+
+/// ⭐ ADRES SAĞLIK TESTİ — indirmeye başlamadan önce URL gerçekten tam mı?
+///
+/// ÖLÇÜM (2026-08-21): kısıtlı bir adreste (PO Token'sız InnerTube) dosyanın
+/// SON 1 KB'ını istemek 403 döndürüyor (0.16 sn); kısıtsız adreste (yt-dlp)
+/// aynı istek 206 (0.07 sn). Yani "bu adres sonuna kadar iner mi?" sorusu
+/// bir kilobayt ile ve göz açıp kapayana kadar cevaplanıyor.
+///
+/// Bu test olmadan kısıtlı adres her şarkıda 1 MB indirip 403 alıyor, yani
+/// boşa veri + ~1 sn. Şimdi o israf tamamen kalkıyor.
+pub fn probe_url(src: &AudioSource) -> bool {
+    if src.content_length < 2048 {
+        return true; // çok küçük dosyada test anlamsız
+    }
+    let Ok(c) = http() else { return true };
+    let from = src.content_length - 1024;
+    let to = src.content_length - 1;
+    match c
+        .get(&src.url)
+        .header("User-Agent", &src.user_agent)
+        .header("Range", format!("bytes={from}-{to}"))
+        .send()
+    {
+        Ok(r) => r.status().is_success(),
+        // Ağ hatasında adresi suçlama: indirme yolu kendi retry'ını yapsın.
+        Err(_) => true,
+    }
+}
+
 /// URL'yi PARÇALI indirir: her parça ayrı `Range` isteği, parça başına
 /// yeniden deneme, yarıda kalan dosyadan DEVAM.
 ///
@@ -728,6 +757,11 @@ pub fn fetch(cache_dir: &Path, video_id: &str, prefer_low: bool) -> Result<std::
         return Err(anyhow!("yerel çözüm geçici olarak askıda"));
     }
     let src = resolve_innertube(video_id, prefer_low)?;
+    // ⭐ Boşa 1 MB indirme: adres kısıtlıysa ŞİMDİ anla (bkz. probe_url).
+    if !probe_url(&src) {
+        note_native_failure();
+        return Err(anyhow!("adres kısıtlı (sağlık testi)"));
+    }
     let dest = cache_dir.join(format!("{video_id}.src.m4a"));
     let n = match download_ranged(&src, &dest) {
         Ok(n) => {
@@ -765,6 +799,9 @@ pub fn fetch_with_url(
         content_length,
         via: "yt-dlp-url".into(),
     };
+    if !probe_url(&src) {
+        return Err(anyhow!("adres kısıtlı/eskimiş (sağlık testi)"));
+    }
     let dest = cache_dir.join(format!("{video_id}.src.m4a"));
     let n = download_ranged(&src, &dest)?;
     log::info!("yerel indirici (yt-dlp URL) tamam {video_id}: {n} bayt");

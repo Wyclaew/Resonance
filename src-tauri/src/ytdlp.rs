@@ -832,6 +832,83 @@ pub fn ensure_local_audio(cache_dir: &Path, path: &str) -> anyhow::Result<PathBu
     Ok(target)
 }
 
+
+/// ⭐ ALTERNATİF KAYNAK — "bu video inmiyorsa, aynı şarkının BAŞKA yüklemesi".
+///
+/// Bir video kaldırılmış, bölge kısıtlı ya da inatla 403 veriyor olabilir.
+/// Şimdiye kadar bu durumda şarkı ATLANIYORDU — oysa YouTube'da aynı şarkının
+/// onlarca yüklemesi var. Bu fonksiyon başlık+sanatçıyla arayıp SÜRESİ TUTAN
+/// (±%20) bir alternatif bulur; çağıran taraf onu indirmeyi dener.
+///
+/// ⚠️ Süre kontrolü ŞART: aynı adı taşıyan başka bir şarkı, canlı kayıt ya da
+/// 10 dakikalık bir "mix" gelmesin. `is_likely_song` filtresi de uygulanır.
+pub fn find_alternative(
+    title: &str,
+    artist: &str,
+    duration_ms: u64,
+    exclude_id: &str,
+    cookies: Option<&str>,
+) -> Option<SearchResult> {
+    let q = if artist.trim().is_empty() {
+        title.to_string()
+    } else {
+        format!("{artist} {title}")
+    };
+    let results = search(&q, 8, cookies).ok()?;
+    let mut best: Option<(u64, SearchResult)> = None;
+    for r in results {
+        if r.source_id == exclude_id {
+            continue;
+        }
+        if !is_likely_song(&r.title, &r.artist, r.duration_ms) {
+            continue;
+        }
+        // Süre yakınlığı: aynı şarkı olduğuna dair en güvenilir sinyal.
+        if duration_ms > 0 && r.duration_ms > 0 {
+            let diff = duration_ms.abs_diff(r.duration_ms);
+            if diff * 5 > duration_ms {
+                continue; // %20'den fazla sapma → başka bir kayıt
+            }
+            let score = diff;
+            if best.as_ref().map(|(b, _)| score < *b).unwrap_or(true) {
+                best = Some((score, r));
+            }
+        } else if best.is_none() {
+            best = Some((u64::MAX, r));
+        }
+    }
+    let (_, r) = best?;
+    log::info!(
+        "alternatif kaynak bulundu: {} → {} ({})",
+        exclude_id,
+        r.source_id,
+        r.title
+    );
+    Some(r)
+}
+
+/// Öneri motorundaki `isLikelySong` filtresinin Rust karşılığı (dar sürüm):
+/// alternatif ararken mix/podcast/uzun içerik gelmesin.
+fn is_likely_song(title: &str, channel: &str, duration_ms: u64) -> bool {
+    if duration_ms > 0 && (duration_ms < 40_000 || duration_ms > 9 * 60_000) {
+        return false;
+    }
+    let t = title.to_lowercase();
+    let c = channel.to_lowercase();
+    const BAD: [&str; 10] = [
+        "full album", "mix", "megamix", "compilation", "greatest hits",
+        "podcast", "interview", "röportaj", "live stream", "canlı yayın",
+    ];
+    // Kelime sınırı olmadan kontrol RİSKLİ ("mix" → "Remix") → boşlukla sarmala.
+    let padded = format!(" {t} ");
+    for b in BAD {
+        if padded.contains(&format!(" {b} ")) {
+            return false;
+        }
+    }
+    !c.contains("podcast")
+}
+
 /// ⭐ İNDİRME TEŞHİSİ — "neden çalmıyor?" sorusunu log okumadan yanıtlar.
 ///
 /// Kullanıcının Windows'ta yaşadığı "hiçbir şarkı açılmıyor, sadece
@@ -976,7 +1053,17 @@ pub fn prewarm_urls(video_ids: &[String], cookies: Option<&str>) {
     } else {
         "bestaudio[ext=m4a]/bestaudio/best[height<=480]/best"
     };
-    let urls: Vec<String> = video_ids
+    // ⭐ Zaten önbellekte adresi olanları TEKRAR çözme. `prefetchNext` her
+    // şarkı yüklemesinde ısıtma çağırıyor; süzmezsek aynı 8 şarkı için
+    // defalarca yt-dlp çalıştırılırdı (her tur ~16 sn boşa iş).
+    let pending: Vec<&String> = video_ids
+        .iter()
+        .filter(|v| native_dl::cached_source(v).is_none())
+        .collect();
+    if pending.is_empty() {
+        return;
+    }
+    let urls: Vec<String> = pending
         .iter()
         .map(|v| format!("https://www.youtube.com/watch?v={v}"))
         .collect();
@@ -994,7 +1081,7 @@ pub fn prewarm_urls(video_ids: &[String], cookies: Option<&str>) {
         args.push(u);
     }
 
-    log::info!("adres ısıtma başlıyor: {} şarkı", video_ids.len());
+    log::info!("adres ısıtma başlıyor: {} şarkı", pending.len());
     let out = match run_yt_dlp(&args, cookies) {
         Ok(o) => o,
         Err(e) => {
@@ -1596,4 +1683,37 @@ fn best_thumb(v: &serde_json::Value, id: &str) -> String {
         return u.to_string();
     }
     format!("https://i.ytimg.com/vi/{id}/hqdefault.jpg")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ALTERNATİF KAYNAK testi (ağ ister):
+    ///   cargo test --lib alternative -- --ignored --nocapture
+    ///
+    /// "Bu video inmiyorsa aynı şarkının başka yüklemesini bul" yolunun
+    /// gerçekten işe yaradığını ve YANLIŞ eşleşme (mix/canlı/başka şarkı)
+    /// getirmediğini doğrular.
+    #[test]
+    #[ignore]
+    fn alternative_source_found() {
+        // Bilinen bir şarkı; "exclude" olarak uydurma bir id veriyoruz ki
+        // arama sonucundaki her aday geçerli sayılsın.
+        let alt = find_alternative(
+            "Get Lucky",
+            "Daft Punk",
+            248_000, // ~4:08
+            "ZZZZZZZZZZZ",
+            None,
+        );
+        let a = alt.expect("alternatif bulunamadı");
+        println!("bulundu: {} — {} ({} ms)", a.artist, a.title, a.duration_ms);
+        assert!(a.duration_ms > 0, "süre bilinmiyor");
+        // Süre ±%20 içinde olmalı (yanlış şarkı/mix gelmesin).
+        let diff = 248_000u64.abs_diff(a.duration_ms);
+        assert!(diff * 5 <= 248_000, "süre çok saptı: {} ms", a.duration_ms);
+        let t = a.title.to_lowercase();
+        assert!(!t.contains("full album"), "yanlış içerik: {t}");
+    }
 }
