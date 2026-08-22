@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, emit } from "@tauri-apps/api/event";
 import Sidebar from "./components/Sidebar";
 import NowPlayingBar from "./components/NowPlayingBar";
 import LyricsPanel from "./components/LyricsPanel";
@@ -9,6 +10,7 @@ import Screensaver from "./components/Screensaver";
 import Onboarding from "./components/Onboarding";
 import WindowControls from "./components/WindowControls";
 import Toasts from "./components/Toasts";
+import MiniPlayer from "./components/MiniPlayer";
 import { getDb, isTauri } from "./lib/db";
 import { onRemoteApplied, startSync } from "./lib/sync/engine";
 import { latestRemoteQueue, localQueueUpdatedAt } from "./lib/deviceQueue";
@@ -32,11 +34,18 @@ import SettingsView from "./views/SettingsView";
 import StatsView from "./views/StatsView";
 import TasteView from "./views/TasteView";
 import WrappedView from "./views/WrappedView";
+import ArtistView from "./views/ArtistView";
 import AccountView from "./views/AccountView";
 import { useAppStore } from "./store/useAppStore";
 import { useLibraryStore } from "./store/useLibraryStore";
 import { usePlaylistStore } from "./store/usePlaylistStore";
 import { useSettingsStore } from "./store/useSettingsStore";
+
+// ⭐ MİNİ PENCERE: aynı frontend `?mini=1` ile yüklenir ve TAMAMEN farklı
+// (küçük) bir arayüz render eder. Ayrı bir HTML girişi tutmaya gerek yok.
+const IS_MINI =
+  typeof window !== "undefined" &&
+  new URLSearchParams(window.location.search).has("mini");
 
 function CurrentView() {
   const view = useAppStore((s) => s.view);
@@ -63,6 +72,10 @@ function CurrentView() {
       return <TasteView />;
     case "wrapped":
       return <WrappedView />;
+    // ⚠️ `activePlaylistId` alanı burada SANATÇI ADINI taşır — gezinme
+    // argümanı tek alan olduğu için yeniden kullanılıyor.
+    case "artist":
+      return <ArtistView artist={activePlaylistId ?? ""} />;
     case "account":
       return <AccountView />;
     case "settings":
@@ -112,6 +125,16 @@ async function adoptRemoteQueue(): Promise<void> {
     .show(t("sync.resumedFrom", { device: remote.deviceName }), "info");
 }
 
+/** Çalan şarkının bilgisini mini pencereye yolla. */
+async function emitMiniMeta(): Promise<void> {
+  const c = usePlayerStore.getState().current;
+  await emit("mini-meta", {
+    title: c?.title ?? "",
+    artist: c?.artist ?? "",
+    thumbnail: c?.thumbnail,
+  });
+}
+
 // Windows mı? (çerçevesiz pencerede sol boşluk/buton yerleşimi için)
 const isWindows =
   typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
@@ -128,6 +151,14 @@ function darken(hex: string, factor: number): string {
 }
 
 export default function App() {
+  // Mini pencere: ağır ana arayüzü hiç kurmadan küçük oynatıcıyı göster.
+  // (Hook sırası bozulmasın diye tüm hook'lardan ÖNCE, ama App'in kendi
+  // gövdesinde erken dönüş yapılamaz → ayrı bileşene ayrıldı.)
+  if (IS_MINI) return <MiniPlayer />;
+  return <MainApp />;
+}
+
+function MainApp() {
   const accentColor = useSettingsStore((s) => s.accentColor);
   const theme = useSettingsStore((s) => s.theme);
   const lyricsOpen = useAppStore((s) => s.lyricsOpen);
@@ -251,6 +282,37 @@ export default function App() {
     initPlayer();
   }, []);
 
+  // ⭐ MİNİ PENCERE KÖPRÜSÜ: mini ayrı bir JS bağlamı olduğu için kuyruk
+  // mantığına erişemez; komutları buraya yollar, biz uygularız. Şarkı
+  // değişince de başlık/kapak bilgisini ona geri gönderiyoruz.
+  useEffect(() => {
+    const un = listen<{ action: string }>("mini-command", (e) => {
+      const p = usePlayerStore.getState();
+      switch (e.payload.action) {
+        case "toggle":
+          p.toggle();
+          break;
+        case "next":
+          p.next();
+          break;
+        case "prev":
+          p.prev();
+          break;
+        case "sync":
+          break; // aşağıdaki efekt zaten meta yolluyor
+      }
+      void emitMiniMeta();
+    });
+    return () => {
+      void un.then((f) => f());
+    };
+  }, []);
+
+  const currentTrack = usePlayerStore((s) => s.current);
+  useEffect(() => {
+    void emitMiniMeta();
+  }, [currentTrack?.id]);
+
   // Uzaktan (diğer cihazdan) veri geldiğinde listeleri tazele — kullanıcı
   // Ayarlar'a girip elle yenilemek zorunda kalmasın.
   useEffect(
@@ -350,6 +412,16 @@ export default function App() {
           break;
         case "KeyM":
           p.toggleMute();
+          break;
+        case "KeyL":
+          useAppStore.getState().toggleLyrics();
+          break;
+        case "KeyQ":
+          useAppStore.getState().toggleQueue();
+          break;
+        case "KeyP":
+          // Mini oynatıcı (küçük, hep üstte pencere).
+          if (e.shiftKey) invoke("toggle_mini_player").catch(() => {});
           break;
       }
     }

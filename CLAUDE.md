@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.8.2** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.8.3** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,24 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.8.3'te: **KENDİ MÜZİK DOSYALARIN** (`localFiles.ts` + `ytdlp::scan_local`:
+dosya/klasör seç → ffprobe ile etiket oku → `source='local'` olarak tracks'e;
+dosyalar KOPYALANMAZ, yerinde çalınır. ⚠️ rodio m4a/opus çözemiyor →
+`ensure_local_audio` bunları BİR KEZ ADTS'ye çevirip önbelleğe koyar, kaynağa
+dokunmaz. ⚠️ `sourceId` = dosya yolu → senkronda tracks satırı gider ama ses
+gitmez, diğer cihazda çalmaz: bilinçli); **SANATÇI SAYFASI** (`ArtistView`,
+sanatçı adı ilk kez tıklanabilir: geçmişin + parçaları + radyosu + daha
+çok/az/engelle); **AKILLI LİSTELER** (`smartLists.ts` — kalıcı playlist satırı
+YOK, her açılışta play_history'den hesaplanır → senkron yükü yok, hep güncel);
+**ŞARKI DETAYI** (sağ tık: kaç kez çaldın/tamamladın/atladın + saat dağılımı;
+eşikler öneri motorununkiyle AYNI); **SÖZDEN ŞARKI BULMA** (lrclib arama ucu →
+bulunan şarkı YouTube'da aranıp çalınır); **MİNİ OYNATICI** (`?mini=1` ile aynı
+frontend, ikinci pencere, hep üstte; ⚠️ AYRI JS bağlamı — store paylaşılmaz,
+komutlar `mini-command` olayıyla ana pencereye gider); **SON SORUNLAR** (toast
+4 sn'de kayboluyordu, tekrar eden hata iz bırakmıyordu → Ayarlar'da sayaçlı
+liste); **KUYRUK SONU DAVRANIŞI** (öneriyle devam / tekrarla / dur);
+**UYKUDA FADE-OUT + "şarkı bitince dur"**; geçiş boşluğu küçüldü (şarkı kendi
+bitince 180 ms'lik debounce ATLANIR — o gecikme doğrudan sessizliğe dönüşüyordu).
 v1.8.2'de: **CROSSFADE** (`AudioCmd::Load{fade_ms}` + audio.rs'te sönen sink
 listesi; parça bitmeye fade süresi kala frontend `next("ended")` çağırır —
 "ended" ŞART, yoksa crossfade her şarkıya haksız ATLAMA cezası yazardı.

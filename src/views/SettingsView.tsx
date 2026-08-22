@@ -34,6 +34,7 @@ import { getDb, isTauri } from "../lib/db";
 import { formatBytes } from "../lib/format";
 import { importBackup, type ImportResult } from "../lib/backup";
 import { loadBlockedArtists, unblockArtist } from "../lib/blocked";
+import { useToastStore } from "../store/useToastStore";
 
 // label yerine çeviri ANAHTARI — dil değişince kategori adları da değişsin.
 const categories = [
@@ -217,6 +218,56 @@ const BROWSERS = [
   { v: "vivaldi", label: "Vivaldi" },
 ];
 
+// ⭐ SON SORUNLAR (v1.8.3): toast'lar 4 saniyede kaybolur ve arayüzde log
+// ekranı yok — tekrar eden bir hata (ör. her şarkıda indirme hatası) hiçbir
+// yerde iz bırakmıyordu. Aynı hata tek satırda sayılır.
+function ProblemLog() {
+  const t = useT();
+  const problems = useToastStore((s) => s.problems);
+  const clear = useToastStore((s) => s.clearProblems);
+  return (
+    <>
+      <div className="mt-6 mb-2 flex items-center justify-between">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">
+          {t("settings.problems")}
+        </div>
+        {problems.length > 0 && (
+          <button
+            onClick={clear}
+            className="text-xs text-muted underline underline-offset-2 hover:text-text"
+          >
+            {t("settings.problemsClear")}
+          </button>
+        )}
+      </div>
+      <p className="mb-2 text-xs text-muted">{t("settings.problemsDesc")}</p>
+      {problems.length === 0 ? (
+        <p className="text-xs text-faint">{t("settings.problemsNone")}</p>
+      ) : (
+        <div className="rounded-md border border-border bg-surface">
+          {problems.map((p, i) => (
+            <div
+              key={`${p.at}-${i}`}
+              className="flex items-start justify-between gap-3 border-b border-border/60 px-3 py-2 last:border-0"
+            >
+              <span className="min-w-0 flex-1 text-xs leading-relaxed text-muted">
+                {p.message}
+              </span>
+              <span className="shrink-0 text-[11px] tabular-nums text-faint">
+                {p.count > 1 && `×${p.count} · `}
+                {new Date(p.at).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
 function IntegrationsSettings() {
   const t = useT();
   const cookiesBrowser = useSettingsStore((s) => s.cookiesBrowser);
@@ -329,6 +380,8 @@ function IntegrationsSettings() {
           {diagRunning ? t("settings.diagnoseRunning") : t("settings.diagnoseRun")}
         </button>
       </SettingRow>
+      <ProblemLog />
+
       {diag && (
         <div className="mt-2">
           <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-surface p-3 text-[11px] leading-relaxed text-muted">
@@ -411,6 +464,42 @@ function PlaybackSettings() {
           checked={s.prefetchEnabled}
           onChange={(v) => s.update("prefetchEnabled", v)}
         />
+      </SettingRow>
+      <SettingRow
+        label={t("settings.queueEnd")}
+        description={t("settings.queueEndDesc")}
+      >
+        <select
+          value={s.queueEndBehavior}
+          onChange={(e) =>
+            s.update(
+              "queueEndBehavior",
+              e.target.value as "recommend" | "repeat" | "stop"
+            )
+          }
+          className="rounded-md border border-border bg-surface px-2 py-1.5 text-sm"
+        >
+          <option value="recommend">{t("settings.queueEndRecommend")}</option>
+          <option value="repeat">{t("settings.queueEndRepeat")}</option>
+          <option value="stop">{t("settings.queueEndStop")}</option>
+        </select>
+      </SettingRow>
+      <SettingRow
+        label={t("settings.sleepFade")}
+        description={t("settings.sleepFadeDesc")}
+      >
+        <select
+          value={s.sleepFadeSeconds}
+          onChange={(e) =>
+            s.update("sleepFadeSeconds", Number(e.target.value) || 0)
+          }
+          className="rounded-md border border-border bg-surface px-2 py-1.5 text-sm"
+        >
+          <option value={0}>{t("settings.off")}</option>
+          <option value={10}>10 sn</option>
+          <option value={20}>20 sn</option>
+          <option value={60}>60 sn</option>
+        </select>
       </SettingRow>
       <SettingRow
         label={t("settings.crossfade")}

@@ -82,6 +82,7 @@ export type ViewId =
   | "stats" // Dinleme etkinliği & analiz (profil menüsünden)
   | "taste" // Zevk profili: modelin içi + elle düzeltme (profil menüsünden)
   | "wrapped" // Yıllık özet (İstatistikler → Yıllık özet)
+  | "artist" // Sanatçı sayfası (arg olarak sanatçı adı taşınır)
   | "account" // Hesap & senkron (profil menüsünden; Ayarlar'dan çıkarıldı)
   | "settings";
 

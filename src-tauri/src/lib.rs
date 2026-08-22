@@ -364,6 +364,8 @@ pub fn run() {
             }
         }));
         // Windows açılışında otomatik başlatma (Ayarlar'dan aç/kapa).
+        // Dosya seçici (yerel müzik dosyalarını içe aktarmak için).
+        builder = builder.plugin(tauri_plugin_dialog::init());
         builder = builder.plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -399,6 +401,9 @@ pub fn run() {
             commands::prewarm_urls,
             commands::diagnose_download,
             commands::download_health,
+            commands::search_lyrics,
+            commands::scan_local_files,
+            commands::toggle_mini_player,
             commands::export_data,
             commands::backup_db,
             commands::list_backups,

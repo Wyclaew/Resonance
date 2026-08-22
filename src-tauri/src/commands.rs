@@ -17,6 +17,9 @@ pub struct PlayInput {
     pub track_id: String,
     #[serde(default)]
     pub resume_ms: u64, // kaldığın yerden devam (0 = baştan)
+    /// Yerel dosya yolu (source = "local"). Verilirse İNDİRME YAPILMAZ.
+    #[serde(default)]
+    pub local_path: Option<String>,
     /// Crossfade süresi (ms). 0 = anında geçiş (varsayılan davranış).
     #[serde(default)]
     pub fade_ms: u64,
@@ -298,6 +301,101 @@ fn dl_semaphore() -> &'static tokio::sync::Semaphore {
     SEM.get_or_init(|| tokio::sync::Semaphore::new(3))
 }
 
+/// ⭐ MİNİ OYNATICI (v1.8.3): küçük, hep üstte duran ikinci pencere.
+///
+/// ⚠️ İki webview AYRI JS bağlamıdır — zustand store'u paylaşmazlar. Mini
+/// pencere durumu Rust'tan gelen `playback-tick` olayıyla öğrenir, komutları
+/// da `mini-command` olayıyla ANA pencereye yollar (kuyruk mantığı orada).
+#[tauri::command]
+pub async fn toggle_mini_player(app: AppHandle) -> Result<bool, String> {
+    if let Some(w) = app.get_webview_window("mini") {
+        let _ = w.close();
+        return Ok(false);
+    }
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        "mini",
+        tauri::WebviewUrl::App("index.html?mini=1".into()),
+    )
+    .title("Resonance")
+    .inner_size(360.0, 128.0)
+    .resizable(false)
+    .always_on_top(true)
+    .decorations(false)
+    .skip_taskbar(true)
+    .build()
+    .map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+/// Seçilen dosya/klasörleri tarar ve içe aktarılabilir parçaları döndürür.
+#[tauri::command]
+pub async fn scan_local_files(paths: Vec<String>) -> Result<Vec<ytdlp::LocalTrack>, String> {
+    tauri::async_runtime::spawn_blocking(move || ytdlp::scan_local(&paths))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LyricHit {
+    pub title: String,
+    pub artist: String,
+    /// Eşleşen sözün kısa bir parçası (kullanıcı doğru şarkı mı görsün).
+    pub snippet: String,
+}
+
+/// ⭐ SÖZDEN ŞARKI BULMA: aklında söz var ama ad yok.
+/// lrclib'in kendi arama uçunu kullanır (anahtarsız). Sonuç YouTube'da
+/// aranıp çalınır — burada yalnız "hangi şarkı?" sorusu cevaplanır.
+#[tauri::command]
+pub async fn search_lyrics(query: String) -> Result<Vec<LyricHit>, String> {
+    if query.trim().len() < 3 {
+        return Ok(vec![]);
+    }
+    tauri::async_runtime::spawn_blocking(move || -> anyhow::Result<Vec<LyricHit>> {
+        let client = reqwest::blocking::Client::builder()
+            .user_agent("Resonance (personal music player)")
+            .timeout(std::time::Duration::from_secs(20))
+            .build()?;
+        let resp = client
+            .get("https://lrclib.net/api/search")
+            .query(&[("q", query.as_str())])
+            .send()?;
+        let arr: serde_json::Value = resp.json().unwrap_or(serde_json::Value::Null);
+        let mut out = Vec::new();
+        if let Some(items) = arr.as_array() {
+            let needle = query.to_lowercase();
+            for it in items.iter().take(25) {
+                let title = it["trackName"].as_str().unwrap_or("").to_string();
+                let artist = it["artistName"].as_str().unwrap_or("").to_string();
+                if title.is_empty() {
+                    continue;
+                }
+                // Eşleşen satırı bul — kullanıcı doğru şarkı olduğunu görsün.
+                let plain = it["plainLyrics"].as_str().unwrap_or("");
+                let snippet = plain
+                    .lines()
+                    .find(|l| l.to_lowercase().contains(&needle))
+                    .unwrap_or_else(|| plain.lines().next().unwrap_or(""))
+                    .trim()
+                    .chars()
+                    .take(90)
+                    .collect::<String>();
+                out.push(LyricHit {
+                    title,
+                    artist,
+                    snippet,
+                });
+            }
+        }
+        Ok(out)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DownloadHealth {
@@ -355,6 +453,32 @@ pub async fn play_track(
     let _ = app.emit("playback-loading", &input.track_id);
 
     let cache = audio_cache_dir(&app).map_err(|e| e.to_string())?;
+
+    // ⭐ YEREL DOSYA: indirme/akış yollarının hiçbiri çalışmaz — dosya zaten
+    // diskte. Gerekirse (m4a/opus gibi rodio'nun çözemediği formatlarda)
+    // bir kez ADTS'ye çevrilir.
+    if let Some(lp) = input.local_path.clone() {
+        let cache_l = cache.clone();
+        let path = tauri::async_runtime::spawn_blocking(move || {
+            ytdlp::ensure_local_audio(&cache_l, &lp)
+        })
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+        if PLAY_GEN.load(Ordering::SeqCst) != my_gen {
+            return Ok(());
+        }
+        audio.send(AudioCmd::Load {
+            path,
+            duration_ms: input.duration_ms,
+            track_id: input.track_id,
+            start_ms: input.resume_ms,
+            fade_ms: input.fade_ms,
+            growing: None,
+        });
+        return Ok(());
+    }
+
     let sid = input.source_id.clone();
     let cookies = cookies_browser.clone();
 

@@ -63,6 +63,9 @@ interface PlayerState {
   // Uyku zamanlayıcı
   sleepTimerEndsAt: number | null;
   setSleepTimer: (minutes: number | null) => void;
+  /** Çalan şarkı bitince dur (süreye değil parçaya bağlı uyku). */
+  sleepAfterTrack: boolean;
+  setSleepAfterTrack: (on: boolean) => void;
 
   error: string | null;
 
@@ -280,6 +283,8 @@ function loadAndPlay(item: QueueItem, startMs = 0) {
       trackId: item.id,
       resumeMs: Math.floor(startMs),
       fadeMs,
+      // Yerel dosya: indirme/akış yolları atlanır (bkz. lib/localFiles.ts).
+      localPath: item.source === "local" ? item.sourceId : null,
     },
     cookiesBrowser: useSettingsStore.getState().cookiesBrowser,
   })
@@ -321,9 +326,12 @@ let loadFailCount = 0;
 // yükler → tek indirme, arayüz-ses her zaman aynı.
 let loadTimer: ReturnType<typeof setTimeout> | undefined;
 let prefetchTimer: ReturnType<typeof setTimeout> | undefined;
-function scheduleLoad(item: QueueItem, startMs = 0) {
+function scheduleLoad(item: QueueItem, startMs = 0, immediate = false) {
   clearTimeout(loadTimer);
-  loadTimer = setTimeout(() => loadAndPlay(item, startMs), 180);
+  // ⭐ 180 ms'lik debounce KULLANICI hızlı hızlı şarkı geçerken gereklidir;
+  // ama şarkı KENDİ bitince beklemenin anlamı yok — o gecikme doğrudan
+  // parçalar arası sessizliğe dönüşüyordu. Bitişte anında yükle.
+  loadTimer = setTimeout(() => loadAndPlay(item, startMs), immediate ? 0 : 180);
   // Prefetch'i daha uzun beklet: kullanıcı hızlıca şarkı geçerken geçilen
   // şarkılar boşuna indirilmesin — yalnızca durduktan sonra sıradakiler hazırlanır.
   clearTimeout(prefetchTimer);
@@ -331,6 +339,18 @@ function scheduleLoad(item: QueueItem, startMs = 0) {
 }
 
 let sleepTimeout: ReturnType<typeof setTimeout> | undefined;
+let sleepFade: ReturnType<typeof setInterval> | undefined;
+let sleepBaseVolume = 0;
+/** Fade sırasında kısılan sesi kullanıcının seviyesine geri getirir. */
+function restoreVolumeAfterSleep(): void {
+  if (sleepBaseVolume > 0) {
+    usePlayerStore.setState({ volume: sleepBaseVolume });
+    if (isTauri()) {
+      invoke("audio_set_volume", { volume: sleepBaseVolume }).catch(() => {});
+    }
+    sleepBaseVolume = 0;
+  }
+}
 
 // Ses düzeyini ayarlara debounce'lu kaydet (sürükleme sırasında DB'yi yormamak için).
 let volSaveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -751,16 +771,53 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   sleepTimerEndsAt: null,
   setSleepTimer: (minutes) => {
     clearTimeout(sleepTimeout);
+    clearInterval(sleepFade);
+    set({ sleepAfterTrack: false });
     if (minutes == null) {
+      restoreVolumeAfterSleep();
       set({ sleepTimerEndsAt: null });
       return;
     }
     const ms = minutes * 60000;
     set({ sleepTimerEndsAt: Date.now() + ms });
+
+    // ⭐ FADE-OUT (v1.8.3): süre dolarken ses kademeli kısılır. Müziğin
+    // ortasında aniden kesilmesi uykuya dalanı UYANDIRIYOR — asıl istenen
+    // yumuşak sönme. Kullanıcının ses seviyesi saklanır ve zamanlayıcı
+    // iptal edilirse/bittikten sonra geri yüklenir.
+    const fadeSec = useSettingsStore.getState().sleepFadeSeconds;
+    if (fadeSec > 0 && ms > fadeSec * 1000) {
+      const fadeStart = ms - fadeSec * 1000;
+      setTimeout(() => {
+        const st = get();
+        if (!st.sleepTimerEndsAt) return; // iptal edilmiş
+        sleepBaseVolume = st.volume;
+        const t0 = Date.now();
+        sleepFade = setInterval(() => {
+          const p = Math.min(1, (Date.now() - t0) / (fadeSec * 1000));
+          const v = sleepBaseVolume * (1 - p);
+          if (isTauri()) invoke("audio_set_volume", { volume: v }).catch(() => {});
+          if (p >= 1) clearInterval(sleepFade);
+        }, 500);
+      }, fadeStart);
+    }
+
     sleepTimeout = setTimeout(() => {
       if (isTauri()) invoke("audio_pause").catch(() => {});
+      clearInterval(sleepFade);
       set({ status: "paused", sleepTimerEndsAt: null });
+      restoreVolumeAfterSleep();
     }, ms);
+  },
+
+  // ⭐ "ŞARKI BİTİNCE DUR": süre yerine parça sonuna bağlı uyku.
+  // Dinlediğin şarkı yarıda kesilmesin diye en çok istenen varyant.
+  sleepAfterTrack: false,
+  setSleepAfterTrack: (on) => {
+    clearTimeout(sleepTimeout);
+    clearInterval(sleepFade);
+    restoreVolumeAfterSleep();
+    set({ sleepAfterTrack: on, sleepTimerEndsAt: null });
   },
 
   error: null,
@@ -1191,6 +1248,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   next: (reason = "next") => {
+    const endedNaturally = reason === "ended";
     // Crossfade geçişinde reason "ended" gelir: kullanıcı ATLAMADI, şarkı
     // bitti → skip cezası ve mod sinyali yazılmamalı.
     recordOutgoing(get(), reason);
@@ -1227,9 +1285,22 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
           refillRadio(true);
           return;
         } else {
-          if (isTauri()) invoke("audio_stop").catch(() => {});
-          set({ status: "idle", positionMs: 0 });
-          return;
+          // ⭐ KUYRUK SONU DAVRANIŞI (v1.8.3, Ayarlar → Çalma).
+          // Eskiden tek seçenek vardı: sus. Listeyi bitirince müziğin kesilmesi
+          // yerine öneriyle devam etmek (varsayılan) ya da listeyi baştan
+          // almak artık seçilebiliyor.
+          const behavior = useSettingsStore.getState().queueEndBehavior;
+          if (behavior === "repeat" && queue.length > 0) {
+            nextIdx = 0;
+          } else if (behavior === "recommend") {
+            set({ status: "loading", positionMs: 0, radioActive: true });
+            refillRadio(true);
+            return;
+          } else {
+            if (isTauri()) invoke("audio_stop").catch(() => {});
+            set({ status: "idle", positionMs: 0 });
+            return;
+          }
         }
       }
     }
@@ -1241,7 +1312,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       positionMs: 0,
       durationMs: item.durationMs,
     });
-    scheduleLoad(item);
+    scheduleLoad(item, 0, endedNaturally);
     // Radyo/keşifte sıradaki şarkı sayısı hedefin (20) altına düşünce hemen
     // tamamla — sırada hep ~20 yüklü şarkı dursun.
     if (radioActive && queue.length - nextIdx - 1 < TARGET_QUEUE_AHEAD) {
@@ -1438,7 +1509,18 @@ export async function initPlayer() {
   );
 
   await listen("track-ended", () => {
-    usePlayerStore.getState().next();
+    const st = usePlayerStore.getState();
+    // "Şarkı bitince dur": sıradakine geçme, burada bitir.
+    if (st.sleepAfterTrack) {
+      if (isTauri()) invoke("audio_stop").catch(() => {});
+      usePlayerStore.setState({
+        status: "idle",
+        positionMs: 0,
+        sleepAfterTrack: false,
+      });
+      return;
+    }
+    st.next("ended");
   });
 
   await listen<string>("playback-loading", () => {

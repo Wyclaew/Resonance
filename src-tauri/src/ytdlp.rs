@@ -640,6 +640,198 @@ pub fn stream_audio(
     Ok(h)
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════════
+// YEREL MÜZİK DOSYALARI (v1.8.3)
+//
+// Kullanıcının kendi arşivi: YouTube'da olmayan/kaldırılmış şarkılar, kendi
+// kayıtları, satın aldıkları. İnternet gerekmez ve öneri motoru bunları da
+// öğrenir (aynı `tracks` tablosuna `source='local'` olarak yazılırlar).
+//
+// ⚠️ ÇALINABİLİRLİK: rodio/symphonia mp3/flac/wav/ogg'yi doğrudan çözer ama
+// m4a/aac/opus/wma'da ya panikler ya da hiç desteklemez (bkz. CLAUDE.md #1).
+// Bu yüzden desteklenmeyen formatlar ffmpeg ile BİR KEZ ADTS'ye çevrilip
+// önbelleğe konur; kaynak dosyaya DOKUNULMAZ.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// rodio'nun doğrudan çözebildiği uzantılar.
+const NATIVE_PLAYABLE: [&str; 6] = ["mp3", "flac", "wav", "ogg", "oga", "aac"];
+/// Taramada kabul edilen tüm ses uzantıları.
+const AUDIO_EXTS: [&str; 10] = [
+    "mp3", "flac", "wav", "ogg", "oga", "aac", "m4a", "opus", "wma", "aiff",
+];
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalTrack {
+    pub path: String,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub duration_ms: u64,
+}
+
+fn ffprobe() -> Command {
+    let mut c = Command::new(resolve_bin("ffprobe"));
+    c.env("PATH", augmented_path());
+    no_window(&mut c);
+    c
+}
+
+/// Dosya/klasör listesini tarar, ses dosyalarının metadata'sını okur.
+/// Klasörler ÖZYİNELEMELİ taranır (bir albüm klasörü tek seçimle gelsin).
+pub fn scan_local(paths: &[String]) -> Vec<LocalTrack> {
+    let mut files: Vec<PathBuf> = Vec::new();
+    for p in paths {
+        let path = PathBuf::from(p);
+        if path.is_dir() {
+            collect_audio(&path, &mut files, 0);
+        } else if is_audio(&path) {
+            files.push(path);
+        }
+    }
+    files.sort();
+    files.dedup();
+
+    let mut out = Vec::new();
+    for f in files.iter().take(2000) {
+        if let Some(t) = probe_local(f) {
+            out.push(t);
+        }
+    }
+    log::info!("{} yerel ses dosyası içe aktarıldı", out.len());
+    out
+}
+
+fn is_audio(p: &Path) -> bool {
+    p.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| AUDIO_EXTS.contains(&e.to_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+fn collect_audio(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) {
+    if depth > 6 {
+        return; // saçma derinlikte taramayı kes
+    }
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            collect_audio(&p, out, depth + 1);
+        } else if is_audio(&p) {
+            out.push(p);
+        }
+    }
+}
+
+/// ffprobe ile başlık/sanatçı/süre. Etiket yoksa dosya adına düşülür.
+fn probe_local(path: &Path) -> Option<LocalTrack> {
+    let out = ffprobe()
+        .args([
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
+            "-show_format",
+            "--",
+            path.to_str()?,
+        ])
+        .output()
+        .ok()?;
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    let tags = &v["format"]["tags"];
+    let get = |k: &str, k2: &str| -> String {
+        tags[k]
+            .as_str()
+            .or_else(|| tags[k2].as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string();
+    let mut title = get("title", "TITLE");
+    if title.is_empty() {
+        title = stem.clone();
+    }
+    let artist = {
+        let a = get("artist", "ARTIST");
+        if a.is_empty() {
+            // "Sanatçı - Şarkı.mp3" kalıbı yaygın; etiket yoksa oradan çıkar.
+            stem.split(" - ").next().filter(|x| x.len() > 1 && stem.contains(" - "))
+                .unwrap_or("")
+                .to_string()
+        } else {
+            a
+        }
+    };
+    let duration_ms = v["format"]["duration"]
+        .as_str()
+        .and_then(|d| d.parse::<f64>().ok())
+        .map(|d| (d * 1000.0) as u64)
+        .unwrap_or(0);
+    Some(LocalTrack {
+        path: path.to_string_lossy().into_owned(),
+        title,
+        artist: get("album_artist", "ALBUM_ARTIST")
+            .is_empty()
+            .then(|| artist.clone())
+            .unwrap_or_else(|| get("album_artist", "ALBUM_ARTIST")),
+        album: get("album", "ALBUM"),
+        duration_ms,
+    })
+}
+
+/// Yerel dosyayı ÇALINABİLİR hâle getirir: rodio doğrudan çözebiliyorsa
+/// dosyanın kendisi, çözemiyorsa önbellekteki ADTS kopyası döner.
+pub fn ensure_local_audio(cache_dir: &Path, path: &str) -> anyhow::Result<PathBuf> {
+    let src = PathBuf::from(path);
+    if !src.exists() {
+        anyhow::bail!("dosya bulunamadı: {path}");
+    }
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+    if NATIVE_PLAYABLE.contains(&ext.as_str()) {
+        return Ok(src);
+    }
+
+    // Dönüştürülmüş kopya: yol karmasıyla adlandırılır (aynı ada sahip farklı
+    // dosyalar çakışmasın).
+    let mut hash: u64 = 1469598103934665603;
+    for b in path.as_bytes() {
+        hash ^= *b as u64;
+        hash = hash.wrapping_mul(1099511628211);
+    }
+    let target = cache_dir.join(format!("local-{hash:016x}.aac"));
+    if target.exists() {
+        return Ok(target);
+    }
+    std::fs::create_dir_all(cache_dir)?;
+    let out = ffmpeg()
+        .args([
+            "-y", "-v", "error", "-i", path, "-vn", "-c:a", "aac", "-b:a", "192k",
+            "-f", "adts",
+            target.to_str().unwrap(),
+        ])
+        .output()?;
+    if !out.status.success() || !target.exists() {
+        anyhow::bail!(
+            "yerel dosya dönüştürülemedi: {}",
+            first_line(&String::from_utf8_lossy(&out.stderr))
+        );
+    }
+    Ok(target)
+}
+
 /// ⭐ İNDİRME TEŞHİSİ — "neden çalmıyor?" sorusunu log okumadan yanıtlar.
 ///
 /// Kullanıcının Windows'ta yaşadığı "hiçbir şarkı açılmıyor, sadece

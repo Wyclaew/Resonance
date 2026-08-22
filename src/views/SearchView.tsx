@@ -34,6 +34,12 @@ export default function SearchView() {
   const [searched, setSearched] = useState(false);
   const [history, setHistory] = useState<string[]>(loadHistory);
   const [focused, setFocused] = useState(false);
+  // ⭐ SÖZDEN ARAMA (v1.8.3): "aklımda söz var, ad yok". lrclib'in arama ucu
+  // sözü bulur, biz de bulunan şarkıyı YouTube'da arayıp çalarız.
+  const [mode, setMode] = useState<"track" | "lyrics">("track");
+  const [lyricHits, setLyricHits] = useState<
+    { title: string; artist: string; snippet: string }[]
+  >([]);
   const reqId = useRef(0);
 
   const current = usePlayerStore((s) => s.current);
@@ -66,15 +72,27 @@ export default function SearchView() {
     setLoading(true);
     setError(null);
     try {
-      const res = await invoke<Track[]>("search_youtube", {
-        query: q,
-        limit: 20,
-        cookiesBrowser: useSettingsStore.getState().cookiesBrowser,
-      });
-      if (id === reqId.current) {
-        setResults(res);
-        setSearched(true);
-        if (addToHistory) remember(q);
+      if (mode === "lyrics") {
+        const hits = await invoke<
+          { title: string; artist: string; snippet: string }[]
+        >("search_lyrics", { query: q });
+        if (id === reqId.current) {
+          setLyricHits(hits);
+          setResults([]);
+          setSearched(true);
+        }
+      } else {
+        const res = await invoke<Track[]>("search_youtube", {
+          query: q,
+          limit: 20,
+          cookiesBrowser: useSettingsStore.getState().cookiesBrowser,
+        });
+        if (id === reqId.current) {
+          setResults(res);
+          setLyricHits([]);
+          setSearched(true);
+          if (addToHistory) remember(q);
+        }
       }
     } catch (e) {
       if (id === reqId.current) setError(String(e));
@@ -96,7 +114,32 @@ export default function SearchView() {
     const handle = setTimeout(() => runSearch(q), DEBOUNCE_MS);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query]);
+  }, [query, mode]);
+
+  // Söz sonucundan çalma: lrclib yalnız "hangi şarkı" sorusunu cevaplar,
+  // sesi yine YouTube'dan buluyoruz.
+  async function playFromLyricHit(h: { title: string; artist: string }) {
+    if (!isTauri()) return;
+    setLoading(true);
+    try {
+      const res = await invoke<Track[]>("search_youtube", {
+        query: `${h.artist} ${h.title}`,
+        limit: 5,
+        cookiesBrowser: useSettingsStore.getState().cookiesBrowser,
+      });
+      if (res.length > 0) {
+        setResults(res);
+        setLyricHits([]);
+        playNow(res[0], res);
+      } else {
+        setError(t("search.noResults"));
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  }
 
   // Bir şarkı çalınınca aramayı geçmişe ekle (anlamlı sorgu işareti).
   const showHistory = focused && query.trim().length === 0 && history.length > 0;
@@ -109,6 +152,25 @@ export default function SearchView() {
       />
 
       <div className="px-8">
+        {/* Arama modu: şarkı adı mı, söz mü? */}
+        <div className="mb-3 flex gap-1 rounded-md bg-surface-2 p-1 w-fit">
+          {(["track", "lyrics"] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => {
+                setMode(m);
+                setLyricHits([]);
+                setResults([]);
+                setSearched(false);
+              }}
+              className={`rounded px-3 py-1 text-xs transition-colors ${
+                mode === m ? "bg-accent font-medium text-bg" : "text-muted"
+              }`}
+            >
+              {t(m === "track" ? "search.modeTrack" : "search.modeLyrics")}
+            </button>
+          ))}
+        </div>
         <div className="relative">
           <div className="flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 focus-within:border-border-strong">
             <Search
@@ -207,9 +269,37 @@ export default function SearchView() {
           </div>
         )}
 
-        {!error && searched && results.length === 0 && !loading && (
-          <p className="py-24 text-center text-sm text-faint">{t("search.noResults")}</p>
-        )}
+        {!error &&
+          searched &&
+          results.length === 0 &&
+          lyricHits.length === 0 &&
+          !loading && (
+            <p className="py-24 text-center text-sm text-faint">
+              {t("search.noResults")}
+            </p>
+          )}
+
+        {/* Söz sonuçları: tıklayınca şarkı YouTube'da aranıp çalınır. */}
+        {lyricHits.map((h, i) => (
+          <button
+            key={`${h.title}-${h.artist}-${i}`}
+            onClick={() => void playFromLyricHit(h)}
+            className="flex w-full items-start gap-3 rounded-md px-2 py-2.5 text-left transition-colors hover:bg-surface"
+          >
+            <span className="mt-0.5 w-6 shrink-0 text-center text-xs tabular-nums text-faint">
+              {i + 1}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm">{h.title}</span>
+              <span className="block truncate text-xs text-muted">{h.artist}</span>
+              {h.snippet && (
+                <span className="mt-0.5 block truncate text-xs italic text-faint">
+                  "{h.snippet}"
+                </span>
+              )}
+            </span>
+          </button>
+        ))}
 
         {results.map((t, i) => (
           <TrackRow

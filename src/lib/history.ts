@@ -153,3 +153,65 @@ export async function weekDiscoveries(limit = 8): Promise<Track[]> {
     return [];
   }
 }
+
+export interface TrackStats {
+  plays: number;
+  completed: number;
+  skipped: number;
+  totalMs: number;
+  firstAt: number | null;
+  lastAt: number | null;
+  /** Saat dağılımı (24 kova). */
+  byHour: number[];
+}
+
+/**
+ * Tek bir parçanın dinleme karnesi (sağ tık → detay).
+ *
+ * "Tamamlanan" ve "atlanan" ayrımı öneri motorunun kullandığı eşiklerle
+ * AYNI (>%70 / <%15) — kullanıcı ekranda gördüğü sayıyla modelin gördüğü
+ * sinyalin aynı şey olduğunu bilsin.
+ */
+export async function getTrackStats(
+  trackId: string,
+  durationMs: number
+): Promise<TrackStats> {
+  const empty: TrackStats = {
+    plays: 0,
+    completed: 0,
+    skipped: 0,
+    totalMs: 0,
+    firstAt: null,
+    lastAt: null,
+    byHour: Array(24).fill(0),
+  };
+  if (!isTauri()) return empty;
+  try {
+    const db = await getDb();
+    const rows = await db.select<
+      { played_at: number; ms_played: number; hour: number }[]
+    >(
+      `SELECT played_at, ms_played, hour FROM play_history
+        WHERE track_id = $1 ORDER BY played_at ASC`,
+      [trackId]
+    );
+    if (rows.length === 0) return empty;
+    const st = { ...empty, byHour: Array(24).fill(0) };
+    for (const r of rows) {
+      st.plays += 1;
+      st.totalMs += r.ms_played;
+      st.byHour[r.hour % 24] += 1;
+      if (durationMs > 0) {
+        const ratio = r.ms_played / durationMs;
+        if (ratio > 0.7) st.completed += 1;
+        else if (ratio < 0.15) st.skipped += 1;
+      }
+    }
+    st.firstAt = rows[0].played_at;
+    st.lastAt = rows[rows.length - 1].played_at;
+    return st;
+  } catch (e) {
+    console.error("[resonance] parça istatistiği okunamadı:", e);
+    return empty;
+  }
+}

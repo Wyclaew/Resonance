@@ -9,6 +9,8 @@ export default function SleepTimerButton() {
   const t = useT();
   const sleepEndsAt = usePlayerStore((s) => s.sleepTimerEndsAt);
   const setSleepTimer = usePlayerStore((s) => s.setSleepTimer);
+  const afterTrack = usePlayerStore((s) => s.sleepAfterTrack);
+  const setSleepAfterTrack = usePlayerStore((s) => s.setSleepAfterTrack);
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
   const ref = useRef<HTMLDivElement>(null);
@@ -39,7 +41,7 @@ export default function SleepTimerButton() {
         onClick={() => setOpen((o) => !o)}
         title={t("sleep.title")}
         className={`flex items-center gap-1 ${
-          active ? "text-accent" : "text-muted hover:text-text"
+          active || afterTrack ? "text-accent" : "text-muted hover:text-text"
         }`}
       >
         <Moon size={16} />
@@ -60,7 +62,32 @@ export default function SleepTimerButton() {
               <span className="text-down">{t("common.cancel")}</span>
             </button>
           )}
-          {active && <div className="my-1 h-px bg-border" />}
+          {afterTrack && (
+            <button
+              onClick={() => {
+                setSleepAfterTrack(false);
+                setOpen(false);
+              }}
+              className="flex w-full items-center justify-between rounded px-2.5 py-1.5 text-left text-sm text-accent hover:bg-surface-3"
+            >
+              <span>{t("sleep.afterTrack")}</span>
+              <span className="text-down">{t("common.cancel")}</span>
+            </button>
+          )}
+          {(active || afterTrack) && <div className="my-1 h-px bg-border" />}
+          {/* ⭐ "Şarkı bitince dur": süreye değil PARÇAYA bağlı uyku —
+              dinlediğin şarkı yarıda kesilmesin. */}
+          {!afterTrack && (
+            <button
+              onClick={() => {
+                setSleepAfterTrack(true);
+                setOpen(false);
+              }}
+              className="block w-full rounded px-2.5 py-1.5 text-left text-sm text-muted hover:bg-surface-3 hover:text-text"
+            >
+              {t("sleep.afterTrack")}
+            </button>
+          )}
           {OPTIONS.map((m) => (
             <button
               key={m}

@@ -1,6 +1,6 @@
 [package]
 name = "resonance"
-version = "1.8.2"
+version = "1.8.3"
 description = "Hafif, karma tabanlı kişisel müzik oynatıcı"
 authors = ["Wyclaew"]
 license = ""
@@ -36,6 +36,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "json",
     "rustls-tls",
 ] }
+tauri-plugin-dialog = "2"
 
 # OS medya oturumu: macOS MPRemoteCommandCenter, Windows SMTC, Linux MPRIS.
 # Global hotkey'in yakalayamadığı tuşları (macOS F7/F9) ve oyun tam ekrandayken

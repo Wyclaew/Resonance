@@ -2,7 +2,9 @@ import { Play, Pause, Music2, Loader2, Download, CircleCheck, X } from "lucide-r
 import type { Track } from "../types";
 import { formatMs } from "../lib/format";
 import { useLibraryStore } from "../store/useLibraryStore";
+import { useState } from "react";
 import { useT } from "../lib/i18n";
+import TrackDetail from "./TrackDetail";
 import AddToPlaylistButton from "./AddToPlaylistButton";
 
 interface TrackRowProps {
@@ -46,6 +48,7 @@ export default function TrackRow({
   const downloading = useLibraryStore((s) => s.downloadingIds.has(track.id));
   const download = useLibraryStore((s) => s.download);
   const remove = useLibraryStore((s) => s.remove);
+  const [detail, setDetail] = useState(false);
 
   function handleDownloadClick(e: React.MouseEvent) {
     e.stopPropagation();
@@ -55,8 +58,19 @@ export default function TrackRow({
   }
 
   return (
+    <>
+    {detail && (
+      <TrackDetail track={track} onClose={() => setDetail(false)} />
+    )}
     <div
       onDoubleClick={onPlay}
+      // ⭐ Sağ tık → şarkı detayı (kaç kez çaldın, hangi saatlerde, kaç kez
+      // atladın). Ayrı bir menü açmak yerine doğrudan detay: tek eylem var.
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setDetail(true);
+      }}
+      title={t("trackDetail.open")}
       draggable={draggable}
       onDragStart={onDragStart}
       onDragOver={onDragOver}
@@ -165,5 +179,6 @@ export default function TrackRow({
         </span>
       </div>
     </div>
+    </>
   );
 }

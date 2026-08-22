@@ -192,6 +192,10 @@ Masaüstünde çalışan ve mobilde **yeniden yazılmaması gereken** parçalar:
 | **Sanatçı tür etiketleri** | `src/lib/tags.ts` + `artist_tags` | ⭐ v1.8.0, yerel. Tür alanı olmadığı için "şu anki modun: sakin · rock" bilgisinin TEK kaynağı. Filtre havuzu çekildikçe birikir. |
 | **Ses seviyesi eşitleme** | `src/lib/loudness.ts` + `track_loudness` + Rust `measure_loudness` | ⭐ v1.8.0. Yerel (dosyadan türer). ⚠️ MOBİLDE ffmpeg yok → ExoPlayer'ın kendi `LoudnessCodecController`'ı (Android 14+) ya da ReplayGain benzeri bir kütüphane kullanılmalı; ölçüm mantığı (hedef −14 LUFS, tepe koruması) aynen taşınır. |
 | **Yıllık özet (Wrapped)** | `src/views/WrappedView.tsx` | v1.8.0. Saf SQL; RN'de aynı sorgular. Mobilde paylaşım (Story) için görsel dışa aktarma DAHA değerli — `react-native-view-shot` ile ekran görüntüsü üretilebilir. |
+| **Yerel dosyalar** | `src/lib/localFiles.ts` + `ytdlp::scan_local` | v1.8.3. Mobilde ÇOK daha değerli (telefonda indirilmiş müzik yaygın) ama dosya erişimi izin ister (Android `READ_MEDIA_AUDIO`). `sourceId` = dosya yolu olduğu için senkronda tracks satırı gider, ses gitmez — mobilde de aynı kural. |
+| **Akıllı listeler** | `src/lib/smartLists.ts` | v1.8.3. Saf SQL, kalıcı satır yok → mobil aynı sorguları kullanır, senkron yükü sıfır. |
+| **Sanatçı sayfası / şarkı detayı** | `ArtistView`, `TrackDetail` | v1.8.3. Saf SQL + UI; mobilde dokunmatik için yeniden düzenlenmeli. |
+| **Mini oynatıcı** | `MiniPlayer` + `toggle_mini_player` | v1.8.3. ⛔ Mobilde KARŞILIĞI YOK — oradaki eşdeğeri bildirim/kilit ekranı denetimi (Android MediaSession), ki `media_controls.rs` deseninin mobil karşılığıdır. |
 | **İnteraktif tur** | `src/components/Onboarding.tsx` | v1.8.0: spotlight + `data-tour` işaretleri. RN'de `measureInWindow()` ile aynı desen kurulur; adım listesi aynen taşınabilir. |
 
 **Mobilde platforma özel kalan tek şey SES**: yt-dlp gömülemez (§2).

@@ -29,6 +29,10 @@ export interface Settings {
   normalizeVolume: boolean;
   /** Şarkı geçişinde yumuşak geçiş (saniye). 0 = kapalı. */
   crossfadeSeconds: number;
+  /** Kuyruk bitince ne olsun: öneriyle devam / listeyi tekrarla / dur. */
+  queueEndBehavior: "recommend" | "repeat" | "stop";
+  /** Uyku zamanlayıcı dolarken sesi kademeli kıs (saniye). 0 = kapalı. */
+  sleepFadeSeconds: number;
   /** Profil avatarı (data URI). YERELDE kalır — settings senkronlanmıyor. */
   avatarDataUrl: string;
   /** En çok dinlenen kaç şarkı otomatik indirilsin (çevrimdışı). 0 = kapalı. */
@@ -59,6 +63,8 @@ const DEFAULTS: Settings = {
   // Varsayılan KAPALI: crossfade sırasında iki parça birlikte çalar (2× kod
   // çözme) ve albüm/gapless dinleyen için istenmeyen bir etki olabilir.
   crossfadeSeconds: 0,
+  queueEndBehavior: "recommend" as "recommend" | "repeat" | "stop",
+  sleepFadeSeconds: 20,
   avatarDataUrl: "",
   autoDownloadTop: 0,
   resumeState: "",
@@ -86,6 +92,8 @@ const KEYS: Record<keyof Settings, string> = {
   audioQuality: "storage.audioQuality",
   normalizeVolume: "playback.normalizeVolume",
   crossfadeSeconds: "playback.crossfadeSeconds",
+  queueEndBehavior: "playback.queueEndBehavior",
+  sleepFadeSeconds: "playback.sleepFadeSeconds",
   avatarDataUrl: "profile.avatarDataUrl",
   autoDownloadTop: "storage.autoDownloadTop",
   resumeState: "playback.resumeState",

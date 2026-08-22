@@ -66,6 +66,8 @@ export const SYNCED_SETTING_KEYS = new Set([
   "playback.prefetch",
   "playback.normalizeVolume",
   "playback.crossfadeSeconds",
+  "playback.queueEndBehavior",
+  "playback.sleepFadeSeconds",
 ]);
 // ⛔ BİLEREK DIŞARIDA: playback.resumeState (cihazın kendi kuyruğu —
 // device_queue tablosu taşır), playback.savedVolume / rememberVolume,

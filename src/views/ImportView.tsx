@@ -1,5 +1,13 @@
 import { useState } from "react";
-import { Download, Link2, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import {
+  Download,
+  Link2,
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
+  FileMusic,
+  FolderOpen,
+} from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import ViewHeader from "../components/ViewHeader";
@@ -11,6 +19,12 @@ import { importTracks } from "../lib/playlists";
 import { isShareCode, decodePlaylist } from "../lib/share";
 import { isTauri } from "../lib/db";
 import { useT, type TrKey } from "../lib/i18n";
+import { useToastStore } from "../store/useToastStore";
+import {
+  importLocalToPlaylist,
+  pickLocalFiles,
+  pickLocalFolder,
+} from "../lib/localFiles";
 
 type Status = "idle" | "loading" | "importing" | "done";
 type Src = "spotify" | "ytmusic" | "youtube" | "code" | null;
@@ -149,6 +163,11 @@ export default function ImportView() {
       />
 
       <div className="mx-auto w-full max-w-2xl px-8">
+        <LocalImport />
+
+        <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">
+          {t("import.fromLink")}
+        </div>
         <div className="flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 focus-within:border-border-strong">
           <Link2 size={18} className="text-faint" />
           <input
@@ -252,5 +271,82 @@ export default function ImportView() {
         </div>
       </div>
     </div>
+  );
+}
+
+// ⭐ KENDİ MÜZİK DOSYALARIN (v1.8.3): YouTube'da olmayan şarkılar, kendi
+// kayıtların. Dosyalar KOPYALANMAZ, yerinde çalınır; öneri motoru bunları da
+// normal parçalar gibi öğrenir (aynı tracks/votes/play_history yolu).
+function LocalImport() {
+  const t = useT();
+  const navigate = useAppStore((s) => s.navigate);
+  const refreshPlaylists = usePlaylistStore((s) => s.refresh);
+  const toast = useToastStore((s) => s.show);
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(
+    null
+  );
+
+  const run = async (picker: () => Promise<Track[]>) => {
+    if (busy) return;
+    setBusy(true);
+    setProgress(null);
+    try {
+      const tracks = await picker();
+      if (tracks.length === 0) {
+        setBusy(false);
+        return;
+      }
+      const name = t("import.localListName", {
+        date: new Date().toLocaleDateString(),
+      });
+      const id = await importLocalToPlaylist(name, tracks, (done, total) =>
+        setProgress({ done, total })
+      );
+      await refreshPlaylists();
+      toast(t("import.localDone", { count: tracks.length }), "success");
+      navigate("playlist", id);
+    } catch (e) {
+      console.error("[resonance] yerel içe aktarma başarısız:", e);
+      toast(t("import.localFailed"), "error");
+    } finally {
+      setBusy(false);
+      setProgress(null);
+    }
+  };
+
+  return (
+    <section className="mb-8">
+      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-faint">
+        {t("import.localHeader")}
+      </div>
+      <p className="mb-3 text-xs leading-relaxed text-muted">
+        {t("import.localDesc")}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => void run(pickLocalFiles)}
+          disabled={busy}
+          className="flex items-center gap-2 rounded-md bg-surface-2 px-3.5 py-2 text-sm text-text transition-colors hover:bg-surface-3 disabled:opacity-40"
+        >
+          <FileMusic size={15} /> {t("import.pickFiles")}
+        </button>
+        <button
+          onClick={() => void run(pickLocalFolder)}
+          disabled={busy}
+          className="flex items-center gap-2 rounded-md bg-surface-2 px-3.5 py-2 text-sm text-text transition-colors hover:bg-surface-3 disabled:opacity-40"
+        >
+          <FolderOpen size={15} /> {t("import.pickFolder")}
+        </button>
+      </div>
+      {progress && (
+        <p className="mt-2 text-xs text-muted">
+          {t("import.localProgress", {
+            done: progress.done,
+            total: progress.total,
+          })}
+        </p>
+      )}
+    </section>
   );
 }

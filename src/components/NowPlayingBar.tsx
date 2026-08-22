@@ -13,11 +13,13 @@ import {
   Sparkles,
   ScrollText,
   ListMusic,
+  PictureInPicture2,
   Download,
   CircleCheck,
   Loader2,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { usePlayerStore, DISCOVERY_ID } from "../store/usePlayerStore";
 import { useAppStore } from "../store/useAppStore";
 import { useToastStore } from "../store/useToastStore";
@@ -346,6 +348,13 @@ export default function NowPlayingBar() {
             <ListMusic size={16} />
           </button>
         )}
+        <button
+          onClick={() => invoke("toggle_mini_player").catch(() => {})}
+          title={t("player.miniPlayer")}
+          className="text-muted hover:text-text"
+        >
+          <PictureInPicture2 size={16} />
+        </button>
         <button
           onClick={toggleLyrics}
           title={t("player.lyrics")}
