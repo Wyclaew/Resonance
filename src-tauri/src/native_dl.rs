@@ -311,6 +311,69 @@ pub fn cached_count() -> usize {
     url_cache().lock().map(|m| m.len()).unwrap_or(0)
 }
 
+
+// ═══ İNDİRME SAĞLIĞI ═════════════════════════════════════════════════════
+// ⭐ AKILLI TAMPON: kaç şarkı önden indirileceği SABİT olmamalı. Hızlı ve
+// sorunsuz bir bağlantıda 5 şarkıyı önden indirmek boşuna disk+veri; yavaş
+// ya da kopan bir bağlantıda 5 bile az. Son indirmelerin hızını ve başarı
+// oranını ölçüp tampon önerisini buradan veriyoruz.
+struct DlSample {
+    bytes: u64,
+    secs: f32,
+    ok: bool,
+}
+
+fn dl_stats() -> &'static std::sync::Mutex<Vec<DlSample>> {
+    static S: std::sync::OnceLock<std::sync::Mutex<Vec<DlSample>>> =
+        std::sync::OnceLock::new();
+    S.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
+fn note_download(bytes: u64, secs: f32, ok: bool) {
+    if let Ok(mut v) = dl_stats().lock() {
+        v.push(DlSample { bytes, secs, ok });
+        // Yalnız son 20 indirme sayılır: ağ koşulu değişince eski ölçüm
+        // yanıltmasın (otelde/mobil hotspotta bağlanınca hemen uyum sağlasın).
+        let len = v.len();
+        if len > 20 {
+            v.drain(0..len - 20);
+        }
+    }
+}
+
+/// (MB/sn, başarısızlık oranı, önerilen tampon şarkı sayısı)
+pub fn health() -> (f32, f32, u32) {
+    let Ok(v) = dl_stats().lock() else {
+        return (0.0, 0.0, 5);
+    };
+    if v.is_empty() {
+        return (0.0, 0.0, 5);
+    }
+    let fails = v.iter().filter(|s| !s.ok).count() as f32 / v.len() as f32;
+    let oks: Vec<&DlSample> = v.iter().filter(|s| s.ok && s.secs > 0.01).collect();
+    let mbps = if oks.is_empty() {
+        0.0
+    } else {
+        oks.iter()
+            .map(|s| s.bytes as f32 / s.secs / 1_048_576.0)
+            .sum::<f32>()
+            / oks.len() as f32
+    };
+
+    // Tampon kararı: sorun varsa BÜYÜT (müzik durmasın), her şey yolundaysa
+    // KÜÇÜLT (boşuna veri/disk harcama).
+    let buffer = if fails > 0.3 || (mbps > 0.0 && mbps < 0.7) {
+        8
+    } else if fails > 0.1 || (mbps > 0.0 && mbps < 2.0) {
+        6
+    } else if mbps > 4.0 {
+        3
+    } else {
+        5
+    };
+    (mbps, fails, buffer)
+}
+
 /// URL'yi PARÇALI indirir: her parça ayrı `Range` isteği, parça başına
 /// yeniden deneme, yarıda kalan dosyadan DEVAM.
 ///
@@ -321,6 +384,7 @@ pub fn cached_count() -> usize {
 ///
 /// Dönüş: indirilen bayt sayısı.
 pub fn download_ranged(src: &AudioSource, dest: &Path) -> Result<u64> {
+    let t_dl = std::time::Instant::now();
     let c = http()?;
     let part = dest.with_extension("part");
     let meta = dest.with_extension("part.meta");
@@ -363,6 +427,7 @@ pub fn download_ranged(src: &AudioSource, dest: &Path) -> Result<u64> {
                         std::fs::write(&part, &bytes)?;
                         std::fs::rename(&part, dest)?;
                         let _ = std::fs::remove_file(&meta);
+                        note_download(src.content_length, t_dl.elapsed().as_secs_f32(), true);
                         return Ok(src.content_length);
                     }
                 }
@@ -419,10 +484,12 @@ pub fn download_ranged(src: &AudioSource, dest: &Path) -> Result<u64> {
                 }
                 Ok(_) => {
                     drop(f);
+                    note_download(have, t_dl.elapsed().as_secs_f32(), false);
                     return Err(anyhow!("boş parça @ {have}"));
                 }
                 Err(e) => {
                     drop(f);
+                    note_download(have, t_dl.elapsed().as_secs_f32(), false);
                     // Yarım dosya BIRAKILIR: aynı kaynakla sonraki deneme
                     // kaldığı yerden sürer (mühür bunu güvenli kılıyor).
                     return Err(anyhow!("{e} @ {have}"));
@@ -435,6 +502,7 @@ pub fn download_ranged(src: &AudioSource, dest: &Path) -> Result<u64> {
     drop(f);
     std::fs::rename(&part, dest)?;
     let _ = std::fs::remove_file(&meta);
+    note_download(have, t_dl.elapsed().as_secs_f32(), true);
     Ok(have)
 }
 

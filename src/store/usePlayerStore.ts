@@ -21,6 +21,7 @@ import { noteListen } from "../lib/mood";
 import { publishNowPlaying } from "../lib/nowPlaying";
 import { publishDeviceQueue } from "../lib/deviceQueue";
 import { gainForTrack } from "../lib/loudness";
+import { setArtistPref, PREF_MORE } from "../lib/prefs";
 import { useSettingsStore } from "./useSettingsStore";
 import { useToastStore } from "./useToastStore";
 import { useAppStore } from "./useAppStore";
@@ -77,6 +78,8 @@ interface PlayerState {
   startSmartShuffle: (tracks: KarmaTrack[], playlistId: string) => Promise<void>;
   startDiscovery: (opts?: { force?: boolean }) => Promise<void>;
   rerollDiscovery: () => Promise<void>;
+  /** "Bunu daha çok böyle": çalanı bozmadan SIRADAKİLERİ bu tarza çevirir. */
+  moreLikeThis: (item: QueueItem) => Promise<void>;
   setDiscoveryFilters: (ids: string[]) => void;
   setLockedSeedArtist: (artist: string | null) => void;
   restoreState: (track: Track, positionMs: number) => void;
@@ -84,7 +87,7 @@ interface PlayerState {
   restoreQueue: (queue: QueueItem[], index: number, positionMs: number) => void;
   restoreDiscovery: (state: DiscoveryResume) => void;
   toggle: () => void;
-  next: () => void;
+  next: (reason?: ExitReason) => void;
   prev: () => void;
   jumpTo: (index: number) => void;
   removeFromQueue: (uid: string) => void;
@@ -266,12 +269,17 @@ function loadAndPlay(item: QueueItem, startMs = 0) {
     usePlayerStore.setState({ trackGain: 1 });
     pushVolume();
   }
+  // Crossfade YALNIZ normal geçişte anlamlı: kullanıcı elle şarkı seçtiyse
+  // (ya da kaldığı yerden devam ediyorsa) anında geçiş beklenir.
+  const fadeMs = startMs === 0 && crossfadeArmed ? crossfadeMs() : 0;
+  crossfadeArmed = false;
   invoke("play_track", {
     input: {
       sourceId: item.sourceId,
       durationMs: item.durationMs,
       trackId: item.id,
       resumeMs: Math.floor(startMs),
+      fadeMs,
     },
     cookiesBrowser: useSettingsStore.getState().cookiesBrowser,
   })
@@ -428,6 +436,35 @@ export function prewarmQueueUrls(): void {
   }).catch(() => {});
 }
 
+// Crossfade süresi (ms). 0 = kapalı. Ayarlar → Çalma.
+function crossfadeMs(): number {
+  return Math.round(useSettingsStore.getState().crossfadeSeconds * 1000);
+}
+// Aynı parça için crossfade'in bir kez tetiklenmesini sağlar; her yeni
+// yüklemede sıfırlanır (aksi hâlde tick akışında defalarca next() çağrılırdı).
+let crossfadeArmed = false;
+
+// Ağa göre önerilen tampon (native_dl::health). 60 sn'de bir tazelenir.
+let dynamicBuffer = 5;
+let bufferCheckedAt = 0;
+function refreshBufferSize(): void {
+  if (!isTauri()) return;
+  const now = Date.now();
+  if (now - bufferCheckedAt < 60_000) return;
+  bufferCheckedAt = now;
+  invoke<{ mbps: number; failRate: number; buffer: number }>("download_health")
+    .then((h) => {
+      if (h.buffer >= 1 && h.buffer <= 12) dynamicBuffer = h.buffer;
+    })
+    .catch(() => {});
+}
+
+/** Kuyruk değişti ama çalan şarkı aynı → yalnız hazırlığı tazele. */
+function scheduleLoadPrefetchOnly(): void {
+  prewarmQueueUrls();
+  setTimeout(() => prefetchNext(), 300);
+}
+
 function prefetchNext() {
   if (!isTauri()) return;
   // Ekran koruyucu aktifken ağır yt-dlp çağrılarını durdur (CPU/disk tasarrufu).
@@ -437,6 +474,14 @@ function prefetchNext() {
   const cookiesBrowser = useSettingsStore.getState().cookiesBrowser;
   prewarmQueueUrls();
 
+  // ⭐ AKILLI TAMPON (v1.8.2): sabit sayı yerine AĞA GÖRE.
+  // Rust tarafı son 20 indirmenin hızını ve başarı oranını ölçüyor
+  // (native_dl::health): bağlantı yavaş/kopuyorsa tampon 8'e çıkar (müzik
+  // durmasın), hızlı ve sorunsuzsa 3'e iner (boşuna veri/disk harcanmasın).
+  // Sağlık sorgusu ucuz ama her şarkıda gerekmiyor → 60 sn'de bir tazelenir.
+  refreshBufferSize();
+  const bufferSize = dynamicBuffer;
+
   // ⭐ ÇEVRİMDIŞI TAMPON (v1.8.1): 2 → 5 şarkı.
   // Neden artık güvenli: adresler önden çözülüyor (prewarm) ve indirmeyi
   // kendi indiricimiz yapıyor → şarkı başına yt-dlp süreci başlatılmıyor.
@@ -444,7 +489,7 @@ function prefetchNext() {
   // ortadan kalkınca tamponu büyütmek ağ koptuğunda/YouTube tıkandığında
   // müziğin devam etmesini sağlıyor. İstekler Rust tarafında sıraya giriyor
   // (dl_semaphore), yani 5 istek aynı anda ağa çıkmıyor.
-  for (let i = 1; i <= 5; i++) {
+  for (let i = 1; i <= bufferSize; i++) {
     const item = queue[queueIndex + i];
     if (!item) break;
     invoke("prefetch_audio", {
@@ -911,6 +956,68 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   // "Bu tarzı beğenmedim" → sırayı at, BAŞKA sanatçıların radyolarından yeni
   // parti kur. Şu anki partiyi getiren seed sanatçıları dışlanır, böylece gelen
   // tarz gerçekten değişir (yoksa aynı güçlü sinyaller aynı radyoları açardı).
+  // ⭐ "BUNU DAHA ÇOK BÖYLE" (v1.8.2).
+  //
+  // Tarz kilidi zaten vardı ama TÜM partiyi yeniden kuruyor — çalan şarkı da
+  // gidiyordu. Kullanıcının istediği daha yumuşak bir müdahale: "şu an çalan
+  // kalsın, SONRASI böyle devam etsin."
+  //
+  // Üç şey birden yapar:
+  //  1. Kalıcı karar: sanatçıya "daha çok öner" (artist_prefs, senkronlanır).
+  //  2. Oturum modu: bu tarza güçlü pozitif sinyal (lib/mood.ts).
+  //  3. Kuyruğun KALANINI o tohumla yeniden doldurur; çalan parça ve öncesi
+  //     olduğu gibi kalır.
+  moreLikeThis: async (item) => {
+    const artist = item.seedArtist || item.artist;
+    if (!artist || get().discovering) return;
+    const s = useSettingsStore.getState();
+    set({ discovering: true });
+    try {
+      await setArtistPref(artist, PREF_MORE);
+      noteListen(item.seedArtist, 1); // "sonuna kadar dinlendi" kadar güçlü
+      set({ lockedSeedArtist: artist });
+
+      const st = get();
+      const keep = st.queue.slice(0, st.queueIndex + 1);
+      const recs = await getRecommendations({
+        playlistId: st.radioPlaylistId ?? DISCOVERY_ID,
+        filters: st.discoveryFilters,
+        lockedSeedArtist: artist,
+        excludeIds: new Set<string>([
+          ...st.skippedRecIds,
+          ...recommendedThisSession,
+          ...keep.map((k) => k.id),
+        ]),
+        excludeCores: buildExcludeCores(),
+        limit: TARGET_QUEUE_AHEAD,
+        useYouTube: s.recYouTube,
+        useLibrary: s.recLibrary,
+        halfLifeDays: s.karmaHalfLifeDays,
+      });
+      if (recs.length === 0) {
+        useToastStore.getState().show(t("discover.moreLikeEmpty"), "info");
+        return;
+      }
+      rememberRecs(recs);
+      const items = spreadByArtist(recs).map((r) =>
+        toRecItem(r, st.radioPlaylistId ?? DISCOVERY_ID)
+      );
+      set({
+        queue: [...keep, ...items],
+        // queueIndex DEĞİŞMEZ: çalan şarkı yerinde kalır.
+        discoverySeedArtists: [artist],
+      });
+      useToastStore
+        .getState()
+        .show(t("discover.moreLikeDone", { artist }), "success");
+      scheduleLoadPrefetchOnly();
+    } catch (e) {
+      console.error("[resonance] tarz yönlendirme başarısız:", e);
+    } finally {
+      set({ discovering: false });
+    }
+  },
+
   rerollDiscovery: async () => {
     if (get().discovering) return; // arka arkaya basışları yut
     const s = useSettingsStore.getState();
@@ -1083,8 +1190,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
   },
 
-  next: () => {
-    recordOutgoing(get(), "next");
+  next: (reason = "next") => {
+    // Crossfade geçişinde reason "ended" gelir: kullanıcı ATLAMADI, şarkı
+    // bitti → skip cezası ve mod sinyali yazılmamalı.
+    recordOutgoing(get(), reason);
     const { queue, queueIndex, shuffleMode, repeat, radioActive } = get();
     if (queue.length === 0) return;
 
@@ -1312,6 +1421,19 @@ export async function initPlayer() {
       usePlayerStore.setState(patch);
       // Çalarken pozisyonu periyodik kaydet (kaldığın yerden devam).
       if (playing) persistPlaybackState();
+
+      // ⭐ CROSSFADE: parça bitmeye "fade süresi" kala sıradakine GEÇ.
+      // `track-ended` beklenirse geçiş sert olur; erken geçince ses motoru
+      // eskiyi söndürürken yeniyi açar (audio.rs).
+      if (playing && duration_ms > 0) {
+        const fadeMs = crossfadeMs();
+        const remain = duration_ms - position_ms;
+        if (fadeMs > 0 && remain > 0 && remain <= fadeMs && !crossfadeArmed) {
+          crossfadeArmed = true;
+          // "ended" olarak say: bu kullanıcının ATLAMASI değil, şarkı bitti.
+          usePlayerStore.getState().next("ended");
+        }
+      }
     }
   );
 

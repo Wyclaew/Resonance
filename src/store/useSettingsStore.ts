@@ -27,6 +27,8 @@ export interface Settings {
   audioQuality: "high" | "medium" | "low";
   /** Şarkılar arası ses seviyesi farkını eşitle (ReplayGain mantığı). */
   normalizeVolume: boolean;
+  /** Şarkı geçişinde yumuşak geçiş (saniye). 0 = kapalı. */
+  crossfadeSeconds: number;
   /** Profil avatarı (data URI). YERELDE kalır — settings senkronlanmıyor. */
   avatarDataUrl: string;
   /** En çok dinlenen kaç şarkı otomatik indirilsin (çevrimdışı). 0 = kapalı. */
@@ -54,6 +56,9 @@ const DEFAULTS: Settings = {
   cacheLimitGb: 2,
   audioQuality: "high" as "high" | "medium" | "low",
   normalizeVolume: true,
+  // Varsayılan KAPALI: crossfade sırasında iki parça birlikte çalar (2× kod
+  // çözme) ve albüm/gapless dinleyen için istenmeyen bir etki olabilir.
+  crossfadeSeconds: 0,
   avatarDataUrl: "",
   autoDownloadTop: 0,
   resumeState: "",
@@ -80,6 +85,7 @@ const KEYS: Record<keyof Settings, string> = {
   cacheLimitGb: "storage.cacheLimitGb",
   audioQuality: "storage.audioQuality",
   normalizeVolume: "playback.normalizeVolume",
+  crossfadeSeconds: "playback.crossfadeSeconds",
   avatarDataUrl: "profile.avatarDataUrl",
   autoDownloadTop: "storage.autoDownloadTop",
   resumeState: "playback.resumeState",

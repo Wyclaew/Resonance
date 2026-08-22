@@ -20,6 +20,9 @@ pub enum AudioCmd {
         duration_ms: u64,
         track_id: String,
         start_ms: u64, // kaldığın yerden devam için başlangıç pozisyonu (0 = baştan)
+        /// ⭐ CROSSFADE: >0 ise yeni parça sessizden açılır ve ÖNCEKİ parça
+        /// durdurulmak yerine aynı sürede kısılarak söner (iki sink birlikte).
+        fade_ms: u64,
         /// ⭐ İNDİRİRKEN ÇALMA: dosya hâlâ YAZILIYORSA bu bayrak verilir.
         /// Okuyucu sona geldiğinde EOF sanıp durmaz, bayrak true olana kadar
         /// yeni veriyi bekler (bkz. native_dl::GrowingFile).
@@ -87,6 +90,10 @@ fn audio_loop(rx: Receiver<AudioCmd>, shared: Arc<Shared>, app: AppHandle) {
     let mut volume = 0.9f32;
     sink.set_volume(volume);
 
+    // Sönmekte olan eski parçalar (crossfade). Genelde 0 ya da 1 eleman.
+    let mut fading: Vec<Fading> = Vec::new();
+    // Yeni parçanın açılma rampası: (başlangıç, süre).
+    let mut fade_in: Option<(Instant, u64)> = None;
     let mut ended_emitted = true; // boştayken yanlış 'bitti' yaymamak için
     let mut last_tick = Instant::now();
 
@@ -98,11 +105,31 @@ fn audio_loop(rx: Receiver<AudioCmd>, shared: Arc<Shared>, app: AppHandle) {
                     duration_ms,
                     track_id,
                     start_ms,
+                    fade_ms,
                     growing,
                 } => {
-                    sink.stop();
-                    sink = Sink::try_new(&handle).expect("sink");
-                    sink.set_volume(volume);
+                    // ⭐ CROSSFADE: eskiyi ÖLDÜRME, söndürme listesine al.
+                    // Yeni parça 0 sesten açılır; ikisi birlikte çalarken
+                    // aşağıdaki döngü rampaları uygular.
+                    if fade_ms > 0 && !sink.empty() {
+                        let old = std::mem::replace(
+                            &mut sink,
+                            Sink::try_new(&handle).expect("sink"),
+                        );
+                        fading.push(Fading {
+                            sink: old,
+                            t0: Instant::now(),
+                            dur_ms: fade_ms,
+                            from_vol: volume,
+                        });
+                        fade_in = Some((Instant::now(), fade_ms));
+                        sink.set_volume(0.0);
+                    } else {
+                        sink.stop();
+                        sink = Sink::try_new(&handle).expect("sink");
+                        fade_in = None;
+                        sink.set_volume(volume);
+                    }
                     // Çözümlemeyi yakala: bozuk/desteklenmeyen bir dosya
                     // panikleyip tüm ses motorunu öldürmesin.
                     let decoded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
@@ -188,8 +215,40 @@ fn audio_loop(rx: Receiver<AudioCmd>, shared: Arc<Shared>, app: AppHandle) {
             );
         }
 
+        // ── Crossfade rampaları (50 ms'de bir) ────────────────────────────
+        // Sönenler: süre dolunca gerçekten durdurulur ve listeden düşer.
+        fading.retain_mut(|f| {
+            let p = f.t0.elapsed().as_millis() as f32 / f.dur_ms.max(1) as f32;
+            if p >= 1.0 {
+                f.sink.stop();
+                false
+            } else {
+                f.sink.set_volume(f.from_vol * (1.0 - p));
+                true
+            }
+        });
+        // Açılan: hedef ses seviyesine yükselir. `volume` bu sırada kullanıcı
+        // tarafından değiştirilebilir; rampa her zaman GÜNCEL değeri kullanır.
+        if let Some((t0, dur)) = fade_in {
+            let p = t0.elapsed().as_millis() as f32 / dur.max(1) as f32;
+            if p >= 1.0 {
+                sink.set_volume(volume);
+                fade_in = None;
+            } else {
+                sink.set_volume(volume * p);
+            }
+        }
+
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+/// Crossfade sırasında sönmekte olan parça.
+struct Fading {
+    sink: Sink,
+    t0: Instant,
+    dur_ms: u64,
+    from_vol: f32,
 }
 
 fn open_source(path: &PathBuf) -> anyhow::Result<Decoder<BufReader<File>>> {

@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.8.1** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.8.2** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,16 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.8.2'de: **CROSSFADE** (`AudioCmd::Load{fade_ms}` + audio.rs'te sönen sink
+listesi; parça bitmeye fade süresi kala frontend `next("ended")` çağırır —
+"ended" ŞART, yoksa crossfade her şarkıya haksız ATLAMA cezası yazardı.
+Varsayılan KAPALI: iki parça birlikte çalar, albüm/gapless dinleyeni rahatsız
+edebilir); **AKILLI TAMPON** (`native_dl::health` son 20 indirmenin hızını ve
+başarı oranını ölçer → tampon 3-8 arası kendi ayarlanır; sabit 5 yerine);
+**"BÖYLE DEVAM ET"** (`moreLikeThis`: çalanı bozmadan SIRADAKİLERİ o tarza
+çevirir + artist_prefs'e kalıcı "daha çok" yazar — tarz kilidi tüm partiyi
+yeniden kuruyordu); **KARAOKE VURGUSU** (aktif satırda okunan kısım vurgu
+rengiyle dolar, uzak satırlar kademeli solar).
 v1.8.1'de: ⭐ **İNDİRİRKEN ÇALMA** (progressive playback, `native_dl::stream_to_adts`
 + `GrowingFile` + `AudioCmd::Load{growing}`): indirilen baytlar ffmpeg'e BORUDAN
 verilir, ffmpeg ADTS yazar, ses motoru dosyayı BÜYÜRKEN okur. ÖLÇÜLDÜ (entegrasyon

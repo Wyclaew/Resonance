@@ -398,6 +398,7 @@ pub fn run() {
             commands::measure_loudness,
             commands::prewarm_urls,
             commands::diagnose_download,
+            commands::download_health,
             commands::export_data,
             commands::backup_db,
             commands::list_backups,

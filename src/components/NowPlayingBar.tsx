@@ -255,7 +255,7 @@ export default function NowPlayingBar() {
             )}
           </button>
           <button
-            onClick={next}
+            onClick={() => next()}
             title={t("player.next")}
             className="text-muted hover:text-text"
           >

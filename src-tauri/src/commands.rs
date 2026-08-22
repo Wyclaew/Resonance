@@ -17,6 +17,9 @@ pub struct PlayInput {
     pub track_id: String,
     #[serde(default)]
     pub resume_ms: u64, // kaldığın yerden devam (0 = baştan)
+    /// Crossfade süresi (ms). 0 = anında geçiş (varsayılan davranış).
+    #[serde(default)]
+    pub fade_ms: u64,
 }
 
 fn audio_cache_dir(app: &AppHandle) -> anyhow::Result<PathBuf> {
@@ -295,6 +298,26 @@ fn dl_semaphore() -> &'static tokio::sync::Semaphore {
     SEM.get_or_init(|| tokio::sync::Semaphore::new(3))
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadHealth {
+    pub mbps: f32,
+    pub fail_rate: f32,
+    /// Önerilen çevrimdışı tampon (kaç şarkı önden indirilsin).
+    pub buffer: u32,
+}
+
+/// İndirme sağlığı — akıllı tampon için (bkz. native_dl::health).
+#[tauri::command]
+pub fn download_health() -> DownloadHealth {
+    let (mbps, fail_rate, buffer) = crate::native_dl::health();
+    DownloadHealth {
+        mbps,
+        fail_rate,
+        buffer,
+    }
+}
+
 /// Açılışta artık kullanılmayan akış dosyalarını (`*.stream.aac`) siler.
 ///
 /// İndirirken çalma yolunda bu dosyalar geçicidir: tamamlanınca nihai
@@ -368,6 +391,7 @@ pub async fn play_track(
             duration_ms: input.duration_ms,
             track_id: input.track_id,
             start_ms: 0,
+            fade_ms: input.fade_ms,
             growing: Some(h.done),
         });
         return Ok(());
@@ -390,6 +414,7 @@ pub async fn play_track(
         duration_ms: input.duration_ms,
         track_id: input.track_id,
         start_ms: input.resume_ms,
+        fade_ms: input.fade_ms,
         growing: None,
     });
     Ok(())

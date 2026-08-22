@@ -50,6 +50,15 @@ export default function LyricsPanel() {
   }, [current?.id]);
 
   const activeIdx = synced ? findActive(synced, positionMs) : -1;
+  // Aktif satırın ne kadarı okundu (0..1). Bir sonraki satırın zaman damgası
+  // satırın bitişini verir; son satırda parça sonuna kadar sayılır.
+  const lineProgress = (() => {
+    if (!synced || activeIdx < 0) return 0;
+    const start = synced[activeIdx].timeMs;
+    const end = synced[activeIdx + 1]?.timeMs ?? start + 4000;
+    if (end <= start) return 1;
+    return Math.max(0, Math.min(1, (positionMs - start) / (end - start)));
+  })();
 
   useEffect(() => {
     activeRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -81,20 +90,45 @@ export default function LyricsPanel() {
           </div>
         ) : synced ? (
           <div className="mx-auto max-w-2xl text-center">
-            {synced.map((l, i) => (
-              <div
-                key={i}
-                ref={i === activeIdx ? activeRef : undefined}
-                onClick={() => seek(l.timeMs)}
-                className={`cursor-pointer py-2.5 text-2xl font-semibold leading-snug transition-colors ${
-                  i === activeIdx
-                    ? "text-text"
-                    : "text-faint hover:text-muted"
-                }`}
-              >
-                {l.text || "♪"}
-              </div>
-            ))}
+            {synced.map((l, i) => {
+              // ⭐ KARAOKE VURGUSU (v1.8.2): eskiden yalnız renk değişiyordu.
+              // Uzaklığa göre solma + aktif satırın büyümesi, gözün satırı
+              // takip etmesini kolaylaştırır (Apple Music/Spotify deseni).
+              const d = Math.abs(i - activeIdx);
+              const state =
+                activeIdx < 0
+                  ? "text-muted"
+                  : d === 0
+                  ? "scale-[1.04] text-text"
+                  : d === 1
+                  ? "text-muted"
+                  : d === 2
+                  ? "text-faint"
+                  : "text-faint/50";
+              return (
+                <div
+                  key={i}
+                  ref={i === activeIdx ? activeRef : undefined}
+                  onClick={() => seek(l.timeMs)}
+                  className={`origin-center cursor-pointer py-2.5 text-2xl font-semibold leading-snug transition-all duration-300 hover:text-text ${state}`}
+                >
+                  {/* Aktif satırda ilerleme: sözün okunan kısmı vurgulanır. */}
+                  {i === activeIdx && l.text ? (
+                    <span className="relative inline-block">
+                      <span className="text-faint">{l.text}</span>
+                      <span
+                        className="absolute left-0 top-0 overflow-hidden whitespace-nowrap text-accent transition-[width] duration-200 ease-linear"
+                        style={{ width: `${Math.round(lineProgress * 100)}%` }}
+                      >
+                        {l.text}
+                      </span>
+                    </span>
+                  ) : (
+                    l.text || "♪"
+                  )}
+                </div>
+              );
+            })}
           </div>
         ) : plain ? (
           <div className="mx-auto max-w-2xl whitespace-pre-wrap text-lg leading-relaxed text-muted">

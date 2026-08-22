@@ -413,6 +413,23 @@ function PlaybackSettings() {
         />
       </SettingRow>
       <SettingRow
+        label={t("settings.crossfade")}
+        description={t("settings.crossfadeDesc")}
+      >
+        <select
+          value={s.crossfadeSeconds}
+          onChange={(e) =>
+            s.update("crossfadeSeconds", Number(e.target.value) || 0)
+          }
+          className="rounded-md border border-border bg-surface px-2 py-1.5 text-sm"
+        >
+          <option value={0}>{t("settings.off")}</option>
+          <option value={2}>2 sn</option>
+          <option value={4}>4 sn</option>
+          <option value={6}>6 sn</option>
+        </select>
+      </SettingRow>
+      <SettingRow
         label={t("settings.normalize")}
         description={t("settings.normalizeDesc")}
       >

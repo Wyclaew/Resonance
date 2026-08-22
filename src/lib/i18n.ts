@@ -210,6 +210,10 @@ const tr = {
   "device.minsAgo": "{n} dk önce",
   "device.hoursAgo": "{n} saat önce",
   "device.daysAgo": "{n} gün önce",
+  "discover.moreLike": "Böyle devam et",
+  "discover.moreLikeHint": "Çalan şarkı kalsın, sıradakiler bu tarza dönsün",
+  "discover.moreLikeDone": "Sıradakiler {artist} tarzına çevrildi",
+  "discover.moreLikeEmpty": "Bu tarzda yeni bir şey bulunamadı",
   "discover.saveQueue": "Listeye kaydet",
   "discover.savedName": "Keşfet",
   "discover.saveQueueDone": "{count} şarkı \"{name}\" listesine kaydedildi",
@@ -220,6 +224,9 @@ const tr = {
   "settings.diagnoseRun": "Testi çalıştır",
   "settings.diagnoseRunning": "Test ediliyor…",
   "settings.diagnoseCopy": "Raporu kopyala",
+  "settings.crossfade": "Şarkı geçişi",
+  "settings.crossfadeDesc":
+    "Biten şarkı sönerken sıradaki açılır. Kapalıyken geçiş anında olur (albüm dinlerken tercih edilebilir).",
   "settings.normalize": "Ses seviyesini eşitle",
   "settings.normalizeDesc":
     "Şarkılar arası seviye farkını otomatik düzeltir (YouTube kaynakları çok değişken). İlk çalışta dosya bir kez ölçülür.",
@@ -882,6 +889,10 @@ const en: Record<TrKey, string> = {
   "device.minsAgo": "{n} min ago",
   "device.hoursAgo": "{n} h ago",
   "device.daysAgo": "{n} d ago",
+  "discover.moreLike": "More like this",
+  "discover.moreLikeHint": "Keep this track, steer what comes next toward it",
+  "discover.moreLikeDone": "Up next is now in {artist}'s direction",
+  "discover.moreLikeEmpty": "Couldn't find anything new in that style",
   "discover.saveQueue": "Save as playlist",
   "discover.savedName": "Discover",
   "discover.saveQueueDone": "Saved {count} tracks to \"{name}\"",
@@ -892,6 +903,9 @@ const en: Record<TrKey, string> = {
   "settings.diagnoseRun": "Run test",
   "settings.diagnoseRunning": "Testing…",
   "settings.diagnoseCopy": "Copy report",
+  "settings.crossfade": "Crossfade",
+  "settings.crossfadeDesc":
+    "The ending track fades out while the next one fades in. Off means instant switching (better for albums).",
   "settings.normalize": "Normalize volume",
   "settings.normalizeDesc":
     "Evens out level differences between tracks (YouTube sources vary a lot). Each file is measured once on first play.",

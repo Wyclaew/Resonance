@@ -13,6 +13,7 @@ import {
   Lock,
   Unlock,
   ListPlus,
+  TrendingUp,
 } from "lucide-react";
 import ViewHeader from "../components/ViewHeader";
 import DeviceQueuePicker from "../components/DeviceQueuePicker";
@@ -50,6 +51,7 @@ export default function DiscoverView() {
   const locked = usePlayerStore((s) => s.lockedSeedArtist);
   const setLocked = usePlayerStore((s) => s.setLockedSeedArtist);
   const removeFromQueue = usePlayerStore((s) => s.removeFromQueue);
+  const moreLikeThis = usePlayerStore((s) => s.moreLikeThis);
   const toast = useToastStore((s) => s.show);
 
   // "Bu sanatçıyı önerme": engelle + kuyruktaki diğer parçalarını da temizle
@@ -357,6 +359,19 @@ export default function DiscoverView() {
                 )}
               </button>
             </div>
+
+            {/* "Böyle devam et": çalanı bozmadan sıradakileri bu tarza çevirir. */}
+            {current && (
+              <button
+                onClick={() => void moreLikeThis(current)}
+                disabled={discovering}
+                title={t("discover.moreLikeHint")}
+                className="mt-3 flex items-center gap-1.5 rounded-full border border-accent/40 px-3 py-1.5 text-xs text-accent transition-colors hover:bg-accent hover:text-bg disabled:opacity-40"
+              >
+                <TrendingUp size={13} />
+                {t("discover.moreLike")}
+              </button>
+            )}
 
             {locked && (
               <p className="mt-3 flex items-center gap-1.5 text-xs text-accent">
