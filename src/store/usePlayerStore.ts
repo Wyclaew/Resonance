@@ -1234,8 +1234,22 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   toggle: () => {
-    const { status, current } = get();
-    if (!current) return;
+    const { status, current, queue, queueIndex } = get();
+
+    // ⚠️ YÜKLEME SÜRERKEN İKİNCİ BASIŞ (v1.8.5 düzeltmesi).
+    // İlk basış indirmeyi başlatıyor; yavaş bir bağlantıda (Windows'ta sık)
+    // kullanıcı sabırsızlanıp tekrar basınca eski kod `audio_play` çağırıp
+    // durumu "playing" yapıyordu — ama ses motoruna henüz HİÇBİR ŞEY
+    // yüklenmediği için ses gelmiyor, tick de akmıyordu: oynatıcı "çalıyor"
+    // görünüp sessiz kalıyordu. Yükleme bitene kadar basışı yut.
+    if (status === "loading") return;
+
+    // Kuyruk var ama `current` boşsa (bazı geri yükleme yolları yalnız kuyruğu
+    // kuruyor) play tuşu SESSİZCE hiçbir şey yapmıyordu.
+    const item = current ?? queue[queueIndex] ?? queue[0];
+    if (!item) return;
+    if (!current) set({ current: item });
+
     if (status === "playing") {
       if (isTauri()) invoke("audio_pause").catch(() => {});
       set({ status: "paused" });
@@ -1243,7 +1257,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       // Henüz hiç yüklenmediyse (açılış resume) kaldığı pozisyondan yükle.
       if (!hasLoaded) {
         set({ status: "loading" });
-        scheduleLoad(current, resumeMsPending);
+        scheduleLoad(item, resumeMsPending);
         resumeMsPending = 0;
       } else {
         if (isTauri()) invoke("audio_play").catch(() => {});

@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.8.4** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.8.5** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,33 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.8.5 (BUG TURU, ağırlıklı Windows):
+• **"Şarkılar 40-45. saniyede kendiliğinden atlıyor"** — KÖK NEDEN: akış yolu
+  (indirirken çalma) adresi DOĞRULAMADAN başlıyordu. Kısıtlı adres 1 MB sonra
+  403 alınca dosya eksik kalıyor, ses motoru dosyanın sonuna gelip "şarkı
+  bitti" sanıyor ve sıradakine geçiyordu. İki katmanlı düzeltme: (1) akıştan
+  önce `probe_url` ile adres doğrulanır, (2) yine de koparsa
+  `StreamHandle.failed` ile ayırt edilir ve şarkı ATLANMAZ — tam dosya
+  indirilip KALDIĞI SANİYEDEN devam edilir (`play_track` kurtarma thread'i).
+• **"İlk açılışta play çalışmıyor"** — yükleme sürerken (Windows'ta indirme
+  yavaş → sık) ikinci basış `audio_play` çağırıp durumu "playing" yapıyordu;
+  ses motoruna henüz bir şey yüklenmediği için ses gelmiyor, tick de akmıyordu.
+  Artık `status === "loading"` iken basış yutulur. Ayrıca kuyruk dolu ama
+  `current` boşken play tuşu SESSİZCE hiçbir şey yapmıyordu.
+• **⚠️ WINDOWS: `std::fs::rename` hedef dosya VARSA hata verir** (Unix'te
+  üzerine yazar) → yarım kalmış indirmeden sonra sessiz başarısızlık.
+  `replace_file` yardımcısı eklendi.
+• **⚠️ WINDOWS: yol dönüşümü paniği** — ffmpeg çağrılarında
+  `path.to_str().unwrap()` geçersiz UTF-8 yolda panikler. `Command::arg()`
+  zaten `OsStr` aldığı için dönüşüm kaldırıldı.
+• **⚠️ WINDOWS: ffprobe SIDECAR'A DAHİL DEĞİL** (yalnız yt-dlp + ffmpeg).
+  macOS'ta Homebrew olduğu için fark edilmiyordu; temiz Windows'ta yerel dosya
+  içe aktarma çalışmazdı → süre gerekirse ffmpeg çıktısından okunuyor.
+• yt-dlp sürüm kontrolünde Windows'ta konsol penceresi fırlıyordu (`no_window`).
+• **ÖLÜ ADRES ÖNBELLEKTE KALIYORDU**: sağlık testinden kalan adres siliniyor —
+  yoksa her denemede yeniden seçilip katmanları tüketiyordu (ölçüldü: bir
+  şarkı 15.6 sn'de hazır oldu).
+
 v1.8.4'te: ⭐ **İNDİRİCİ "HER ŞARKIYI BİR ŞEKİLDE İNDİR" SEVİYESİNE ÇIKTI**:
 • **ADRES SAĞLIK TESTİ** (`native_dl::probe_url`) — indirmeye başlamadan önce
   dosyanın SON 1 KB'ı istenir. ÖLÇÜM: kısıtlı adres (PO Token'sız InnerTube)

@@ -516,6 +516,66 @@ pub async fn play_track(
         if PLAY_GEN.load(Ordering::SeqCst) != my_gen {
             return Ok(());
         }
+        // ⭐ AKIŞ KURTARMA (v1.8.5): akış yarıda kesilirse şarkıyı ATLAMA —
+        // tam dosyayı indirip KALDIĞI SANİYEDEN devam et.
+        //
+        // Eksik dosyanın sonuna gelen ses motoru bunu "şarkı bitti" sanıp
+        // sıradakine geçiyordu; kullanıcının gördüğü "şarkılar 40-45.
+        // saniyede kendiliğinden atlıyor" davranışı buydu.
+        let done = h.done.clone();
+        let failed = h.failed.clone();
+        let app_w = app.clone();
+        let sid_w = sid.clone();
+        let cookies_w = cookies.clone();
+        let track_w = input.track_id.clone();
+        let dur_w = input.duration_ms;
+        let cache_w = cache.clone();
+        tauri::async_runtime::spawn(async move {
+            // Akışın bitmesini bekle (tamamlandı ya da koptu).
+            loop {
+                if done.load(Ordering::Relaxed) {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            }
+            if !failed.load(Ordering::Relaxed) {
+                return; // sorunsuz tamamlandı
+            }
+            // Kullanıcı bu arada başka şarkıya geçtiyse karışma.
+            if PLAY_GEN.load(Ordering::SeqCst) != my_gen {
+                return;
+            }
+            log::info!("akış koptu, tam indirmeye geçiliyor: {sid_w}");
+            let sid2 = sid_w.clone();
+            let ck = cookies_w.clone();
+            let full = tauri::async_runtime::spawn_blocking(move || {
+                ytdlp::ensure_audio(&cache_w, &sid2, ck.as_deref())
+            })
+            .await;
+            let Ok(Ok(path)) = full else {
+                let _ = app_w.emit("playback-error", "akış kurtarılamadı".to_string());
+                return;
+            };
+            if PLAY_GEN.load(Ordering::SeqCst) != my_gen {
+                return;
+            }
+            // Kaldığı saniyeden devam et (ses motorunun kendi sayacı).
+            let pos = app_w
+                .try_state::<AudioHandle>()
+                .map(|st| st.shared.position_ms.load(Ordering::Relaxed))
+                .unwrap_or(0);
+            if let Some(st) = app_w.try_state::<AudioHandle>() {
+                st.send(AudioCmd::Load {
+                    path,
+                    duration_ms: dur_w,
+                    track_id: track_w,
+                    start_ms: pos,
+                    fade_ms: 0,
+                    growing: None,
+                });
+            }
+        });
+
         audio.send(AudioCmd::Load {
             path: h.path,
             duration_ms: input.duration_ms,
@@ -1090,11 +1150,23 @@ pub async fn update_ytdlp(app: AppHandle) -> Result<String, String> {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
         }
+        // Windows: hedef varsa rename hata verir → önce kaldır.
+        if dest.exists() {
+            let _ = std::fs::remove_file(&dest);
+        }
         std::fs::rename(&tmp, &dest)?;
         log::info!("yt-dlp güncellendi: {}", dest.display());
 
         // Sürümü öğren (kısa).
-        let ver = std::process::Command::new(&dest)
+        // ⚠️ Windows: bu çağrı `no_window` almadığı için güncelleme sırasında
+        // ekrana bir konsol penceresi fırlıyordu.
+        let mut vc = std::process::Command::new(&dest);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            vc.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
+        let ver = vc
             .arg("--version")
             .output()
             .ok()

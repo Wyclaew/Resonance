@@ -307,6 +307,18 @@ pub fn cached_source(video_id: &str) -> Option<AudioSource> {
     })
 }
 
+/// Önbellekteki adresi ÜNUT (sağlık testinden kalınca / indirme kopunca).
+///
+/// ⚠️ Neden gerekli: adresler `expire` damgasına göre ~6 saat geçerli sayılıyor
+/// ama YouTube tarafında daha erken ölebiliyorlar. Silinmezse aynı ölü adres
+/// her denemede yeniden kullanılıp katmanları boşuna tüketiyor (ölçüldü: bir
+/// şarkı 15.6 sn'de hazır oldu).
+pub fn forget_url(video_id: &str) {
+    if let Ok(mut m) = url_cache().lock() {
+        m.remove(video_id);
+    }
+}
+
 pub fn cached_count() -> usize {
     url_cache().lock().map(|m| m.len()).unwrap_or(0)
 }
@@ -374,6 +386,18 @@ pub fn health() -> (f32, f32, u32) {
     (mbps, fails, buffer)
 }
 
+
+
+/// ⚠️ WINDOWS: `std::fs::rename` hedef dosya VARSA hata verir (Unix'te üzerine
+/// yazar). Yarım kalmış bir indirmeden sonra hedef zaten duruyorsa indirme
+/// sessizce başarısız oluyordu — platformlar arası fark, macOS'ta hiç
+/// görünmeyen bir Windows hatası.
+fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    if to.exists() {
+        let _ = std::fs::remove_file(to);
+    }
+    std::fs::rename(from, to)
+}
 
 /// ⭐ ADRES SAĞLIK TESTİ — indirmeye başlamadan önce URL gerçekten tam mı?
 ///
@@ -454,7 +478,7 @@ pub fn download_ranged(src: &AudioSource, dest: &Path) -> Result<u64> {
                 if let Ok(bytes) = resp.bytes() {
                     if bytes.len() as u64 == src.content_length {
                         std::fs::write(&part, &bytes)?;
-                        std::fs::rename(&part, dest)?;
+                        replace_file(&part, dest)?;
                         let _ = std::fs::remove_file(&meta);
                         note_download(src.content_length, t_dl.elapsed().as_secs_f32(), true);
                         return Ok(src.content_length);
@@ -529,7 +553,7 @@ pub fn download_ranged(src: &AudioSource, dest: &Path) -> Result<u64> {
 
     f.flush()?;
     drop(f);
-    std::fs::rename(&part, dest)?;
+    replace_file(&part, dest)?;
     let _ = std::fs::remove_file(&meta);
     note_download(have, t_dl.elapsed().as_secs_f32(), true);
     Ok(have)
@@ -606,6 +630,12 @@ pub struct StreamHandle {
     pub path: std::path::PathBuf,
     /// Yazım bitti mi? GrowingFile bunu görünce gerçek EOF döndürür.
     pub done: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// ⚠️ Akış YARIDA KESİLDİ mi? (indirme 403 aldı / bağlantı koptu)
+    ///
+    /// Bu ayrım kritik: eksik dosyanın sonuna gelen ses motoru bunu "şarkı
+    /// bitti" sanıp SONRAKİ ŞARKIYA GEÇİYORDU — kullanıcının gördüğü
+    /// "şarkılar 40-45. saniyede kendiliğinden atlıyor" davranışı buydu.
+    pub failed: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Dosyayı BÜYÜRKEN okuyan reader. Sona gelince yazım bitene kadar bekler.
@@ -690,6 +720,8 @@ pub fn stream_to_adts(
 
     let done = Arc::new(AtomicBool::new(false));
     let done_w = done.clone();
+    let failed = Arc::new(AtomicBool::new(false));
+    let failed_w = failed.clone();
     let dest_w = dest.clone(); // thread kendi kopyasını alır
 
     // İndirme + besleme thread'i.
@@ -713,7 +745,10 @@ pub fn stream_to_adts(
         drop(stdin);
         let ok = result.is_ok() && child.wait().map(|s| s.success()).unwrap_or(false);
         if let Err(e) = &result {
-            log::info!("akışlı indirme yarıda kaldı: {e}");
+            log::warn!("akışlı indirme yarıda kaldı: {e}");
+        }
+        if !ok {
+            failed_w.store(true, Ordering::Relaxed);
         }
         // ⭐ Tamamlandıysa nihai ada KOPYALA → bir dahaki sefere normal
         // (anında) yoldan çalınır. Taşıma değil: dosya hâlâ açık olabilir.
@@ -735,12 +770,20 @@ pub fn stream_to_adts(
     loop {
         let size = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
         if size >= MIN_START_BYTES {
-            return Ok(StreamHandle { path: dest, done });
+            return Ok(StreamHandle {
+                path: dest,
+                done,
+                failed,
+            });
         }
         if done.load(Ordering::Relaxed) {
             // Yazım bitti: dosya küçük olsa da (kısa şarkı) çalınabilir.
             if size > 0 {
-                return Ok(StreamHandle { path: dest, done });
+                return Ok(StreamHandle {
+                    path: dest,
+                    done,
+                    failed,
+                });
             }
             anyhow::bail!("akış başlatılamadı (çıktı yok)");
         }
@@ -811,6 +854,54 @@ pub fn fetch_with_url(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// SAĞLIK TESTİ regresyonu (ağ ister):
+    ///   cargo test --lib probe -- --ignored --nocapture
+    ///
+    /// InnerTube adresi PO Token olmadan yalnız ilk ~1 MB'ı veriyor; bu testin
+    /// yakaladığı şey, o adresi İNDİRMEDEN önce ayırt edebildiğimiz.
+    /// Ayrım kaybolursa akış yolu şarkının ortasında susar (v1.8.5 bug'ı).
+    #[test]
+    #[ignore]
+    fn probe_detects_restricted_url() {
+        let vid = "cuMuMnCRfqk";
+        let restricted = resolve_innertube(vid, false).expect("innertube adresi yok");
+        let ok_restricted = probe_url(&restricted);
+        println!("innertube adresi sağlıklı mı: {ok_restricted}");
+
+        // yt-dlp'nin çözdüğü adres kısıtsız olmalı.
+        let out = std::process::Command::new("yt-dlp")
+            .env("PATH", "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin")
+            .args([
+                "--extractor-args",
+                "youtube:player_client=web_embedded",
+                "-j",
+                "-f",
+                "bestaudio[ext=m4a]/bestaudio/best",
+                "--no-playlist",
+                "--no-warnings",
+                "--",
+                vid,
+            ])
+            .output()
+            .expect("yt-dlp yok");
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
+        let full = AudioSource {
+            url: v["url"].as_str().expect("url").to_string(),
+            user_agent: v["http_headers"]["User-Agent"]
+                .as_str()
+                .unwrap_or("Mozilla/5.0")
+                .to_string(),
+            content_length: v["filesize"]
+                .as_u64()
+                .or_else(|| v["filesize_approx"].as_u64())
+                .expect("boyut"),
+            via: "yt-dlp".into(),
+        };
+        let ok_full = probe_url(&full);
+        println!("yt-dlp adresi sağlıklı mı: {ok_full}");
+        assert!(ok_full, "kısıtsız adres sağlıksız göründü — test yanlış eler");
+    }
 
     /// İNDİRİRKEN ÇALMA uçtan uca testi (ağ + ffmpeg ister):
     ///   cargo test --lib progressive -- --ignored --nocapture

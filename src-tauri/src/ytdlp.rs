@@ -630,6 +630,15 @@ pub fn stream_audio(
         }
     };
 
+    // ⭐ AKIŞA GİRMEDEN ÖNCE ADRESİ DOĞRULA (v1.8.5).
+    // Kısıtlı bir adresle akış başlatmak, şarkının ortasında sesin kesilmesi
+    // demek: indirme 403 alınca dosya eksik kalıyor, ses motoru dosyanın
+    // sonuna gelip "bitti" sanıyor ve sıradakine geçiyor. Normal indirmede
+    // aynı durum yalnız "bir katman düştü" anlamına geldiği için zararsızdı.
+    if !native_dl::probe_url(&src) {
+        anyhow::bail!("akış için adres kısıtlı (sağlık testi)");
+    }
+
     let dest = cache_dir.join(format!("{video_id}.stream.aac"));
     let t0 = std::time::Instant::now();
     let h = native_dl::stream_to_adts(src, dest, ffmpeg())?;
@@ -727,21 +736,47 @@ fn collect_audio(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) {
     }
 }
 
+/// ffmpeg çıktısından süreyi çıkar ("Duration: 00:03:45.12").
+///
+/// ⚠️ NEDEN GEREKLİ: `ffprobe` sidecar olarak PAKETLENMİYOR (yalnız yt-dlp ve
+/// ffmpeg). macOS'ta Homebrew kurulu olduğu için fark edilmiyordu, ama temiz
+/// bir Windows kurulumunda ffprobe YOK → yerel dosya içe aktarma çalışmazdı.
+/// ffmpeg her zaman elimizde; süreyi ondan okuyoruz.
+fn duration_via_ffmpeg(path: &Path) -> u64 {
+    let Ok(out) = ffmpeg().arg("-i").arg(path).output() else {
+        return 0;
+    };
+    let err = String::from_utf8_lossy(&out.stderr);
+    let Some(i) = err.find("Duration:") else {
+        return 0;
+    };
+    let rest = &err[i + 9..];
+    let stamp: String = rest.trim_start().chars().take(11).collect();
+    let mut parts = stamp.split(':');
+    let h: f64 = parts.next().and_then(|x| x.trim().parse().ok()).unwrap_or(0.0);
+    let m: f64 = parts.next().and_then(|x| x.parse().ok()).unwrap_or(0.0);
+    let sec: f64 = parts
+        .next()
+        .map(|x| x.trim_end_matches(',').to_string())
+        .and_then(|x| x.parse().ok())
+        .unwrap_or(0.0);
+    ((h * 3600.0 + m * 60.0 + sec) * 1000.0) as u64
+}
+
 /// ffprobe ile başlık/sanatçı/süre. Etiket yoksa dosya adına düşülür.
+/// ffprobe bulunamazsa süre ffmpeg'den okunur (bkz. duration_via_ffmpeg).
 fn probe_local(path: &Path) -> Option<LocalTrack> {
-    let out = ffprobe()
-        .args([
-            "-v",
-            "quiet",
-            "-print_format",
-            "json",
-            "-show_format",
-            "--",
-            path.to_str()?,
-        ])
+    let probe = ffprobe()
+        .args(["-v", "quiet", "-print_format", "json", "-show_format", "--"])
+        .arg(path)
         .output()
-        .ok()?;
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+        .ok()
+        .filter(|o| o.status.success());
+
+    let stem_only = probe.is_none();
+    let v: serde_json::Value = probe
+        .and_then(|o| serde_json::from_slice(&o.stdout).ok())
+        .unwrap_or(serde_json::Value::Null);
     let tags = &v["format"]["tags"];
     let get = |k: &str, k2: &str| -> String {
         tags[k]
@@ -775,7 +810,14 @@ fn probe_local(path: &Path) -> Option<LocalTrack> {
         .as_str()
         .and_then(|d| d.parse::<f64>().ok())
         .map(|d| (d * 1000.0) as u64)
-        .unwrap_or(0);
+        .unwrap_or_else(|| {
+            // ffprobe yoksa/çalışmadıysa süreyi ffmpeg'den al.
+            if stem_only {
+                duration_via_ffmpeg(path)
+            } else {
+                0
+            }
+        });
     Some(LocalTrack {
         path: path.to_string_lossy().into_owned(),
         title,
@@ -816,12 +858,13 @@ pub fn ensure_local_audio(cache_dir: &Path, path: &str) -> anyhow::Result<PathBu
         return Ok(target);
     }
     std::fs::create_dir_all(cache_dir)?;
+    // ⚠️ Yolları `to_str().unwrap()` ile geçirmek Windows'ta PANİK riski
+    // (geçersiz UTF-8 yol). `arg()` OsStr aldığı için dönüşüme hiç gerek yok.
     let out = ffmpeg()
-        .args([
-            "-y", "-v", "error", "-i", path, "-vn", "-c:a", "aac", "-b:a", "192k",
-            "-f", "adts",
-            target.to_str().unwrap(),
-        ])
+        .args(["-y", "-v", "error", "-i"])
+        .arg(path)
+        .args(["-vn", "-c:a", "aac", "-b:a", "192k", "-f", "adts"])
+        .arg(&target)
         .output()?;
     if !out.status.success() || !target.exists() {
         anyhow::bail!(
@@ -1194,17 +1237,9 @@ pub fn measure_loudness(cache_dir: &Path, video_id: &str) -> anyhow::Result<(f64
     let path = find_cached(cache_dir, video_id)
         .ok_or_else(|| anyhow::anyhow!("dosya önbellekte yok ({video_id})"))?;
     let out = ffmpeg()
-        .args([
-            "-hide_banner",
-            "-nostats",
-            "-i",
-            path.to_str().unwrap(),
-            "-af",
-            "loudnorm=print_format=json",
-            "-f",
-            "null",
-            "-",
-        ])
+        .args(["-hide_banner", "-nostats", "-i"])
+        .arg(&path)
+        .args(["-af", "loudnorm=print_format=json", "-f", "null", "-"])
         .output()?;
 
     // JSON bloğu stderr'in SONUNDADIR (ffmpeg'in kendi logları önce gelir).
@@ -1298,7 +1333,10 @@ pub fn ensure_audio(
     let url = format!("https://www.youtube.com/watch?v={video_id}");
     let dl_tmpl = cache_dir.join(format!("{video_id}.src.%(ext)s"));
 
-    let dl_tmpl_str = dl_tmpl.to_str().unwrap();
+    // Panik yerine anlaşılır hata: Windows'ta yol geçersiz UTF-8 içerebilir.
+    let dl_tmpl_str = dl_tmpl
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("önbellek yolu okunamadı (geçersiz karakter)"))?;
     let ff = ffmpeg_path();
     let ff_str = ff.as_ref().map(|p| p.to_string_lossy());
 
@@ -1384,6 +1422,9 @@ pub fn ensure_audio(
                     "önbellek adresi tutmadı {video_id}: {}",
                     first_line(&e.to_string())
                 );
+                // Ölü adresi önbellekte BIRAKMA: bir sonraki denemede yine
+                // seçilip katmanları boşuna tüketirdi (ölçüldü: 15.6 sn).
+                native_dl::forget_url(video_id);
                 if let Some(pth) = find_src(cache_dir, video_id) {
                     let _ = std::fs::remove_file(pth);
                 }
@@ -1563,19 +1604,11 @@ pub fn ensure_audio(
     } else {
         Some(
             ffmpeg()
-                .args([
-                    "-y",
-                    "-v",
-                    "error",
-                    "-i",
-                    src.to_str().unwrap(),
-                    "-vn", // video varsa (muxed best) at — sadece ses
-                    "-c:a",
-                    "copy",
-                    "-f",
-                    "adts",
-                    target.to_str().unwrap(),
-                ])
+                .args(["-y", "-v", "error", "-i"])
+                .arg(&src)
+                // -vn: video varsa (muxed best) at — sadece ses
+                .args(["-vn", "-c:a", "copy", "-f", "adts"])
+                .arg(&target)
                 .output(),
         )
     };
@@ -1595,13 +1628,11 @@ pub fn ensure_audio(
     if !copied || !target.exists() {
         let _ = std::fs::remove_file(&target);
         match ffmpeg()
+            .args(["-y", "-v", "error", "-i"])
+            .arg(&src)
+            // -vn: video varsa (muxed best) at — sadece ses
             .args([
-                "-y",
-                "-v",
-                "error",
-                "-i",
-                src.to_str().unwrap(),
-                "-vn", // video varsa (muxed best) at — sadece ses
+                "-vn",
                 "-c:a",
                 "aac",
                 "-b:a",
@@ -1610,8 +1641,8 @@ pub fn ensure_audio(
                 if medium { "96k" } else { "192k" },
                 "-f",
                 "adts",
-                target.to_str().unwrap(),
             ])
+            .arg(&target)
             .output()
         {
             Ok(o) if o.status.success() => {}
