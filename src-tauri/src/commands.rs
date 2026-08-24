@@ -480,6 +480,7 @@ pub async fn play_track(
             track_id: input.track_id,
             start_ms: input.resume_ms,
             fade_ms: input.fade_ms,
+            stream_failed: None,
             growing: None,
         });
         return Ok(());
@@ -571,6 +572,7 @@ pub async fn play_track(
                     track_id: track_w,
                     start_ms: pos,
                     fade_ms: 0,
+                    stream_failed: None,
                     growing: None,
                 });
             }
@@ -582,6 +584,9 @@ pub async fn play_track(
             track_id: input.track_id,
             start_ms: 0,
             fade_ms: input.fade_ms,
+            // Kopma bayrağı motora da verilir: yarım dosyanın sonu "bitti"
+            // sayılmasın (bkz. audio.rs).
+            stream_failed: Some(h.failed.clone()),
             growing: Some(h.done),
         });
         return Ok(());
@@ -641,6 +646,7 @@ pub async fn play_track(
         track_id: input.track_id,
         start_ms: input.resume_ms,
         fade_ms: input.fade_ms,
+        stream_failed: None,
         growing: None,
     });
     Ok(())

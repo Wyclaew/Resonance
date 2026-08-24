@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.8.5** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.8.6** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,24 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.8.6 (BUG TURU 2 — "şarkı 35-40. sn'de atlıyor" KÖKÜNDEN çözüldü):
+• **KOPAN AKIŞ "BİTİŞ" SAYILIYORDU.** v1.8.5'te adres doğrulama ve kurtarma
+  eklendi ama ses motoru hâlâ kopmayı göremiyordu: yarım dosyanın sonuna gelen
+  rodio sink'i boşalınca `track-ended` YAYILIYOR, frontend `next()` çağırıyor
+  ve şarkı ATLANIYORDU — kurtarma thread'i devreye girmeden. Artık
+  `AudioCmd::Load{stream_failed}` ile kopma bayrağı motora da veriliyor ve
+  kopma durumunda `track-ended` YAYILMIYOR; kurtarma tam dosyayı indirip aynı
+  saniyeden devam ettiriyor (regresyon testi: `broken_stream_is_marked_failed`).
+• **⚠️ SES CİHAZI KAYBOLUNCA PANİK**: `Sink::try_new(...).expect("sink")` —
+  Windows'ta Bluetooth kulaklık kesilince TÜM ses thread'i ölüyor ve uygulama
+  bir daha hiçbir şey çalmıyordu. Artık hata bildiriliyor, thread yaşıyor.
+• Mutex zehirlenmesine dayanıklılık (`track_id.lock().unwrap()` zincirleme
+  panik yapabiliyordu).
+• `repeat === "one"` iken kuyruk dışarıdan değiştiyse `scheduleLoad(undefined)`
+  çökertiyordu.
+• Mini oynatıcı açıkken ana pencere kapatılınca uygulama arka planda asılı
+  kalıyordu (mini taskbar'da görünmüyor) → ana kapanınca mini de kapanır.
+
 v1.8.5 (BUG TURU, ağırlıklı Windows):
 • **"Şarkılar 40-45. saniyede kendiliğinden atlıyor"** — KÖK NEDEN: akış yolu
   (indirirken çalma) adresi DOĞRULAMADAN başlıyordu. Kısıtlı adres 1 MB sonra

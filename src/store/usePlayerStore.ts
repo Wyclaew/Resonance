@@ -1275,7 +1275,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     if (queue.length === 0) return;
 
     if (repeat === "one") {
+      // Kuyruk dışarıdan değişmiş olabilir (öğe silme / uzak kuyruk devralma):
+      // geçersiz indeks `scheduleLoad(undefined)` ile çökerdi.
       const cur = queue[queueIndex];
+      if (!cur) return;
       set({ status: "loading", positionMs: 0 });
       scheduleLoad(cur);
       return;

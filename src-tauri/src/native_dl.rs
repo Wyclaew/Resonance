@@ -903,6 +903,47 @@ mod tests {
         assert!(ok_full, "kısıtsız adres sağlıksız göründü — test yanlış eler");
     }
 
+    /// ⭐ KOPAN AKIŞ, BİTMİŞ AKIŞTAN AYIRT EDİLİYOR MU? (ağ ister)
+    ///   cargo test --lib broken_stream -- --ignored --nocapture
+    ///
+    /// Kullanıcının bildirdiği "şarkı 35-40. saniyede kendiliğinden atlıyor"
+    /// bug'ının kalbi: kısıtlı adres ~1 MB sonra 403 alıyor, dosya eksik
+    /// kalıyor ve ses motoru bunu "şarkı bitti" sanıyordu. `failed` bayrağı
+    /// bu iki durumu ayırt eder; ayrım kaybolursa bug geri gelir.
+    #[test]
+    #[ignore]
+    fn broken_stream_is_marked_failed() {
+        let dir = std::env::temp_dir().join("resonance-broken-test");
+        let _ = std::fs::create_dir_all(&dir);
+        let vid = "cuMuMnCRfqk";
+
+        // Kısıtlı adres (InnerTube, PO Token yok) — sağlık testini BİLEREK
+        // atlıyoruz ki kopma senaryosu gerçekleşsin.
+        let src = resolve_innertube(vid, false).expect("innertube adresi yok");
+        assert!(!probe_url(&src), "adres kısıtlı değil — test anlamsız");
+
+        let dest = dir.join(format!("{vid}.stream.aac"));
+        let mut cmd = std::process::Command::new("ffmpeg");
+        cmd.env("PATH", "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin");
+        let h = stream_to_adts(src, dest, cmd).expect("akış başlamalıydı");
+
+        for _ in 0..600 {
+            if h.done.load(std::sync::atomic::Ordering::Relaxed) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let done = h.done.load(std::sync::atomic::Ordering::Relaxed);
+        let failed = h.failed.load(std::sync::atomic::Ordering::Relaxed);
+        println!("done={done} failed={failed}");
+        assert!(done, "akış bitmedi");
+        assert!(
+            failed,
+            "KOPAN akış 'başarılı' göründü → ses motoru bunu şarkı bitişi              sanar ve parçayı atlar (35-40 sn bug'ı)"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// İNDİRİRKEN ÇALMA uçtan uca testi (ağ + ffmpeg ister):
     ///   cargo test --lib progressive -- --ignored --nocapture
     ///

@@ -473,6 +473,22 @@ pub fn run() {
                 }
             }
 
+            // ⚠️ Mini oynatıcı açıkken ANA pencere kapatılırsa uygulama açık
+            // kalıyordu: mini pencere taskbar'da görünmediği (skip_taskbar)
+            // ve ana pencere de olmadığı için kullanıcı uygulamaya
+            // erişemeden arka planda asılı kalıyordu. Ana pencere kapanınca
+            // mini de kapanır.
+            if let Some(main) = app.get_webview_window("main") {
+                let handle = app.handle().clone();
+                main.on_window_event(move |e| {
+                    if matches!(e, tauri::WindowEvent::CloseRequested { .. }) {
+                        if let Some(mini) = handle.get_webview_window("mini") {
+                            let _ = mini.close();
+                        }
+                    }
+                });
+            }
+
             // İndirirken çalma yolundan kalan geçici dosyaları temizle.
             commands::cleanup_stream_files(&app.handle().clone());
 

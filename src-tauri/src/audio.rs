@@ -23,6 +23,13 @@ pub enum AudioCmd {
         /// ⭐ CROSSFADE: >0 ise yeni parça sessizden açılır ve ÖNCEKİ parça
         /// durdurulmak yerine aynı sürede kısılarak söner (iki sink birlikte).
         fade_ms: u64,
+        /// ⚠️ Akış YARIDA KESİLDİ mi? (indirme koptu / 403)
+        ///
+        /// Bu olmadan eksik dosyanın sonuna gelen motor "şarkı bitti" yayıyor
+        /// ve kuyruk ilerliyordu — kullanıcının gördüğü "şarkı 35-40.
+        /// saniyede kendiliğinden atlıyor" davranışı buydu. Kopma bir BİTİŞ
+        /// değildir: kurtarma tam dosyayı indirip aynı saniyeden devam ettirir.
+        stream_failed: Option<Arc<AtomicBool>>,
         /// ⭐ İNDİRİRKEN ÇALMA: dosya hâlâ YAZILIYORSA bu bayrak verilir.
         /// Okuyucu sona geldiğinde EOF sanıp durmaz, bayrak true olana kadar
         /// yeni veriyi bekler (bkz. native_dl::GrowingFile).
@@ -90,6 +97,8 @@ fn audio_loop(rx: Receiver<AudioCmd>, shared: Arc<Shared>, app: AppHandle) {
     let mut volume = 0.9f32;
     sink.set_volume(volume);
 
+    // Çalan parçanın akışı koptu mu? (yalnız indirirken çalma yolunda dolu)
+    let mut stream_failed: Option<Arc<AtomicBool>> = None;
     // Sönmekte olan eski parçalar (crossfade). Genelde 0 ya da 1 eleman.
     let mut fading: Vec<Fading> = Vec::new();
     // Yeni parçanın açılma rampası: (başlangıç, süre).
@@ -106,16 +115,30 @@ fn audio_loop(rx: Receiver<AudioCmd>, shared: Arc<Shared>, app: AppHandle) {
                     track_id,
                     start_ms,
                     fade_ms,
+                    stream_failed: failed_flag,
                     growing,
                 } => {
                     // ⭐ CROSSFADE: eskiyi ÖLDÜRME, söndürme listesine al.
                     // Yeni parça 0 sesten açılır; ikisi birlikte çalarken
                     // aşağıdaki döngü rampaları uygular.
+                    // ⚠️ `expect("sink")` PANİKLERDİ: ses cihazı kaybolunca
+                    // (Windows'ta Bluetooth kulaklığın kesilmesi yaygın)
+                    // tüm ses thread'i ölüyor ve uygulama bir daha hiçbir şey
+                    // çalmıyordu. Artık hata bildirilip mevcut sink korunuyor.
+                    let fresh = match Sink::try_new(&handle) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            log::error!("ses çıkışı kurulamadı: {e}");
+                            let _ = app.emit(
+                                "playback-error",
+                                "ses çıkışı kullanılamıyor".to_string(),
+                            );
+                            ended_emitted = true;
+                            continue;
+                        }
+                    };
                     if fade_ms > 0 && !sink.empty() {
-                        let old = std::mem::replace(
-                            &mut sink,
-                            Sink::try_new(&handle).expect("sink"),
-                        );
+                        let old = std::mem::replace(&mut sink, fresh);
                         fading.push(Fading {
                             sink: old,
                             t0: Instant::now(),
@@ -126,7 +149,7 @@ fn audio_loop(rx: Receiver<AudioCmd>, shared: Arc<Shared>, app: AppHandle) {
                         sink.set_volume(0.0);
                     } else {
                         sink.stop();
-                        sink = Sink::try_new(&handle).expect("sink");
+                        sink = fresh;
                         fade_in = None;
                         sink.set_volume(volume);
                     }
@@ -151,9 +174,12 @@ fn audio_loop(rx: Receiver<AudioCmd>, shared: Arc<Shared>, app: AppHandle) {
                                 let _ = sink.try_seek(Duration::from_millis(start_ms));
                             }
                             sink.play();
+                            stream_failed = failed_flag.clone();
                             shared.duration_ms.store(duration_ms, Ordering::Relaxed);
                             shared.position_ms.store(start_ms, Ordering::Relaxed);
-                            *shared.track_id.lock().unwrap() = Some(track_id);
+                            if let Ok(mut g) = shared.track_id.lock() {
+                                *g = Some(track_id);
+                            }
                             ended_emitted = false;
                         }
                         Ok(Err(e)) => {
@@ -178,7 +204,9 @@ fn audio_loop(rx: Receiver<AudioCmd>, shared: Arc<Shared>, app: AppHandle) {
                 AudioCmd::Stop => {
                     sink.stop();
                     shared.position_ms.store(0, Ordering::Relaxed);
-                    *shared.track_id.lock().unwrap() = None;
+                    if let Ok(mut g) = shared.track_id.lock() {
+                        *g = None;
+                    }
                     ended_emitted = true;
                 }
                 AudioCmd::SetVolume(v) => {
@@ -198,7 +226,22 @@ fn audio_loop(rx: Receiver<AudioCmd>, shared: Arc<Shared>, app: AppHandle) {
         shared.playing.store(playing, Ordering::Relaxed);
 
         // Şarkı doğal olarak bitti mi?
-        if empty && !ended_emitted && shared.track_id.lock().unwrap().is_some() {
+        //
+        // ⚠️ AKIŞ KOPMASI BİTİŞ DEĞİLDİR. Yarım kalan dosyanın sonuna gelmek
+        // "şarkı bitti" gibi görünür; bunu yayarsak kuyruk ilerler ve parça
+        // haksız yere atlanır (üstelik zevk modeline de yanlış sinyal gider).
+        // Bu durumda susuyoruz: kurtarma tam dosyayı indirip aynı saniyeden
+        // devam ettirecek, olmazsa `playback-error` gelir ve frontend atlar.
+        let stream_broken = stream_failed
+            .as_ref()
+            .map(|f| f.load(Ordering::Relaxed))
+            .unwrap_or(false);
+        let has_track = shared
+            .track_id
+            .lock()
+            .map(|g| g.is_some())
+            .unwrap_or(false);
+        if empty && !ended_emitted && !stream_broken && has_track {
             ended_emitted = true;
             let _ = app.emit("track-ended", ());
         }
