@@ -404,6 +404,7 @@ pub fn run() {
             commands::search_lyrics,
             commands::scan_local_files,
             commands::toggle_mini_player,
+            commands::focus_main_window,
             commands::export_data,
             commands::backup_db,
             commands::list_backups,

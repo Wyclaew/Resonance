@@ -25,3 +25,7 @@ npm-debug.log*
 .env
 .env.*
 !.env.example
+
+# Oturum defteri / bağlam dökümleri (context-diet eklentisi) — repoya girmez
+.claude/ctx-spill/
+.claude/context-ledger.md

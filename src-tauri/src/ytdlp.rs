@@ -18,7 +18,13 @@ use std::sync::{Arc, Mutex, OnceLock};
 fn inflight_lock(video_id: &str) -> Arc<Mutex<()>> {
     static MAP: OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
     let map = MAP.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut m = map.lock().unwrap();
+    // ⚠️ `unwrap()` DEĞİL: kilit tutulurken bir indirme panikleyince mutex
+    // zehirlenir ve sonraki HER indirme panikle ölürdü. Zehirlenmiş kilidi
+    // olduğu gibi kullanıyoruz (koruduğu veri sadece bir HashMap).
+    let mut m = match map.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
     m.entry(video_id.to_string())
         .or_insert_with(|| Arc::new(Mutex::new(())))
         .clone()
@@ -169,6 +175,10 @@ fn yt_dlp(cookies: Option<&str>) -> Command {
     let mut c = Command::new(resolve_bin("yt-dlp"));
     c.env("PATH", augmented_path());
     no_window(&mut c);
+    // ⚠️ Soket zaman aşımı: yt-dlp varsayılanda ölü bir bağlantıyı DAKİKALARCA
+    // bekleyebiliyor. Bekleyen süreç `play_track`'i bloke ediyor, arayüz
+    // "yükleniyor"da kilitleniyor ve oynat tuşu ölüyordu (Windows'ta sık).
+    c.args(["--socket-timeout", "20"]);
     if let Some(b) = cookies {
         if !b.is_empty() {
             c.args(["--cookies-from-browser", &cookies_arg(b)]);
@@ -216,12 +226,77 @@ fn is_cookie_error(stderr: &str) -> bool {
 // yt-dlp'yi verilen argümanlarla çalıştırır. Çerez hatası alırsa çerezsiz bir
 // kez daha dener — hatalı tarayıcı ayarı tüm işlemi kırmasın (yalnızca
 // tam-playlist/özel-liste avantajı kaybolur).
+/// Alt süreci çalıştırır ama SONSUZA KADAR BEKLEMEZ.
+///
+/// ⚠️ NEDEN VAR: `Command::output()` süreç bitene kadar bloklar. yt-dlp/ffmpeg
+/// ağ takılmasında (Windows'ta çok daha sık) askıda kalabiliyor; o sırada
+/// `play_track` hiç dönmüyor, frontend durumu "loading"de kalıyor ve
+/// **oynat tuşu tamamen ölüyordu** — kullanıcının "Windows'ta play'e
+/// basamıyorum" dediği tablo buydu. Süre dolunca süreç öldürülür ve normal
+/// bir hata gibi ele alınır (bir sonraki katman devreye girer).
+fn output_timeout(mut cmd: Command, secs: u64) -> std::io::Result<std::process::Output> {
+    use std::io::Read;
+    use std::process::Stdio;
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = cmd.spawn()?;
+    // Boruları AYRI thread'lerde boşalt: dolu bir boru süreci kilitler.
+    let mut so = child.stdout.take();
+    let mut se = child.stderr.take();
+    let t_out = std::thread::spawn(move || {
+        let mut v = Vec::new();
+        if let Some(s) = so.as_mut() {
+            let _ = s.read_to_end(&mut v);
+        }
+        v
+    });
+    let t_err = std::thread::spawn(move || {
+        let mut v = Vec::new();
+        if let Some(s) = se.as_mut() {
+            let _ = s.read_to_end(&mut v);
+        }
+        v
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+    let status = loop {
+        match child.try_wait()? {
+            Some(st) => break st,
+            None => {
+                if std::time::Instant::now() >= deadline {
+                    log::warn!("alt süreç {secs} sn'de dönmedi, sonlandırılıyor");
+                    let _ = child.kill();
+                    break child.wait()?;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+    };
+    Ok(std::process::Output {
+        status,
+        stdout: t_out.join().unwrap_or_default(),
+        stderr: t_err.join().unwrap_or_default(),
+    })
+}
+
 fn run_yt_dlp(args: &[&str], cookies: Option<&str>) -> std::io::Result<std::process::Output> {
-    let out = yt_dlp(cookies).args(args).output()?;
+    run_yt_dlp_timeout(args, cookies, 120)
+}
+
+/// Bilgi/arama çağrıları 120 sn'de dönmeli; asıl BAYT İNDİRME yavaş bir
+/// bağlantıda daha uzun sürebilir → çağıran süreyi seçer.
+fn run_yt_dlp_timeout(
+    args: &[&str],
+    cookies: Option<&str>,
+    secs: u64,
+) -> std::io::Result<std::process::Output> {
+    let mut c = yt_dlp(cookies);
+    c.args(args);
+    let out = output_timeout(c, secs)?;
     if cookies.is_some() && !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         if is_cookie_error(&stderr) {
-            return yt_dlp(None).args(args).output();
+            let mut c2 = yt_dlp(None);
+            c2.args(args);
+            return output_timeout(c2, secs);
         }
     }
     Ok(out)
@@ -332,11 +407,16 @@ pub fn search(
 static AUDIO_QUALITY: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
 pub fn set_audio_quality(q: &str) {
-    *AUDIO_QUALITY.lock().unwrap() = q.to_string();
+    if let Ok(mut g) = AUDIO_QUALITY.lock() {
+        *g = q.to_string();
+    }
 }
 
 fn audio_quality() -> String {
-    AUDIO_QUALITY.lock().unwrap().clone()
+    AUDIO_QUALITY
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_else(|_| "high".to_string())
 }
 
 pub fn music_genre_pool(query: &str, limit: u32) -> anyhow::Result<Vec<SearchResult>> {
@@ -581,6 +661,16 @@ pub fn stream_audio(
     std::fs::create_dir_all(cache_dir)?;
     let low = audio_quality() == "low";
 
+    // ⭐ BAĞLANTI SAĞLIKSIZSA AKIŞ YAPMA (v1.8.8). İndirirken çalma yalnız
+    // indirme, çalmadan HIZLI olduğunda kazançlı; yavaş/kopan bağlantıda
+    // okuyucu yazıcıya yetişiyor ve ses callback'i beklemek zorunda kalıyor →
+    // CIZIRTI. Ölçülmüş sağlık verisi kötüyse normal yola düşüyoruz: ilk ses
+    // biraz geç gelir ama TEMİZ gelir.
+    let (mbps, fails, _) = native_dl::health();
+    if fails > 0.25 || (mbps > 0.0 && mbps < 1.5) {
+        anyhow::bail!("bağlantı akış için yavaş/dengesiz (mbps={mbps:.2}, hata={fails:.2})");
+    }
+
     // "medium" yeniden kodlama istiyor (kaynakta 96k yok) → akış yolunda
     // `-c:a copy` kullanıldığı için bu kademe desteklenmez, normal yola bırak.
     if audio_quality() == "medium" {
@@ -743,7 +833,9 @@ fn collect_audio(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) {
 /// bir Windows kurulumunda ffprobe YOK → yerel dosya içe aktarma çalışmazdı.
 /// ffmpeg her zaman elimizde; süreyi ondan okuyoruz.
 fn duration_via_ffmpeg(path: &Path) -> u64 {
-    let Ok(out) = ffmpeg().arg("-i").arg(path).output() else {
+    let mut c = ffmpeg();
+    c.arg("-i").arg(path);
+    let Ok(out) = output_timeout(c, 30) else {
         return 0;
     };
     let err = String::from_utf8_lossy(&out.stderr);
@@ -766,10 +858,12 @@ fn duration_via_ffmpeg(path: &Path) -> u64 {
 /// ffprobe ile başlık/sanatçı/süre. Etiket yoksa dosya adına düşülür.
 /// ffprobe bulunamazsa süre ffmpeg'den okunur (bkz. duration_via_ffmpeg).
 fn probe_local(path: &Path) -> Option<LocalTrack> {
-    let probe = ffprobe()
-        .args(["-v", "quiet", "-print_format", "json", "-show_format", "--"])
-        .arg(path)
-        .output()
+    let probe = {
+        let mut c = ffprobe();
+        c.args(["-v", "quiet", "-print_format", "json", "-show_format", "--"])
+            .arg(path);
+        output_timeout(c, 30)
+    }
         .ok()
         .filter(|o| o.status.success());
 
@@ -860,12 +954,12 @@ pub fn ensure_local_audio(cache_dir: &Path, path: &str) -> anyhow::Result<PathBu
     std::fs::create_dir_all(cache_dir)?;
     // ⚠️ Yolları `to_str().unwrap()` ile geçirmek Windows'ta PANİK riski
     // (geçersiz UTF-8 yol). `arg()` OsStr aldığı için dönüşüme hiç gerek yok.
-    let out = ffmpeg()
-        .args(["-y", "-v", "error", "-i"])
+    let mut c = ffmpeg();
+    c.args(["-y", "-v", "error", "-i"])
         .arg(path)
         .args(["-vn", "-c:a", "aac", "-b:a", "192k", "-f", "adts"])
-        .arg(&target)
-        .output()?;
+        .arg(&target);
+    let out = output_timeout(c, 180)?;
     if !out.status.success() || !target.exists() {
         anyhow::bail!(
             "yerel dosya dönüştürülemedi: {}",
@@ -966,9 +1060,11 @@ pub fn diagnose(cache_dir: &Path, cookies: Option<&str>) -> String {
 
     let ytp = resolve_bin("yt-dlp");
     line(&mut out, "yt-dlp yolu", ytp.to_string_lossy().into_owned());
-    let ver = yt_dlp(None)
-        .arg("--version")
-        .output()
+    let ver = {
+        let mut c = yt_dlp(None);
+        c.arg("--version");
+        output_timeout(c, 20)
+    }
         .ok()
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
@@ -985,9 +1081,11 @@ pub fn diagnose(cache_dir: &Path, cookies: Option<&str>) -> String {
             .map(|p| p.display().to_string())
             .unwrap_or_else(|| "BULUNAMADI".into()),
     );
-    let ffok = ffmpeg()
-        .arg("-version")
-        .output()
+    let ffok = {
+        let mut c = ffmpeg();
+        c.arg("-version");
+        output_timeout(c, 20)
+    }
         .map(|o| o.status.success())
         .unwrap_or(false);
     line(
@@ -1236,11 +1334,11 @@ fn resolve_url_with_ytdlp(
 pub fn measure_loudness(cache_dir: &Path, video_id: &str) -> anyhow::Result<(f64, f64)> {
     let path = find_cached(cache_dir, video_id)
         .ok_or_else(|| anyhow::anyhow!("dosya önbellekte yok ({video_id})"))?;
-    let out = ffmpeg()
-        .args(["-hide_banner", "-nostats", "-i"])
+    let mut c = ffmpeg();
+    c.args(["-hide_banner", "-nostats", "-i"])
         .arg(&path)
-        .args(["-af", "loudnorm=print_format=json", "-f", "null", "-"])
-        .output()?;
+        .args(["-af", "loudnorm=print_format=json", "-f", "null", "-"]);
+    let out = output_timeout(c, 120)?;
 
     // JSON bloğu stderr'in SONUNDADIR (ffmpeg'in kendi logları önce gelir).
     let err = String::from_utf8_lossy(&out.stderr);
@@ -1545,7 +1643,9 @@ pub fn ensure_audio(
                 a.insert(0, "--extractor-args");
                 a.insert(1, e);
             }
-            let o = run_yt_dlp(&a, if use_cookies { cookies } else { None })?;
+            // İndirme: 4 dakika. (Bilgi çağrılarının 120 sn'si burada yetmez;
+            // yavaş bağlantıda 4 MB'lık dosya daha uzun sürebilir.)
+            let o = run_yt_dlp_timeout(&a, if use_cookies { cookies } else { None }, 240)?;
             if o.status.success() {
                 LAST_GOOD_STRATEGY.store(idx, Ordering::Relaxed);
                 if k > 0 || round > 0 {
@@ -1603,13 +1703,15 @@ pub fn ensure_audio(
         None
     } else {
         Some(
-            ffmpeg()
-                .args(["-y", "-v", "error", "-i"])
-                .arg(&src)
-                // -vn: video varsa (muxed best) at — sadece ses
-                .args(["-vn", "-c:a", "copy", "-f", "adts"])
-                .arg(&target)
-                .output(),
+            {
+                let mut c = ffmpeg();
+                c.args(["-y", "-v", "error", "-i"])
+                    .arg(&src)
+                    // -vn: video varsa (muxed best) at — sadece ses
+                    .args(["-vn", "-c:a", "copy", "-f", "adts"])
+                    .arg(&target);
+                output_timeout(c, 120)
+            },
         )
     };
     let copied = match &remux {
@@ -1627,8 +1729,8 @@ pub fn ensure_audio(
     // 2) Kaynak AAC değilse (opus/webm) ya da kopyalama başarısızsa transcode et.
     if !copied || !target.exists() {
         let _ = std::fs::remove_file(&target);
-        match ffmpeg()
-            .args(["-y", "-v", "error", "-i"])
+        let mut enc = ffmpeg();
+        enc.args(["-y", "-v", "error", "-i"])
             .arg(&src)
             // -vn: video varsa (muxed best) at — sadece ses
             .args([
@@ -1642,8 +1744,8 @@ pub fn ensure_audio(
                 "-f",
                 "adts",
             ])
-            .arg(&target)
-            .output()
+            .arg(&target);
+        match output_timeout(enc, 180)
         {
             Ok(o) if o.status.success() => {}
             Ok(o) => {

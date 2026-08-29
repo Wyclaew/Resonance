@@ -1,4 +1,4 @@
-_Otomatik — 2026-08-23 13:51, son olculen baglam ~888K_
+_Otomatik — 2026-08-29 11:59, son olculen baglam ~505K_
 
 **Degistirilen dosyalar**
 - `../MusicPlayer/src/store/usePlayerStore.ts` (52x)
@@ -21,15 +21,15 @@ _Otomatik — 2026-08-23 13:51, son olculen baglam ~888K_
 - `src/views/DiscoverView.tsx` (7x)
 
 **Son komutlar**
-- `python3`
-- `cd /Users/erne/Desktop/Resonance && python3`
-- `npx tsc --noEmit 2>&1 | head -3; npm run build 2>&1 | tail -1; cd src-tauri && touch binaries/yt-dlp-x86_64-pc`
-- `cd /Users/erne/Desktop/Resonance && pkill -f "Resonance.app"; sleep 1; npm run tauri build -- --debug --bundle`
-- `until grep -qE "Finished|error|Resonance.app" /tmp/build.log 2>/dev/null; do sleep 15; done; tail -3 /tmp/buil`
-- `cd /Users/erne/Desktop/Resonance && find ~/Library/Caches/com.resonance.app/audio -type f -delete; : > ~/Libra`
-- `until [ -s /private/tmp/claude-501/-Users-erne-Desktop-Resonance/ff9dd7a5-039c-4bd8-9478-52108357fa36/tasks/b5`
-- `cargo test --lib -- --ignored --nocapture 2>&1 | grep -E "ilk ses|sağlıklı mı|bulundu:|test result" | head -8`
-- `until grep -q "test result" /private/tmp/claude-501/-Users-erne-Desktop-Resonance/ff9dd7a5-039c-4bd8-9478-5210`
-- `cd /Users/erne/Desktop/Resonance && git add -A && git commit -q -F -`
-- `cd /Users/erne/Desktop/Resonance && git push origin main 2>&1 | tail -3`
-- `git tag v1.8.5 && git push origin v1.8.5 2>&1 | tail -2`
+- `for i in $(seq 1 16); do if grep -q "EXIT=" /tmp/build17.log 2>/dev/null; then break; fi; sleep 15; done; tail`
+- `grep -n "Toasts\|{!idle" src/App.tsx | head -8`
+- `sed -n '55,75p' src/store/useToastStore.ts`
+- `sed -n '256,276p' src/App.tsx`
+- `awk 'NR>=273 && NR<=345' src/App.tsx | grep -n "await\|\.then(\|\.catch(" | head -20`
+- `sed -n '277,290p' src/App.tsx`
+- `grep -n "pub fn backup_db\|pub async fn backup_db" -A 15 src-tauri/src/commands.rs | grep -n "3600\|son\|skip\`
+- `ls -lt ~/Library/"Application Support"/com.resonance.app/backups | head -5; date "+şimdi %H:%M:%S"`
+- `pkill -f "Resonance.app"; sleep 1; open "src-tauri/target/debug/bundle/macos/Resonance.app" --stdout /tmp/res_`
+- `python3 -`
+- `for i in $(seq 1 16); do if grep -q "EXIT=" /tmp/build18.log 2>/dev/null; then break; fi; sleep 15; done; tail`
+- `git status --short | grep -v "^ M .claude" | head -25; echo "=== sürüm ==="; grep '"version"' package.json | h`

@@ -313,25 +313,73 @@ fn dl_semaphore() -> &'static tokio::sync::Semaphore {
 /// pencere durumu Rust'tan gelen `playback-tick` olayıyla öğrenir, komutları
 /// da `mini-command` olayıyla ANA pencereye yollar (kuyruk mantığı orada).
 #[tauri::command]
-pub async fn toggle_mini_player(app: AppHandle) -> Result<bool, String> {
-    if let Some(w) = app.get_webview_window("mini") {
-        let _ = w.close();
+pub async fn toggle_mini_player(
+    app: AppHandle,
+    x: Option<f64>,
+    y: Option<f64>,
+    w: Option<f64>,
+    h: Option<f64>,
+) -> Result<bool, String> {
+    if let Some(win) = app.get_webview_window("mini") {
+        let _ = win.close();
         return Ok(false);
     }
-    tauri::WebviewWindowBuilder::new(
+    let mut b = tauri::WebviewWindowBuilder::new(
         &app,
         "mini",
         tauri::WebviewUrl::App("index.html?mini=1".into()),
     )
     .title("Resonance")
-    .inner_size(360.0, 128.0)
+    .inner_size(w.unwrap_or(360.0), h.unwrap_or(148.0))
     .resizable(false)
     .always_on_top(true)
     .decorations(false)
-    .skip_taskbar(true)
-    .build()
-    .map_err(|e| e.to_string())?;
+    // ⭐ İLK TIK DA SAYILSIN (macOS): odakta olmayan bir pencereye yapılan
+    // ilk tık normalde YALNIZ pencereyi öne getirir ve düğmeye ULAŞMAZ.
+    // Mini oynatıcı zaten "üstte duran küçük kumanda" olduğu için her eylem
+    // iki tık istiyordu (ölçüldü: sabitleme düğmesi ilk tıkta tepki vermedi).
+    .accept_first_mouse(true)
+    .skip_taskbar(true);
+    // ⚠️ Kayıtlı konum EKRAN DIŞINDA kalabilir (ikinci monitör çıkarıldı,
+    // çözünürlük değişti). Öyleyse yok sayılır — yoksa mini pencere görünmez
+    // bir yerde açılır ve kullanıcı onu bir daha bulamaz (taskbar'da da yok).
+    if let (Some(px), Some(py)) = (x, y) {
+        if position_on_screen(&app, px, py) {
+            b = b.position(px, py);
+        }
+    }
+    b.build().map_err(|e| e.to_string())?;
     Ok(true)
+}
+
+/// Verilen MANTIKSAL konum herhangi bir monitörün içine düşüyor mu?
+/// (Pencerenin başlık şeridi tıklanabilir kalsın diye sağ/alt kenarda pay var.)
+fn position_on_screen(app: &AppHandle, x: f64, y: f64) -> bool {
+    let Ok(monitors) = app.available_monitors() else {
+        return false;
+    };
+    monitors.iter().any(|m| {
+        let sf = m.scale_factor();
+        let pos = m.position().to_logical::<f64>(sf);
+        let size = m.size().to_logical::<f64>(sf);
+        x >= pos.x - 8.0
+            && y >= pos.y - 8.0
+            && x <= pos.x + size.width - 80.0
+            && y <= pos.y + size.height - 40.0
+    })
+}
+
+/// Mini oynatıcıdaki "ana pencere" düğmesi: ana pencereyi öne getirir
+/// (simge durumundaysa geri açar). Mini taskbar'da görünmediği için ana
+/// pencere gizlenmişse kullanıcının başka dönüş yolu yok.
+#[tauri::command]
+pub async fn focus_main_window(app: AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+    Ok(())
 }
 
 /// Seçilen dosya/klasörleri tarar ve içe aktarılabilir parçaları döndürür.
@@ -536,6 +584,12 @@ pub async fn play_track(
             loop {
                 if done.load(Ordering::Relaxed) {
                     break;
+                }
+                // Kullanıcı başka şarkıya geçtiyse beklemeyi SÜRDÜRMENİN
+                // anlamı yok: kurtarma zaten aşağıda iptal edilecek. Hızlı
+                // atlamalarda her parça için 4 Hz uyanan bir görev bırakırdı.
+                if PLAY_GEN.load(Ordering::SeqCst) != my_gen {
+                    return;
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(250)).await;
             }
@@ -1077,7 +1131,9 @@ pub fn audio_status(audio: State<'_, AudioHandle>) -> AudioStatus {
         position_ms: s.position_ms.load(Ordering::Relaxed),
         duration_ms: s.duration_ms.load(Ordering::Relaxed),
         playing: s.playing.load(Ordering::Relaxed),
-        track_id: s.track_id.lock().unwrap().clone(),
+        // Zehirlenmiş mutex'te `unwrap()` PANİKLER; durum sorgusu her saniye
+        // çağrılıyor → tek panik zincirleme hataya dönerdi.
+        track_id: s.track_id.lock().ok().and_then(|g| g.clone()),
     }
 }
 
@@ -1160,7 +1216,13 @@ pub async fn update_ytdlp(app: AppHandle) -> Result<String, String> {
         if dest.exists() {
             let _ = std::fs::remove_file(&dest);
         }
-        std::fs::rename(&tmp, &dest)?;
+        // ⚠️ Windows'ta o an ÇALIŞAN bir yt-dlp varsa silme/taşıma başarısız
+        // olur. Yarım kalan `.download` dosyasını bırakmayalım: bir dahaki
+        // güncelleme onu "hazır" sanmasın diye temizliyoruz.
+        if let Err(e) = std::fs::rename(&tmp, &dest) {
+            let _ = std::fs::remove_file(&tmp);
+            anyhow::bail!("yt-dlp değiştirilemedi (kullanımda olabilir): {e}");
+        }
         log::info!("yt-dlp güncellendi: {}", dest.display());
 
         // Sürümü öğren (kısa).

@@ -1,6 +1,6 @@
 [package]
 name = "resonance"
-version = "1.8.6"
+version = "1.8.8"
 description = "Hafif, karma tabanlı kişisel müzik oynatıcı"
 authors = ["Wyclaew"]
 license = ""

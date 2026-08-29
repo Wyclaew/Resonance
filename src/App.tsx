@@ -13,6 +13,7 @@ import Toasts from "./components/Toasts";
 import MiniPlayer from "./components/MiniPlayer";
 import { getDb, isTauri } from "./lib/db";
 import { onRemoteApplied, startSync } from "./lib/sync/engine";
+import { getSupabase, wasSignOutIntentional } from "./lib/sync/client";
 import { latestRemoteQueue, localQueueUpdatedAt } from "./lib/deviceQueue";
 import { t } from "./lib/i18n";
 import { useToastStore } from "./store/useToastStore";
@@ -40,6 +41,13 @@ import { useAppStore } from "./store/useAppStore";
 import { useLibraryStore } from "./store/useLibraryStore";
 import { usePlaylistStore } from "./store/usePlaylistStore";
 import { useSettingsStore } from "./store/useSettingsStore";
+import {
+  saveMiniGeometry,
+  toggleMiniPlayer,
+  type MiniCommand,
+  type MiniState,
+} from "./lib/miniPlayer";
+import { voteCurrent } from "./lib/vote";
 
 // ⭐ MİNİ PENCERE: aynı frontend `?mini=1` ile yüklenir ve TAMAMEN farklı
 // (küçük) bir arayüz render eder. Ayrı bir HTML girişi tutmaya gerek yok.
@@ -125,14 +133,50 @@ async function adoptRemoteQueue(): Promise<void> {
     .show(t("sync.resumedFrom", { device: remote.deviceName }), "info");
 }
 
-/** Çalan şarkının bilgisini mini pencereye yolla. */
-async function emitMiniMeta(): Promise<void> {
-  const c = usePlayerStore.getState().current;
-  await emit("mini-meta", {
+/**
+ * Mini pencereye durum gönder.
+ *
+ * Tema/vurgu DOM'dan OKUNUR (ayarlardan yeniden hesaplanmaz): ana pencerede
+ * o an gerçekten uygulanan değer neyse mini de birebir onu alsın — açık temada
+ * vurgunun koyulaştırılması gibi kuralları ikinci kez yazmak zorunda kalmayız.
+ */
+let miniEmitAt = 0;
+let miniEmitTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function emitMiniState(): Promise<void> {
+  // Kısıtla: ses kaydıracı sürüklenirken saniyede onlarca kez tetikleniyor;
+  // her olay TÜM webview'lere serileşip gidiyor. Son durum yine de gider
+  // (kuyruğa alınan çağrı), sadece seyrekleşir.
+  const now = Date.now();
+  if (now - miniEmitAt < 120) {
+    clearTimeout(miniEmitTimer);
+    miniEmitTimer = setTimeout(() => void emitMiniState(), 140);
+    return;
+  }
+  miniEmitAt = now;
+  const p = usePlayerStore.getState();
+  const s = useSettingsStore.getState();
+  const c = p.current;
+  const root = document.documentElement;
+  const nextItem = p.queue[p.queueIndex + 1];
+  const state: MiniState = {
     title: c?.title ?? "",
     artist: c?.artist ?? "",
     thumbnail: c?.thumbnail,
-  });
+    status: p.status,
+    volume: p.volume,
+    muted: p.muted,
+    nextTitle: nextItem?.title ?? "",
+    nextArtist: nextItem?.artist ?? "",
+    canVote: Boolean(c?.playlistId && c?.id),
+    theme: root.getAttribute("data-theme") ?? "dark",
+    accent:
+      getComputedStyle(root).getPropertyValue("--color-accent").trim() ||
+      s.accentColor,
+    lang: s.language,
+    error: p.error ?? undefined,
+  };
+  await emit("mini-state", state);
 }
 
 // Windows mı? (çerçevesiz pencerede sol boşluk/buton yerleşimi için)
@@ -277,18 +321,29 @@ function MainApp() {
         // Bulut senkronu: yalnız yapılandırılmış VE oturum açıksa başlar
         // (aksi halde sessizce hiçbir şey yapmaz — uygulama %100 yerel).
         void startSync();
+        // ⚠️ SENKRON OTURUMU SESSİZCE DÜŞEBİLİYOR (jeton süresi dolar ya da
+        // uygulama çevrimdışı açılır). Eskiden hiçbir şey söylenmiyordu:
+        // kullanıcı senkronun çalıştığını sanıp diğer cihazdaki değişikliklerin
+        // neden gelmediğini anlayamıyordu. Artık haber veriyoruz.
+        const sb = getSupabase();
+        sb?.auth.onAuthStateChange((event) => {
+          if (event === "SIGNED_OUT" && !wasSignOutIntentional()) {
+            useToastStore.getState().show(t("sync.sessionLost"), "error");
+          }
+        });
       })
       .catch((e) => console.error("[resonance] veritabanı hatası:", e));
     initPlayer();
   }, []);
 
   // ⭐ MİNİ PENCERE KÖPRÜSÜ: mini ayrı bir JS bağlamı olduğu için kuyruk
-  // mantığına erişemez; komutları buraya yollar, biz uygularız. Şarkı
-  // değişince de başlık/kapak bilgisini ona geri gönderiyoruz.
+  // mantığına, veritabanına ve ayarlara erişemez; komutları buraya yollar,
+  // biz uygularız. Durumu da `mini-state` ile ona geri iteriz.
   useEffect(() => {
-    const un = listen<{ action: string }>("mini-command", (e) => {
+    const un = listen<MiniCommand>("mini-command", (e) => {
       const p = usePlayerStore.getState();
-      switch (e.payload.action) {
+      const cmd = e.payload;
+      switch (cmd.action) {
         case "toggle":
           p.toggle();
           break;
@@ -298,20 +353,75 @@ function MainApp() {
         case "prev":
           p.prev();
           break;
+        case "seek":
+          p.seek(cmd.ms);
+          break;
+        case "volume":
+          p.setVolume(cmd.value);
+          break;
+        case "mute":
+          p.toggleMute();
+          break;
+        case "vote":
+          // Oy alt bardakiyle AYNI yoldan geçer (ensureTrack + cooldown).
+          void voteCurrent(cmd.dir);
+          break;
+        case "showMain":
+          invoke("focus_main_window").catch(() => {});
+          break;
+        case "geometry":
+          saveMiniGeometry({ x: cmd.x, y: cmd.y, compact: cmd.compact });
+          return; // durum değişmedi, yeniden yayına gerek yok
         case "sync":
-          break; // aşağıdaki efekt zaten meta yolluyor
+          break; // aşağıdaki yayın zaten güncel durumu gönderiyor
       }
-      void emitMiniMeta();
+      void emitMiniState();
     });
     return () => {
       void un.then((f) => f());
     };
   }, []);
 
-  const currentTrack = usePlayerStore((s) => s.current);
+  // Mini'ye durum iten efekt: bağımlılıklar mini'nin GÖSTERDİĞİ her alan.
+  // (Pozisyon burada YOK — o `playback-tick` ile saniyede 4 kez zaten gidiyor.)
+  const miniDeps = usePlayerStore((s) => {
+    const n = s.queue[s.queueIndex + 1];
+    return [
+      s.current?.id,
+      s.status,
+      s.volume,
+      s.muted,
+      s.error,
+      n?.id,
+      Boolean(s.current?.playlistId),
+    ].join("|");
+  });
+  const miniTheme = useSettingsStore((s) => s.theme);
+  const miniAccent = useSettingsStore((s) => s.accentColor);
+  const miniLang = useSettingsStore((s) => s.language);
   useEffect(() => {
-    void emitMiniMeta();
-  }, [currentTrack?.id]);
+    // ⚠️ rAF ŞART: tema/vurgu DOM'a AŞAĞIDAKİ efektlerde yazılıyor ve React
+    // efektleri TANIM SIRASINDA çalıştırıyor → burada doğrudan okusaydık bir
+    // ÖNCEKİ temayı gönderirdik. (Ölçüldü: ana pencere açık temaya geçti,
+    // mini oynatıcı koyu kaldı.) rAF geri çağrısı aynı commit'in TÜM
+    // efektlerinden sonra, boyamadan önce çalışır.
+    const id = requestAnimationFrame(() => void emitMiniState());
+    return () => cancelAnimationFrame(id);
+  }, [miniDeps, miniTheme, miniAccent, miniLang]);
+
+  // ⭐ TEMA/VURGU DOM'DAN İZLENİR. Yukarıdaki efekt yalnız AYAR değişince
+  // çalışır; ama efektif tema ayar sabitken de değişebilir: tema "sistem"
+  // iken macOS/Windows koyu↔açık geçtiğinde `data-theme` güncellenir, hiçbir
+  // ayar değişmez ve mini eski temada kalırdı. Kök öğedeki `data-theme` ve
+  // inline `style` (vurgu rengi) değişimlerini izleyip yeniden yayınlıyoruz.
+  useEffect(() => {
+    const obs = new MutationObserver(() => void emitMiniState());
+    obs.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme", "style"],
+    });
+    return () => obs.disconnect();
+  }, []);
 
   // Uzaktan (diğer cihazdan) veri geldiğinde listeleri tazele — kullanıcı
   // Ayarlar'a girip elle yenilemek zorunda kalmasın.
@@ -421,7 +531,7 @@ function MainApp() {
           break;
         case "KeyP":
           // Mini oynatıcı (küçük, hep üstte pencere).
-          if (e.shiftKey) invoke("toggle_mini_player").catch(() => {});
+          if (e.shiftKey) void toggleMiniPlayer();
           break;
       }
     }

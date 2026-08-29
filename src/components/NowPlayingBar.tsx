@@ -19,17 +19,17 @@ import {
   Loader2,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { usePlayerStore, DISCOVERY_ID } from "../store/usePlayerStore";
 import { useAppStore } from "../store/useAppStore";
-import { useToastStore } from "../store/useToastStore";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { formatMs } from "../lib/format";
 import { isTauri } from "../lib/db";
 import { useT } from "../lib/i18n";
 import { reasonText } from "../lib/recommender";
 import { useSettingsStore } from "../store/useSettingsStore";
-import { getTrackKarma, voteTrack, undoVote, ensureTrack } from "../lib/playlists";
+import { getTrackKarma } from "../lib/playlists";
+import { voteCurrent, KARMA_EVENT, type KarmaEventDetail } from "../lib/vote";
+import { toggleMiniPlayer } from "../lib/miniPlayer";
 import AddToPlaylistButton from "./AddToPlaylistButton";
 import KarmaControl from "./KarmaControl";
 import SleepTimerButton from "./SleepTimerButton";
@@ -70,7 +70,6 @@ export default function NowPlayingBar() {
   const inDiscovery = radioPlaylistId === DISCOVERY_ID;
   const showQueueButton = !inDiscovery && shuffleMode !== "off";
   const navigate = useAppStore((s) => s.navigate);
-  const showToast = useToastStore((s) => s.show);
 
   // Çalan şarkının indirme durumu (alt bardan indir/kaldır).
   const downloaded = useLibraryStore((s) =>
@@ -97,49 +96,20 @@ export default function NowPlayingBar() {
     }
   }, [current?.id, playlistId]);
 
-  async function handleVote(dir: 1 | -1) {
-    if (!playlistId || !current?.id) return;
-    try {
-      // Parçayı `tracks`'e yaz — YOKSA OY SAYILMAZ. recommender.ts oyları
-      // `votes v JOIN tracks t` ile okuyor; Keşfet'ten gelen parça hiçbir
-      // listede olmadığı için `tracks`'te de yoktu → INNER JOIN oyu düşürüyordu,
-      // yani Keşfet'te oy vermek öğrenmeye HİÇ etki etmiyordu.
-      // Bu yalnızca metadata satırı: parça bir listeye ya da İndirilenler'e
-      // (cache.downloaded=1 şartı var) EKLENMEZ — sadece öğrenme sinyali sayılır.
-      // ensureTrack ON CONFLICT DO UPDATE kullanır (INSERT OR REPLACE değil →
-      // cascade tetiklenmez, bkz. CLAUDE.md gotcha #12).
-      await ensureTrack({
-        id: current.id,
-        source: current.source,
-        sourceId: current.sourceId,
-        title: current.title,
-        artist: current.artist,
-        album: current.album,
-        durationMs: current.durationMs,
-        thumbnail: current.thumbnail,
-      });
-      const res = await voteTrack(playlistId, current.id, dir);
-      if (!res.ok) {
-        const mins = Math.ceil(res.cooldownRemainingMs / 60_000);
-        showToast(t("player.voteCooldown", { mins }), "info");
-        return;
-      }
-      const k = await getTrackKarma(playlistId, current.id);
-      setKarma({ karma: k.karma, lastVoteAt: k.lastVoteAt });
-      // "Geri al" — yanlış oy düzeltme.
-      const pid = playlistId;
-      const tid = current.id;
-      showToast(dir > 0 ? t("player.liked") : t("player.disliked"), "info", {
-        label: t("player.undo"),
-        fn: async () => {
-          await undoVote(pid, tid);
-          const k2 = await getTrackKarma(pid, tid);
-          setKarma({ karma: k2.karma, lastVoteAt: k2.lastVoteAt });
-        },
-      });
-    } catch {
-      /* yoksay */
+  // Mini oynatıcıdan (ya da başka bir yoldan) oy verilirse gösterge tazelensin.
+  useEffect(() => {
+    function onKarma(e: Event) {
+      const d = (e as CustomEvent<KarmaEventDetail>).detail;
+      if (d.trackId !== current?.id || d.playlistId !== playlistId) return;
+      setKarma({ karma: d.karma, lastVoteAt: d.lastVoteAt });
     }
+    window.addEventListener(KARMA_EVENT, onKarma);
+    return () => window.removeEventListener(KARMA_EVENT, onKarma);
+  }, [current?.id, playlistId]);
+
+  async function handleVote(dir: 1 | -1) {
+    // Ortak yol: `src/lib/vote.ts` (ensureTrack + cooldown + geri al).
+    await voteCurrent(dir, setKarma);
   }
 
   const isPlaying = status === "playing";
@@ -349,7 +319,7 @@ export default function NowPlayingBar() {
           </button>
         )}
         <button
-          onClick={() => invoke("toggle_mini_player").catch(() => {})}
+          onClick={() => void toggleMiniPlayer()}
           title={t("player.miniPlayer")}
           className="text-muted hover:text-text"
         >

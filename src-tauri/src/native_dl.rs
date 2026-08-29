@@ -621,7 +621,13 @@ fn fetch_chunk(
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Çalmaya başlamadan önce beklenen en az çıktı (~6 sn @128k).
-const MIN_START_BYTES: u64 = 96 * 1024;
+// ⭐ ÖN TAMPON. Eskiden 96 KB idi ≈ 128k'lik seste yalnız **6 saniye**.
+// İndirme 6 saniyeden uzun takılırsa (Windows'ta 403 retry'ları yüzünden sık)
+// okuyucu yazıcıya YETİŞİYOR; `GrowingFile::read` veri gelene kadar bekliyor ve
+// bu bekleme SES CALLBACK'İNİN İÇİNDE oluyor → cızırtı/kesilme. Kullanıcının
+// "ses kalitesi bok gibi" dediği tablonun teknik karşılığı bu.
+// 448 KB ≈ 28 saniyelik yastık; hızlı bağlantıda maliyeti ~0.15 sn.
+const MIN_START_BYTES: u64 = 448 * 1024;
 /// Bu süre içinde yeterli veri gelmezse progressive'den vazgeç.
 const START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
 
@@ -669,7 +675,8 @@ impl std::io::Read for GrowingFile {
             if self.done.load(std::sync::atomic::Ordering::Relaxed) {
                 return self.file.read(buf);
             }
-            std::thread::sleep(std::time::Duration::from_millis(25));
+            // Bekleme ses callback'ini bloklar; kısa tut ki kesinti duyulmasın.
+            std::thread::sleep(std::time::Duration::from_millis(4));
         }
     }
 }
@@ -756,7 +763,13 @@ pub fn stream_to_adts(
             if let Some(stem) = dest_w.file_name().and_then(|f| f.to_str()) {
                 if let Some(id) = stem.strip_suffix(".stream.aac") {
                     let final_path = dest_w.with_file_name(format!("{id}.aac"));
-                    if let Err(e) = std::fs::copy(&dest_w, &final_path) {
+                    // ⚠️ Zaten varsa DOKUNMA: akış zaman aşımına uğrayıp normal
+                    // yola düşüldüyse aynı dosyayı `ensure_audio` da yazmış
+                    // olabilir ve ses motoru onu AÇMIŞ olabilir. Windows'ta
+                    // açık dosyanın üzerine kopyalamak başarısız olur.
+                    if final_path.exists() {
+                        log::debug!("akış çıktısı zaten önbellekte: {id}");
+                    } else if let Err(e) = std::fs::copy(&dest_w, &final_path) {
                         log::warn!("akış dosyası önbelleğe alınamadı: {e}");
                     }
                 }

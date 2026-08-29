@@ -137,7 +137,7 @@ export default function DiscoverView() {
     return (
       <button
         onClick={() => toggleFilter(id)}
-        className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
+        className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs transition-colors ${
           on
             ? "border-accent bg-accent/15 text-accent"
             : "border-border text-muted hover:border-muted hover:text-text"
@@ -157,7 +157,7 @@ export default function DiscoverView() {
           onClick={() => void saveQueue()}
           disabled={saving || queue.length === 0}
           title={t("discover.saveQueue")}
-          className="flex items-center gap-1.5 rounded-md bg-surface-2 px-3 py-2 text-sm text-muted transition-colors hover:text-text disabled:opacity-40"
+          className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-surface-2 px-3 py-2 text-sm text-muted transition-colors hover:text-text disabled:opacity-40"
         >
           <ListPlus size={14} />
           {t("discover.saveQueue")}
@@ -172,7 +172,7 @@ export default function DiscoverView() {
           title={
             draft.length > 0 ? t("discover.randomBlocked") : t("discover.random")
           }
-          className="flex items-center gap-1.5 rounded-md bg-surface-2 px-3 py-2 text-sm text-muted transition-colors hover:text-text disabled:opacity-40"
+          className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-surface-2 px-3 py-2 text-sm text-muted transition-colors hover:text-text disabled:opacity-40"
         >
           <Shuffle size={14} />
           {t("discover.random")}
@@ -192,7 +192,7 @@ export default function DiscoverView() {
           title={
             draft.length === 0 ? t("discover.pickFilterFirst") : t("discover.apply")
           }
-          className={`flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium transition-opacity disabled:opacity-40 ${
+          className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-4 py-2 text-sm font-medium transition-opacity disabled:opacity-40 ${
             draft.length === 0
               ? "bg-surface-2 text-faint"
               : "bg-accent text-bg"

@@ -262,10 +262,32 @@ async function applyTrackGain(item: QueueItem): Promise<void> {
   pushVolume();
 }
 
+// ⭐ YÜKLEME BEKÇİSİ. `play_track` Rust tarafında dört katmanlı indirme +
+// alternatif kaynak arayabildiği için uzun sürebilir; ama SONSUZA KADAR
+// sürmemeli. Süre aşılırsa durumu "paused"a çekiyoruz — yoksa arayüz
+// "loading"de kilitleniyor ve `toggle()` orada erken döndüğü için
+// OYNAT TUŞU TAMAMEN ÖLÜYORDU (Windows'ta yaşanan tablo).
+const LOAD_TIMEOUT_MS = 45_000;
+let loadWatchdog: ReturnType<typeof setTimeout> | undefined;
+let loadingSince = 0;
+
 function loadAndPlay(item: QueueItem, startMs = 0) {
   if (!isTauri()) return;
   hasLoaded = true;
   const myToken = ++currentLoadToken;
+  loadingSince = Date.now();
+  clearTimeout(loadWatchdog);
+  loadWatchdog = setTimeout(() => {
+    const st = usePlayerStore.getState();
+    if (myToken !== currentLoadToken || st.status !== "loading") return;
+    useToastStore.getState().show(t("player.loadStuck"), "error");
+    // ⚠️ `hasLoaded`'ı da geri al: ses motoruna hiçbir şey ULAŞMADI. Aksi
+    // hâlde sonraki play basışı `audio_play` çağırıp durumu "çalıyor" yapar
+    // ama ortada çalacak bir şey olmadığı için SESSİZ kalırdı (v1.8.5'te
+    // düzeltilen tuzağın aynısı).
+    hasLoaded = false;
+    usePlayerStore.setState({ status: "paused" });
+  }, LOAD_TIMEOUT_MS);
   // Yeni parçada eski kazancı hemen bırak: ölçüm gelene kadar kullanıcının
   // kendi seviyesi geçerli olsun (aksi hâlde önceki şarkının düzeltmesi
   // yenisine uygulanır ve ses fırlar).
@@ -296,6 +318,7 @@ function loadAndPlay(item: QueueItem, startMs = 0) {
     .then(() => {
       // play_track döndüyse dosya cache'te hazır demektir → ölçülebilir.
       if (myToken !== currentLoadToken) return;
+      clearTimeout(loadWatchdog);
       void applyTrackGain(item);
     })
     .catch((e) => {
@@ -304,6 +327,7 @@ function loadAndPlay(item: QueueItem, startMs = 0) {
       // İndirilemeyen şarkı (silinmiş/geçici hata) kuyruğu TIKAMASIN: sıradaki
       // varsa atla. Art arda çok hata olursa dur ki sonsuz döngü olmasın.
       console.error("[resonance] play_track hatası:", e);
+      clearTimeout(loadWatchdog);
       const st = usePlayerStore.getState();
       loadFailCount++;
       if (
@@ -317,6 +341,8 @@ function loadAndPlay(item: QueueItem, startMs = 0) {
         useToastStore
           .getState()
           .show(`Şarkı yüklenemedi — ${String(e)}`, "error");
+        // Motorda yüklü bir şey yok → sonraki play yeniden YÜKLEMELİ.
+        hasLoaded = false;
         usePlayerStore.setState({ status: "idle", error: String(e) });
       }
     });
@@ -332,6 +358,10 @@ let loadFailCount = 0;
 let loadTimer: ReturnType<typeof setTimeout> | undefined;
 let prefetchTimer: ReturnType<typeof setTimeout> | undefined;
 function scheduleLoad(item: QueueItem, startMs = 0, immediate = false) {
+  // Yeni yükleme = eski hata geçersiz. `error` yalnız playNow türü girişlerde
+  // temizleniyordu; atlama/geri/jump yollarında SON hata takılı kalıyor ve
+  // mini oynatıcı çalan şarkının altında eski hatayı göstermeye devam ediyordu.
+  if (usePlayerStore.getState().error) usePlayerStore.setState({ error: null });
   clearTimeout(loadTimer);
   // ⭐ 180 ms'lik debounce KULLANICI hızlı hızlı şarkı geçerken gereklidir;
   // ama şarkı KENDİ bitince beklemenin anlamı yok — o gecikme doğrudan
@@ -344,6 +374,10 @@ function scheduleLoad(item: QueueItem, startMs = 0, immediate = false) {
 }
 
 let sleepTimeout: ReturnType<typeof setTimeout> | undefined;
+// ⚠️ Fade'in BAŞLAMA zamanlayıcısı da tutulmalı: tutulmazsa iptal edilen bir
+// zamanlayıcının fade'i, sonradan kurulan YENİ zamanlayıcının ortasında
+// tetikleniyordu (sesi kendiliğinden kısılan, dakikalarca geri gelmeyen müzik).
+let sleepFadeStart: ReturnType<typeof setTimeout> | undefined;
 let sleepFade: ReturnType<typeof setInterval> | undefined;
 let sleepBaseVolume = 0;
 /** Fade sırasında kısılan sesi kullanıcının seviyesine geri getirir. */
@@ -776,6 +810,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   sleepTimerEndsAt: null,
   setSleepTimer: (minutes) => {
     clearTimeout(sleepTimeout);
+    clearTimeout(sleepFadeStart);
     clearInterval(sleepFade);
     set({ sleepAfterTrack: false });
     if (minutes == null) {
@@ -793,7 +828,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const fadeSec = useSettingsStore.getState().sleepFadeSeconds;
     if (fadeSec > 0 && ms > fadeSec * 1000) {
       const fadeStart = ms - fadeSec * 1000;
-      setTimeout(() => {
+      sleepFadeStart = setTimeout(() => {
         const st = get();
         if (!st.sleepTimerEndsAt) return; // iptal edilmiş
         sleepBaseVolume = st.volume;
@@ -809,6 +844,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
     sleepTimeout = setTimeout(() => {
       if (isTauri()) invoke("audio_pause").catch(() => {});
+      clearTimeout(sleepFadeStart);
       clearInterval(sleepFade);
       set({ status: "paused", sleepTimerEndsAt: null });
       restoreVolumeAfterSleep();
@@ -820,6 +856,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   sleepAfterTrack: false,
   setSleepAfterTrack: (on) => {
     clearTimeout(sleepTimeout);
+    clearTimeout(sleepFadeStart);
     clearInterval(sleepFade);
     restoreVolumeAfterSleep();
     set({ sleepAfterTrack: on, sleepTimerEndsAt: null });
@@ -1242,7 +1279,18 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     // durumu "playing" yapıyordu — ama ses motoruna henüz HİÇBİR ŞEY
     // yüklenmediği için ses gelmiyor, tick de akmıyordu: oynatıcı "çalıyor"
     // görünüp sessiz kalıyordu. Yükleme bitene kadar basışı yut.
-    if (status === "loading") return;
+    if (status === "loading") {
+      // ⚠️ AMA SONSUZA KADAR DEĞİL: yükleme takıldıysa (ağ hatası, ölü
+      // yt-dlp süreci) bu erken dönüş oynat tuşunu KALICI olarak öldürüyordu.
+      // Birkaç saniye sonra ikinci basış "yeniden dene" anlamına gelir.
+      const stuckFor = Date.now() - loadingSince;
+      if (stuckFor < 4000) return;
+      const again = get().current ?? get().queue[get().queueIndex];
+      if (!again) return;
+      useToastStore.getState().show(t("player.retrying"), "info");
+      scheduleLoad(again, get().positionMs, true);
+      return;
+    }
 
     // Kuyruk var ama `current` boşsa (bazı geri yükleme yolları yalnız kuyruğu
     // kuruyor) play tuşu SESSİZCE hiçbir şey yapmıyordu.
@@ -1406,10 +1454,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     const nq = [...queue];
     const [moved] = nq.splice(from, 1);
     nq.splice(to, 0, moved);
-    const nextIndex = current
-      ? nq.findIndex((i) => i.uid === current.uid)
-      : get().queueIndex;
-    set({ queue: nq, queueIndex: nextIndex });
+    // ⚠️ findIndex -1 dönerse indeks BOZULUR (queue[-1] = undefined → sonraki
+    // yükleme çöker). Bulunamazsa eski indekste kal.
+    const found = current ? nq.findIndex((i) => i.uid === current.uid) : -1;
+    set({ queue: nq, queueIndex: found >= 0 ? found : get().queueIndex });
   },
 
   seek: (ms) => {
@@ -1521,7 +1569,16 @@ export async function initPlayer() {
       if (playing && duration_ms > 0) {
         const fadeMs = crossfadeMs();
         const remain = duration_ms - position_ms;
-        if (fadeMs > 0 && remain > 0 && remain <= fadeMs && !crossfadeArmed) {
+        // ⚠️ "Şarkı bitince dur" AÇIKSA crossfade ile erken geçme: geçiş
+        // `track-ended` yerine buradan olurdu ve uyku isteği SESSİZCE
+        // yok sayılıp müzik devam ederdi.
+        if (
+          fadeMs > 0 &&
+          remain > 0 &&
+          remain <= fadeMs &&
+          !crossfadeArmed &&
+          !s.sleepAfterTrack
+        ) {
           crossfadeArmed = true;
           // "ended" olarak say: bu kullanıcının ATLAMASI değil, şarkı bitti.
           usePlayerStore.getState().next("ended");
@@ -1529,6 +1586,17 @@ export async function initPlayer() {
       }
     }
   );
+
+  // ⚠️ ÇIKIŞ CİHAZI MÜZİĞE UYGUN DEĞİLSE KULLANICIYA SÖYLE.
+  // Oyuncu kulaklıkları mikrofon/sohbet modundayken işletim sistemine yalnız
+  // "16 kHz mono" sunabiliyor; o anda açılan uygulama müziği telefon
+  // kalitesinde çalar. Sebebi görünmediği için "uygulamanın sesi bozuk"
+  // sanılıyordu (ÖLÇÜLDÜ: Arctis Nova 5, 16000 Hz 1 kanal).
+  await listen<string>("audio-output-warning", (e) => {
+    useToastStore
+      .getState()
+      .show(t("player.poorOutput", { info: e.payload }), "error");
+  });
 
   await listen("track-ended", () => {
     const st = usePlayerStore.getState();

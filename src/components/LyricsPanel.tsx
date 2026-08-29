@@ -5,19 +5,62 @@ import { useT } from "../lib/i18n";
 import { useAppStore } from "../store/useAppStore";
 import { fetchLyrics, type LrcLine } from "../lib/lyrics";
 
+// Satır, söylenmeye başlamadan bu kadar önce "aktif" olur. Küçük bir öndelik
+// doğru hissettiriyor; büyük olursa satır erken atlar.
+const LEAD_MS = 120;
+
 function findActive(lines: LrcLine[], posMs: number): number {
   let idx = -1;
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i].timeMs <= posMs + 250) idx = i;
+    if (lines[i].timeMs <= posMs + LEAD_MS) idx = i;
     else break;
   }
   return idx;
 }
 
+/**
+ * Çalma pozisyonunu tick'ler ARASINDA da ilerleten saat.
+ *
+ * ⚠️ NEDEN GEREKLİ: `positionMs` yalnız 250 ms'de bir güncelleniyor
+ * (`playback-tick`). Karaoke dolgusu doğrudan ona bağlıydı → hem basamak
+ * basamak ilerliyor hem de ORTALAMA 125 ms, en kötü hâlde 250 ms GERİDEN
+ * geliyordu. Kullanıcının "efekt şarkıdan geride" dediği şey buydu.
+ * Tick geldiğinde saat eşitlenir, aradaki süre yerel saatle doldurulur.
+ */
+function useSmoothPosition(): number {
+  const positionMs = usePlayerStore((s) => s.positionMs);
+  const playing = usePlayerStore((s) => s.status === "playing");
+  const [smooth, setSmooth] = useState(positionMs);
+  const anchor = useRef({ pos: positionMs, at: 0 });
+
+  useEffect(() => {
+    anchor.current = { pos: positionMs, at: performance.now() };
+    setSmooth(positionMs);
+  }, [positionMs]);
+
+  useEffect(() => {
+    if (!playing) return;
+    let raf = 0;
+    let last = 0;
+    const step = (now: number) => {
+      raf = requestAnimationFrame(step);
+      if (now - last < 33) return; // ~30 fps yeter, boşuna render etme
+      last = now;
+      const a = anchor.current;
+      // Tick gecikirse ileri kaçmayalım: en fazla bir tick kadar tahmin.
+      setSmooth(a.pos + Math.min(performance.now() - a.at, 400));
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [playing]);
+
+  return playing ? smooth : positionMs;
+}
+
 export default function LyricsPanel() {
   const t = useT();
   const current = usePlayerStore((s) => s.current);
-  const positionMs = usePlayerStore((s) => s.positionMs);
+  const positionMs = useSmoothPosition();
   const seek = usePlayerStore((s) => s.seek);
   const toggleLyrics = useAppStore((s) => s.toggleLyrics);
 

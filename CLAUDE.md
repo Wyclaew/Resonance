@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.8.6** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.8.8** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,103 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.8.8 (SES KALİTESİ + WINDOWS KİLİTLENMELERİ):
+• **⭐⭐ "SES KALİTESİ REZİL" — SUÇLU UYGULAMA DEĞİL, ÇIKIŞ CİHAZININ MODU.**
+  ÖLÇÜLDÜ (log kanıtı): `ses çıkışı: SteelSeries Arctis Nova 5 @ 16000 Hz,
+  1 kanal`. Oyuncu kulaklıkları mikrofon/sohbet kanalı açıkken işletim
+  sistemine YALNIZCA "16 kHz MONO" sunuyor; rodio `try_default()` cihazın
+  varsayılanını aldığı için uygulama o OTURUM BOYUNCA müziği telefon
+  kalitesinde çalıyordu. "Bir terminalden açınca iyi, diğerinden kötü"
+  gözlemi bundandı — kod değil, cihazın o andaki modu belirliyordu.
+  Çözüm üç parça: (1) `music_config()` — varsayılan yapılandırma <44.1 kHz
+  ise cihazın desteklediği 48/44.1 kHz olan SEÇİLİR; (2) cihaz sonradan
+  müzik moduna dönerse bir sonraki şarkıda çıkış YENİDEN KURULUR (ölçüldü:
+  "çıkış 16000 Hz → 48000 Hz yeniden kuruldu"); (3) hâlâ düşükse kullanıcıya
+  toast ile söylenir (`audio-output-warning`) — sebebi görünmediği için
+  "uygulamanın sesi bozuk" sanılıyordu.
+  ⚠️ **İNDİRİLEN DOSYALARDA SORUN YOK — ÖLÇÜLDÜ**: 46 önbellek dosyasının
+  HEPSİ 44.1 kHz / 130-134 kbps (YouTube'un verdiği en iyi ses; itag 251
+  Opus da 133k ama symphonia opus çözemiyor). Çalma zinciri de şeffaf:
+  rodio'nun kendi çözücü+yeniden örnekleyicisiyle üretilen PCM,
+  ffmpeg'inkiyle 17 kHz üstü enerjide **0.01 dB** fark veriyor
+  (`src-tauri/examples/audio_probe.rs` — kalite şikâyetinde İLK bakılacak
+  araç; `--config` ile cihazın sunduğu yapılandırmaları yazar).
+• **⭐ WINDOWS'TA OYNAT TUŞU ÖLÜYORDU.** `toggle()` "loading" iken erken
+  dönüyor (v1.8.5) ama yükleme SONSUZA KADAR sürebiliyordu → düğme kalıcı
+  işlevsiz. Üç katman: (1) yt-dlp/ffmpeg çağrılarının HEPSİ zaman aşımlı
+  (`output_timeout`: bilgi 120 sn, indirme 240 sn, ffmpeg 180 sn) +
+  `--socket-timeout 20`; (2) 45 sn'lik yükleme bekçisi durumu "paused"a
+  çeker; (3) 4 sn'yi geçen yüklemede İKİNCİ BASIŞ "yeniden dene" olur.
+• **Sözlerde karaoke dolgusu 250 ms geriden geliyordu**: `positionMs` yalnız
+  `playback-tick` ile (250 ms) güncelleniyor, dolgu doğrudan ona bağlıydı.
+  Artık tick'ler ARASI yerel saatle dolduruluyor (`useSmoothPosition`, rAF,
+  ~30 fps) → hem pürüzsüz hem gecikmesiz.
+• **Akışta cızırtı riski**: ön tampon 96 KB (~6 sn) → **448 KB (~28 sn)** ve
+  bağlantı sağlıksızsa (`native_dl::health`) akış yolu HİÇ kullanılmıyor.
+  ⚠️ `GrowingFile::read` beklemesi SES CALLBACK'İNİN İÇİNDE oluyor: tampon
+  biterse ses motoru bloklanır ve cızırtı/kesinti duyulur.
+• **Dar pencerede düğmelerin "ağzı yüzü kayıyordu"** (`ViewHeader`): başlık
+  bloğu `min-w-0`+truncate, aksiyonlar sıkışmak yerine alt satıra sarıyor,
+  Keşfet düğmelerinde `whitespace-nowrap`.
+• **Senkron oturumu SESSİZCE düşüyordu**: jeton süresi dolunca ya da
+  uygulama çevrimdışı açılınca supabase-js oturumu temizliyor; kullanıcı
+  senkronun çalıştığını sanıp "değişiklikler neden gelmiyor" diyordu.
+  Oturum ÇALIŞIRKEN düşerse artık uyarı çıkıyor (`onAuthStateChange` →
+  beklenmedik `SIGNED_OUT`; kullanıcının kendi çıkışı ayırt ediliyor).
+  ⚠️ Açılışta zaten oturumsuz gelen cihaz için ayrıca uyarı DENENDİ ama
+  toast görünmedi (sebep bulunamadı) → kaldırıldı; o durumu profil satırı
+  ("Giriş yapılmadı") zaten gösteriyor.
+• yt-dlp güncellemesi Windows'ta ikili KULLANIMDAYKEN başarısız olursa artık
+  yarım `.download` dosyası bırakmıyor.
+v1.8.7 (MİNİ OYNATICI 2.0 + BUG TURU 3):
+• **MİNİ OYNATICI GELİŞTİ**: tıkla-sürükle ilerleme çubuğu, ses kaydıracı,
+  beğen/beğenme, "Sıradaki" satırı, yükleniyor/hata göstergesi, kompakt↔geniş
+  iki boy, hep-üstte aç/kapa, "ana pencereyi göster", bulanık kapak arka planı
+  ve **KONUM + BOY
+  HATIRLANIR** (`mini.geometry`, senkron DIŞI). Kayıtlı konum ekran dışındaysa
+  YOK SAYILIR (`position_on_screen`) — yoksa mini görünmeyen bir yerde açılır
+  ve taskbar'da olmadığı için bir daha bulunamazdı.
+• **⚠️ MİNİ TEMAYI/DİLİ HİÇ GÖRMÜYORDU**: ayrı JS bağlamı ayarları yüklemez →
+  kullanıcı açık temada/İngilizce olsa bile mini KOYU ve varsayılan dilde
+  kalıyordu. Artık ana pencere `mini-state` ile o an UYGULANAN tema/vurgu/dili
+  de itiyor (sözleşme: `src/lib/miniPlayer.ts`).
+• **⚠️ REACT EFEKT SIRASI TUZAĞI** (CLAUDE.md'deki "isLight'ı DOM'dan OKUMA"
+  uyarısının kardeşi): durum yayını efekti tema efektinden ÖNCE çalıştığı için
+  mini BİR TEMA GERİDE kalıyordu (ölçüldü: ana pencere açık temaya geçti, mini
+  koyu kaldı). Çözüm: yayın `requestAnimationFrame` ile commit sonrasına
+  ertelendi + kök öğedeki `data-theme`/`style` bir **MutationObserver** ile
+  izleniyor (tema "sistem" iken OS koyu↔açık geçişi HİÇBİR ayarı değiştirmez,
+  yalnız DOM değişir).
+• **⛔ MİNİ PENCEREDE KLAVYE macOS'TA ÇALIŞMIYOR** (ölçüldü, kod duruyor):
+  çerçevesiz + hep-üstte pencere `keydown`'ı webview'e hiç geçirmiyor.
+  Denenenler ve HİÇBİRİ İŞE YARAMADI: `setFocus()`, kök öğeye `tabIndex` +
+  `focus()`, `accept_first_mouse`'u kapatmak. Kısayol kodu (boşluk/oklar/
+  N/P/M/Esc) yerinde bırakıldı — Windows'ta muhtemelen çalışır ama SINANMADI.
+  Fare kontrollerinin tamamı çalışıyor; yeni özellik eklerken klavyeye
+  GÜVENME.
+• **⚠️ macOS'ta İLK TIK YUTULUYORDU**: odakta olmayan pencereye yapılan ilk tık
+  yalnız pencereyi öne getirir → mini'de her eylem İKİ tık istiyordu (ölçüldü:
+  sabitleme düğmesi ilk tıkta tepkisiz). `accept_first_mouse(true)`.
+• **OY VERME TEK YERDE** (`src/lib/vote.ts`): alt bar ve mini aynı yoldan
+  geçer. İkinci bir kopya olsaydı `ensureTrack` unutulduğunda oy SESSİZCE
+  sayılmazdı (gotcha #13). Karma göstergesi `resonance:karma` olayıyla tazelenir.
+• **⚠️ SES CİHAZI AÇILIŞTA YOKSA THREAD ÖLÜYORDU** (`expect("sink")` kalıntısı):
+  Windows'ta otomatik başlatma ile açılan uygulama Bluetooth kulaklık
+  bağlanmadan ayağa kalkıyor → o oturumda BİR DAHA hiçbir şey çalmıyordu.
+  Artık cihaz gelene kadar beklenir; çalarken cihaz kaybolursa ses çıkışı
+  YENİDEN kurulur.
+• **Mutex zehirlenmesi** (indirme kilidi, ses kalitesi, medya oturumu,
+  `audio_status`): tek panik zincirleme panige dönüşüyordu.
+• **Uyku zamanlayıcı**: iptal edilen zamanlayıcının fade'i, sonradan kurulan
+  YENİ zamanlayıcının ortasında tetikleniyordu → müziğin sesi kendiliğinden
+  kısılıyor ve dakikalarca geri gelmiyordu (`sleepFadeStart` artık iptal edilir).
+• **Crossfade açıkken "şarkı bitince dur" SESSİZCE yok sayılıyordu**: geçiş
+  `track-ended` yerine tick'ten yapıldığı için uyku isteği hiç görülmüyordu.
+• Yeni yükleme eski `playback-error`'ı temizler (mini'de eski hata takılıydı).
+• `moveInQueue`'da `findIndex` -1 dönerse kuyruk indeksi bozuluyordu.
+• Akış zaman aşımından sonra tamamlanan indirme, `ensure_audio`'nun yazdığı
+  dosyanın ÜZERİNE kopyalamaya çalışıyordu (Windows'ta açık dosya hatası).
+• Akış kurtarma görevi, kullanıcı şarkı değiştirince erken bırakır.
 v1.8.6 (BUG TURU 2 — "şarkı 35-40. sn'de atlıyor" KÖKÜNDEN çözüldü):
 • **KOPAN AKIŞ "BİTİŞ" SAYILIYORDU.** v1.8.5'te adres doğrulama ve kurtarma
   eklendi ama ses motoru hâlâ kopmayı göremiyordu: yarım dosyanın sonuna gelen
@@ -244,10 +341,17 @@ sonra `cd src-tauri && cargo check --target x86_64-pc-windows-gnu`. Bitince saht
   audio_play/pause/seek/stop/set_volume/status.
 - **Yerel indirici** (`native_dl.rs`): InnerTube URL çözümü + Range'li, devam edebilen indirici (3 katmanlı akışın 1. ve 2. katmanı).
 - **Ses motoru** (`audio.rs`): rodio Sink, AudioCmd kanalı, `catch_unwind` ile çözümleme paniğine dayanıklı.
+  ⚠️ **ÇIKIŞ YAPILANDIRMASINI KENDİ SEÇER** (`music_config`): cihazın varsayılanı
+  <44.1 kHz ise (kulaklık sohbet modunda 16 kHz mono) desteklenen 48/44.1 kHz
+  seçilir, olmazsa kullanıcı uyarılır. Kalite şikâyetinde İLK bakılacak yer.
   `Load{start_ms}` ile kaldığın yerden devam.
 - **yt-dlp/ffmpeg** (`ytdlp.rs`): `resolve_bin()` sırası → sistem → **app_data/bin (runtime güncellenen)** →
   sidecar → PATH.
 - **Öneri** (`src/lib/recommender.ts`): tek skorlama modeli (aşağıda ayrı bölüm).
+- **Mini oynatıcı köprüsü** (`src/lib/miniPlayer.ts`): iki pencerenin ORTAK sözleşmesi
+  (`MiniState` / `MiniCommand` tipleri, boyutlar, konum kaydı). Mini ayrı JS bağlamıdır:
+  store/DB/ayar GÖREMEZ → durum ana pencereden `mini-state` ile iter, eylemler
+  `mini-command` ile geri gelir. Oy verme `src/lib/vote.ts` üzerinden ORTAKtır.
 - **Senkron** (`src/lib/sync/`, v1.3.0): Supabase tabanlı bulut senkronu (aşağıda ayrı bölüm).
 - **DB tabloları:** tracks, playlists, playlist_tracks(+vote), votes (olay günlüğü), play_history,
   cache(+downloaded), settings, **recommendation_history**, **sync_state**.
@@ -478,7 +582,12 @@ Tüm sinyaller tek skorda birleşir:
     (Spotify görünümü). AMA pencere artık YALNIZ `data-tauri-drag-region`'dan taşınır ve bu
     **`core:window:allow-start-dragging` iznini** gerektirir — `core:default` bunu KAPSAMAZ.
     İzin yoksa pencere hiç hareket etmez (sessizce; hata da vermez). İzin
-    `capabilities/default.json`'da. Sürükleme şeridi App.tsx'in en üstünde (h-7, sol 5rem
+    `capabilities/default.json`'da.
+    ⚠️ **`core:default` yalnız OKUYUCU pencere komutlarını kapsar** (konum/boy
+    sorgulama, monitör listesi); DEĞİŞTİRENLER tek tek verilmeli. Mini
+    oynatıcının boy değiştirmesi `core:window:allow-set-size`, hep-üstte
+    aç/kapa `core:window:allow-set-always-on-top` ister — eksikse çağrı
+    reddedilir ve düğme sessizce işlevsiz görünür. Sürükleme şeridi App.tsx'in en üstünde (h-7, sol 5rem
     boşluk trafik ışıkları için). Windows'ta `decorations:false` + özel min/max/kapat
     butonları gerekir — YAPILMADI, test edilemedi.
 20. **⭐ İKON: macOS ve Windows AYRI kaynaklardan üretilir.**

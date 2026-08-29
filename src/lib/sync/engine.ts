@@ -73,7 +73,8 @@ export const SYNCED_SETTING_KEYS = new Set([
 // device_queue tablosu taşır), playback.savedVolume / rememberVolume,
 // profile.avatarDataUrl, yt.cookiesBrowser (tarayıcı cihaza göre değişir),
 // spotify.clientId/Secret (gizli anahtar buluta düz metin gitmesin),
-// app.onboardingDone (yeni cihazda rehber görünsün).
+// app.onboardingDone (yeni cihazda rehber görünsün), mini.geometry (mini
+// oynatıcının konumu — ekran düzeni cihaza göre değişir).
 const SETTINGS_WHERE = `key IN (${[...SYNCED_SETTING_KEYS]
   .map((k) => `'${k}'`)
   .join(", ")})`;
@@ -268,6 +269,28 @@ async function writeWatermark(
       patch.lastPushed ?? cur.lastPushed,
     ]
   );
+}
+
+/**
+ * En son ne zaman senkron oldu (epoch ms)? Hiç olmadıysa 0.
+ *
+ * ⚠️ NEDEN: oturum jetonu süresi dolduğunda ya da uygulama çevrimdışı
+ * açıldığında senkron SESSİZCE duruyor. Kullanıcı hâlâ senkronlandığını
+ * sanıyor ve "diğer cihazdaki değişiklikler neden gelmiyor" diyor. Bu değere
+ * bakıp uzun süredir tur atılmadıysa uyarabiliyoruz — auth iç durumuna
+ * güvenmek yerine GÖZLENEBİLİR sonucu ölçüyoruz.
+ */
+export async function lastSyncAt(): Promise<number> {
+  if (!isTauri()) return 0;
+  try {
+    const db = await getDb();
+    const rows = await db.select<{ m: number | null }[]>(
+      `SELECT MAX(last_pushed) AS m FROM sync_state`
+    );
+    return rows[0]?.m ?? 0;
+  } catch {
+    return 0;
+  }
 }
 
 /** Bu cihaz daha önce hiç senkron oldu mu? (ilk-senkron sihirbazı için) */

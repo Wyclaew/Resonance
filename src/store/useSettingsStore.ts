@@ -38,6 +38,8 @@ export interface Settings {
   /** En çok dinlenen kaç şarkı otomatik indirilsin (çevrimdışı). 0 = kapalı. */
   autoDownloadTop: number;
   resumeState: string; // son çalan şarkı + pozisyon (JSON) — kaldığın yerden devam
+  /** Mini oynatıcının son konumu + boyu (JSON). YERELDE kalır (senkron dışı). */
+  miniGeometry: string;
   language: Lang; // arayüz dili ("tr" | "en")
   theme: Theme; // "dark" | "light" | "system"
   onboardingDone: boolean; // ilk açılış rehberi gösterildi mi
@@ -68,6 +70,7 @@ const DEFAULTS: Settings = {
   avatarDataUrl: "",
   autoDownloadTop: 0,
   resumeState: "",
+  miniGeometry: "",
   language: detectLang(),
   theme: "system", // sistem tercihini izle (kullanıcının isteği)
   onboardingDone: false,
@@ -97,6 +100,7 @@ const KEYS: Record<keyof Settings, string> = {
   avatarDataUrl: "profile.avatarDataUrl",
   autoDownloadTop: "storage.autoDownloadTop",
   resumeState: "playback.resumeState",
+  miniGeometry: "mini.geometry",
   language: "appearance.language",
   theme: "appearance.theme",
   onboardingDone: "app.onboardingDone",

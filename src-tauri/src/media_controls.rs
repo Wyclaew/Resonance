@@ -86,14 +86,16 @@ pub fn init(app: &AppHandle) {
         return;
     }
 
-    *CONTROLS.lock().unwrap() = Some(controls);
+    if let Ok(mut g) = CONTROLS.lock() {
+        *g = Some(controls);
+    }
     log::info!("medya oturumu kuruldu (OS medya tuşları + kilit ekranı)");
 }
 
 /// Çalan parçanın bilgisi — kilit ekranı / Control Center / Windows OSD'de görünür.
 #[tauri::command]
 pub fn media_set_metadata(title: String, artist: String, album: String, art_url: String) {
-    if let Some(c) = CONTROLS.lock().unwrap().as_mut() {
+    if let Some(c) = CONTROLS.lock().ok().as_mut().and_then(|g| g.as_mut()) {
         let _ = c.set_metadata(MediaMetadata {
             title: Some(&title),
             artist: Some(&artist),
@@ -107,7 +109,7 @@ pub fn media_set_metadata(title: String, artist: String, album: String, art_url:
 /// Oynatma durumu — OS'un oynat/duraklat ikonunu doğru gösterir.
 #[tauri::command]
 pub fn media_set_playback(playing: bool, stopped: bool) {
-    if let Some(c) = CONTROLS.lock().unwrap().as_mut() {
+    if let Some(c) = CONTROLS.lock().ok().as_mut().and_then(|g| g.as_mut()) {
         let state = if stopped {
             MediaPlayback::Stopped
         } else if playing {

@@ -4,6 +4,10 @@ Bu dosya, mobil uygulamayı **sıfırdan başka bir sohbette** yapacak olan içi
 Masaüstünün mimarisi ve tuzakları için önce **`CLAUDE.md`**'yi oku; senkron protokolü
 `docs/SYNC.md`'de. Bu doküman "mobil nasıl yapılır"ı anlatır.
 
+> **Masaüstü şu an v1.8.8** — bu doküman o sürüme göre günceldir. Aşağıdaki
+> "§5.2 v1.8.5 → v1.8.8 dersleri" bölümü, mobilde AYNI hataları yapmamak için
+> masaüstünde ÖLÇÜLEREK bulunmuş tuzakları taşır; ses yolunu yazmadan önce oku.
+
 **Amaç:** Eren'in kendi kullanımı için mobil Resonance. Masaüstüyle **senkron**
 (playlist, oy/karma, dinleme geçmişi, ayarlar). Ses yine YouTube'dan.
 **Kişisel kullanım, mağazaya çıkmayacak, repo private.**
@@ -195,7 +199,7 @@ Masaüstünde çalışan ve mobilde **yeniden yazılmaması gereken** parçalar:
 | **Yerel dosyalar** | `src/lib/localFiles.ts` + `ytdlp::scan_local` | v1.8.3. Mobilde ÇOK daha değerli (telefonda indirilmiş müzik yaygın) ama dosya erişimi izin ister (Android `READ_MEDIA_AUDIO`). `sourceId` = dosya yolu olduğu için senkronda tracks satırı gider, ses gitmez — mobilde de aynı kural. |
 | **Akıllı listeler** | `src/lib/smartLists.ts` | v1.8.3. Saf SQL, kalıcı satır yok → mobil aynı sorguları kullanır, senkron yükü sıfır. |
 | **Sanatçı sayfası / şarkı detayı** | `ArtistView`, `TrackDetail` | v1.8.3. Saf SQL + UI; mobilde dokunmatik için yeniden düzenlenmeli. |
-| **Mini oynatıcı** | `MiniPlayer` + `toggle_mini_player` | v1.8.3. ⛔ Mobilde KARŞILIĞI YOK — oradaki eşdeğeri bildirim/kilit ekranı denetimi (Android MediaSession), ki `media_controls.rs` deseninin mobil karşılığıdır. |
+| **Mini oynatıcı** | `MiniPlayer` + `src/lib/miniPlayer.ts` | v1.8.7'de olgunlaştı (seek, ses, oy, sıradaki, iki boy, konum hatırlama). ⛔ Mobilde KARŞILIĞI YOK — oradaki eşdeğeri bildirim/kilit ekranı denetimi (Android MediaSession), ki `media_controls.rs` deseninin mobil karşılığıdır. |
 | **İnteraktif tur** | `src/components/Onboarding.tsx` | v1.8.0: spotlight + `data-tour` işaretleri. RN'de `measureInWindow()` ile aynı desen kurulur; adım listesi aynen taşınabilir. |
 
 **Mobilde platforma özel kalan tek şey SES**: yt-dlp gömülemez (§2).
@@ -248,6 +252,67 @@ Masaüstünde çalışan ve mobilde **yeniden yazılmaması gereken** parçalar:
 sarmalayıcısı; mobilde bunların `youtubei.js` karşılığı yazılmalı ve aynı
 `Track` şeklini döndürmelidir. Öneri motoru bu üç fonksiyonun ARKASINI bilmez.
 
+## 5.2 v1.8.5 → v1.8.8 DERSLERİ (mobilde de aynen geçerli)
+
+Bunların hepsi masaüstünde **gerçek kullanımda patladı ve ölçülerek** bulundu.
+Mobilde farklı kütüphaneler var ama tuzaklar aynı yerde duruyor.
+
+**1. ⛔ "Kaynak bitti" ≠ "şarkı bitti" (v1.8.5-1.8.6).** İndirirken çalarken akış
+koparsa dosyanın sonuna gelen ses motoru "parça bitti" yayıyordu; frontend
+kuyruğu ilerletiyor ve şarkı 35-45. saniyede ATLANIYORDU. Aylarca "garip
+şekilde atlıyor" diye görüldü. **Mobilde**: ExoPlayer'ın `STATE_ENDED`'ini
+kuyruğu ilerletmek için TEK BAŞINA kullanma — kaynağın gerçekten tamamlandığını
+(beklenen bayt/süre) doğrula. Doğrulanmadıysa yeniden bağlan ve kaldığı
+saniyeden devam et; kullanıcıya atlatma.
+
+**2. ⛔ Çıkış cihazının MODU sesi mahvedebilir (v1.8.8 — en pahalı ders).**
+ÖLÇÜLDÜ: oyuncu kulaklığı (Arctis Nova 5) mikrofon/sohbet kanalı açıkken
+işletim sistemine YALNIZCA **16 kHz mono** sunuyor; ses motoru açılışta o
+yapılandırmayı alıp oturum boyunca tutunca müzik telefon kalitesinde çalıyor.
+"Uygulamanın sesi bozuk" sanılıyordu; indirilen dosyalar ve çözümleme zinciri
+ölçüldü, ikisi de tertemizdi. **Mobilde bu daha da yaygın**: Bluetooth kulaklık
+HFP/SCO moduna (arama, sesli asistan, oyun sohbeti) düştüğünde Android da
+8/16 kHz mono verir. Yapılacaklar: (a) açılışta seçilen format LOGLANMALI,
+(b) müziğe uygun değilse kullanıcıya SÖYLENMELİ (sebebi görünmüyor),
+(c) cihaz düzelince çıkış YENİDEN AÇILMALI (masaüstünde bir sonraki parçada
+yapılıyor; Android'de `AudioManager` cihaz değişim callback'i var).
+
+**3. ⛔ "Yükleniyor" durumu sonsuza kadar sürmemeli (v1.8.8).** Masaüstünde
+oynat tuşu yükleme sürerken basışı yutuyordu (haklı sebeple) ama indirme
+zincirinde HİÇBİR zaman aşımı yoktu → ağ takılınca durum kalıcı "loading"e
+düşüyor ve **oynat tuşu tamamen ölüyordu**. Üçlü kural mobilde de geçerli:
+her ağ/alt-süreç çağrısına zaman aşımı + bir bekçi (süre dolunca durumu
+duraklatılmışa çek) + "birkaç saniyeden sonra ikinci basış = yeniden dene".
+⚠️ Bekçi devreye girerse "motorda yüklü parça var" bayrağını da SIFIRLA;
+yoksa sonraki basış "çalıyor" gösterip sessiz kalır.
+
+**4. Pozisyon tick'i arayüz için yetmez (v1.8.8).** Konum saniyede 4 kez
+geliyordu; karaoke dolgusu doğrudan ona bağlanınca ortalama 125 ms geriden
+geliyor ve basamak basamak ilerliyordu. Çözüm: tick geldiğinde saati eşitle,
+aradaki süreyi YEREL saatle doldur (rAF/`requestAnimationFrame` ~30 fps).
+Mobilde ExoPlayer konumu da benzer aralıkla sorgulanır → aynı interpolasyon
+gerekir.
+
+**5. İndirirken çalma, ses thread'ini BLOKLAMAMALI (v1.8.8).** Büyüyen dosyayı
+okuyan reader veri bitince bekliyordu ve bu bekleme ses callback'inin İÇİNDE
+oluyordu → cızırtı/kesinti. Ön tampon 6 sn'den 28 sn'ye çıkarıldı ve bağlantı
+sağlıksızsa (ölçülen hız/hata oranı) akış yolu HİÇ kullanılmıyor. **Mobilde**:
+ExoPlayer'a kendi `DataSource`'unu yazarsan aynı tuzak var; mümkünse
+ExoPlayer'ın kendi tamponunu kullan, ön tamponu cömert tut, mobil veride
+akış yerine önce indir.
+
+**6. Oy/dinleme yazan HER yol tek fonksiyondan geçmeli (v1.8.7).** Alt bar ve
+mini oynatıcı ayrı ayrı oy yazıyordu; birinde `ensureTrack` unutulunca oy
+SESSİZCE öğrenmeye katılmıyordu (gotcha #13). Masaüstünde `src/lib/vote.ts`
+tek yol oldu. Mobilde de oy/dinleme kaydı tek modülden geçsin — iki ekran iki
+kopya yazarsa aynı sessiz kayıp olur.
+
+**7. Ses motoru thread'i ÖLMEMELİ (v1.8.6-1.8.8).** `expect()`/panik ile ölen
+thread, uygulama açık kaldığı hâlde "bir daha hiçbir şey çalmıyor" durumuna
+yol açıyordu (cihaz açılışta yoksa ya da çalarken kaybolursa). Mobilde
+karşılığı: foreground service / player servisi bir hatada çökerse tüm oynatma
+biter — hataları yut, servisi yaşat, kullanıcıya bildir.
+
 ## 6. Senkron protokolü — ✅ uygulandı
 
 Detay: `docs/SYNC.md`. Motor masaüstünde `src/lib/sync/engine.ts`'te çalışıyor;
@@ -293,13 +358,16 @@ Bu faz bitmeden başka hiçbir şey yazma.
 masaüstünü sarmalayıcıya bağla. **Masaüstü hâlâ bire bir çalışmalı** (`npm run build` + .app testi).
 Bu faz mobil kodu içermez; masaüstü sohbetinde de yapılabilir.
 
-**Faz 2 — Mobil iskelet.** Expo prebuild, expo-sqlite + **aynı migration'lar** (v1–v4), NativeWind +
+**Faz 2 — Mobil iskelet.** Expo prebuild, expo-sqlite + **aynı migration'lar** (v1–v8), NativeWind +
 `@theme` token'ları, ekranlar: Şu An, Kütüphane, Playlist, Ara. Çalma: track-player + Faz 0'daki yol.
 Offline indirme + LRU kota.
 
-**Faz 3 — Senkron.** Supabase projesi + Auth + RLS. Migration **v5** (§5) → hem masaüstü hem mobil.
-`packages/core/sync.ts`. Önce masaüstü↔Supabase, sonra mobil. **İlk testte mutlaka DB yedeği al**
-(masaüstünde açılışta otomatik yedek var — `backups/`).
+**Faz 3 — Senkron.** ⚠️ ARTIK SIFIRDAN DEĞİL: Supabase projesi, şema (`docs/supabase-schema.sql`),
+RLS, Realtime ve protokol MASAÜSTÜNDE CANLI (v1.3.0'dan beri, şema migration v8'e kadar genişledi).
+Mobilin işi yalnız İSTEMCİ tarafı: aynı tabloları, aynı LWW kurallarını ve aynı
+`SYNCED_SETTING_KEYS` beyaz listesini kullanmak. Şemayı YENİDEN TASARLAMA.
+**İlk testte mutlaka DB yedeği al** (masaüstünde açılışta otomatik yedek var — `backups/`).
+Sapma kontrolü için `scripts/sync-schema-check.py` mobilde de çalıştırılabilir.
 
 **Faz 4 — Keşfet + öneri.** `startDiscovery` mobil karşılığı, `TARGET_QUEUE_AHEAD` düşürülmüş.
 

@@ -85,8 +85,28 @@ export async function completePasswordReset(link: string, newPassword: string) {
   if (e2) throw e2;
 }
 
+/**
+ * Çıkışı KULLANICI mı istedi?
+ *
+ * ⚠️ Oturum kendiliğinden de düşebiliyor (yenileme jetonu süresi dolar ya da
+ * uygulama çevrimdışı açılırsa supabase-js oturumu temizler). O zaman senkron
+ * SESSİZCE durur: kullanıcı hâlâ senkronlandığını sanır, diğer cihazdaki
+ * değişiklikler gelmez. Ayrımı bu bayrakla yapıp yalnız beklenmedik düşmede
+ * uyarıyoruz.
+ */
+let intentionalSignOut = false;
+
+export function wasSignOutIntentional(): boolean {
+  return intentionalSignOut;
+}
+
 export async function signOut() {
   const sb = getSupabase();
   if (!sb) return;
+  intentionalSignOut = true;
   await sb.auth.signOut();
+  // Bayrağı kısa süre sonra bırak: olay zaten geldi.
+  setTimeout(() => {
+    intentionalSignOut = false;
+  }, 3000);
 }
