@@ -449,6 +449,12 @@ pub fn run() {
                 //
                 // Dosyanın YAŞINA bakılır (settings'e erişim Rust tarafında
                 // yok; dosya mtime'ı zaten doğru ve taşınabilir bir damga).
+                // ⚠️ ÖNCE bekleyen güncellemeyi uygula: Windows'ta çalışan
+                // exe değiştirilemediği için güncelleme `<ad>.new` olarak
+                // bekliyor olabilir. Burası dosyanın kullanımda OLMADIĞI tek
+                // güvenli an (henüz arama/ısıtma başlamadı).
+                commands::apply_pending_ytdlp(app.handle());
+
                 const MAX_AGE_DAYS: u64 = 7;
                 let needs_update = match std::fs::metadata(&exe) {
                     Err(_) => true, // hiç yok → ilk indirme

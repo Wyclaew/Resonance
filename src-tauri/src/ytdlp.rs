@@ -1073,6 +1073,24 @@ pub fn diagnose(cache_dir: &Path, cookies: Option<&str>) -> String {
         "yt-dlp sürümü",
         ver.clone().unwrap_or_else(|| "ÇALIŞTIRILAMADI".into()),
     );
+    // ⚠️ ESKİ yt-dlp = YouTube tarafında sessiz kırılma. ÖLÇÜLDÜ: kullanıcının
+    // Windows'unda ikili 10 HAFTA eskiydi (haftalık otomatik güncelleme
+    // çalışan exe'yi değiştiremediği için sessizce başarısız oluyordu).
+    // Panelde görünmediği sürece kimse fark etmiyor.
+    let age_days = std::fs::metadata(&ytp)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.elapsed().ok())
+        .map(|d| d.as_secs() / 86_400);
+    line(
+        &mut out,
+        "yt-dlp yaşı",
+        match age_days {
+            Some(d) if d > 21 => format!("{d} gün — ESKİ, Ayarlar'dan güncelleyin"),
+            Some(d) => format!("{d} gün"),
+            None => "bilinmiyor".to_string(),
+        },
+    );
     let ff = ffmpeg_path();
     line(
         &mut out,
@@ -1152,6 +1170,29 @@ pub fn diagnose(cache_dir: &Path, cookies: Option<&str>) -> String {
             Err(e) => line(&mut out, "test indirme", format!("BAŞARISIZ — {e}")),
         }
     }
+    // ⭐ ASIL SORU BU: "bu bilgisayar bir şarkıyı ÇALINABİLİR hâle getirebiliyor
+    // mu?" Yukarıdaki testler yalnız HIZLI YOLU (kendi indiricimiz) deniyordu;
+    // o başarısız olsa bile uygulama yt-dlp'nin kendi indirmesine düşüyor ve
+    // şarkı çalabiliyor. Eski panel bunu hiç denemeden "baytlar indirilemiyor"
+    // diyip kullanıcıyı güvenlik duvarı aramaya yolluyordu.
+    let _ = std::fs::remove_file(cache_dir.join(format!("{TEST_ID}.aac")));
+    let full_chain = ensure_audio(cache_dir, TEST_ID, cookies);
+    line(
+        &mut out,
+        "tam zincir (yt-dlp indirmesi + dönüştürme)",
+        match &full_chain {
+            Ok(p) => {
+                let sz = std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
+                format!("tamam ({sz} bayt)")
+            }
+            Err(e) => format!("BAŞARISIZ — {e}"),
+        },
+    );
+    if let Ok(p) = &full_chain {
+        let _ = std::fs::remove_file(p);
+    }
+    let playable = full_chain.is_ok();
+
     line(
         &mut out,
         "toplam süre",
@@ -1159,17 +1200,20 @@ pub fn diagnose(cache_dir: &Path, cookies: Option<&str>) -> String {
     );
 
     out.push_str("\nSONUÇ: ");
-    out.push_str(match (resolved.is_some(), downloaded, ffok) {
-        (true, true, true) => {
+    out.push_str(match (playable, downloaded, resolved.is_some(), ffok) {
+        (true, true, _, _) => {
             "her şey çalışıyor. Bir şarkı yine de açılmıyorsa sorun bu bilgisayarda değil;              o şarkı kısıtlı/kaldırılmış olabilir."
         }
-        (true, true, false) => {
-            "indirme çalışıyor ama ffmpeg yok/çalışmıyor → ses dönüştürme başarısız olur.              Uygulamayı yeniden kurmak genelde çözer."
+        (true, false, _, _) => {
+            "şarkılar İNİYOR ama hızlı yol (kendi indiricimiz) bu ağda engelli →              her şarkı birkaç saniye daha geç başlar. Çalmayı engelleyen bir şey yok."
         }
-        (true, false, _) => {
-            "adres çözülüyor ama baytlar indirilemiyor. Genelde güvenlik duvarı/antivirüs              ya da YouTube hız sınırı; birkaç dakika sonra tekrar deneyin."
+        (false, _, _, false) => {
+            "ffmpeg yok/çalışmıyor → ses dönüştürme başarısız oluyor.              Uygulamayı yeniden kurmak genelde çözer."
         }
-        (false, _, _) => {
+        (false, _, true, true) => {
+            "adres çözülüyor ama HİÇBİR yolla bayt indirilemiyor. Genelde güvenlik              duvarı/antivirüs bu uygulamayı engelliyor ya da YouTube hız sınırı var;              birkaç dakika sonra tekrar deneyin."
+        }
+        (false, _, false, _) => {
             "yt-dlp adresi çözemiyor. En olası sebep ESKİ yt-dlp — Ayarlar'dan yt-dlp'yi              güncelleyin."
         }
     });

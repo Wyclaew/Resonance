@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.8.8** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.8.9** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,32 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.8.9 (WINDOWS'TA "HİÇBİR ŞARKI AÇILMIYOR" — ÜÇ AYRI SEBEP):
+• **⭐⭐ HAFTALIK yt-dlp GÜNCELLEMESİ WINDOWS'TA 10 HAFTADIR SESSİZCE
+  BAŞARISIZDI.** ÖLÇÜLDÜ (kullanıcının teşhis çıktısı): ikili **2026.06.09**,
+  o gün yayımlanmış son sürüm **2026.08.19**. Sebep: Windows'ta ÇALIŞAN bir
+  .exe değiştirilemez; güncelleme açılışta tetikleniyor ve tam o sırada adres
+  ısıtma yt-dlp süreçleri başlatıyor → `rename` hata veriyor, kimse görmüyor.
+  Eskiyen yt-dlp = YouTube çıkarımının sessizce kırılması (CLAUDE.md'de zaten
+  "Windows'ta hiçbir şarkı açılmıyor" tablosunun 1 numaralı sebebi olarak
+  yazıyordu). Çözüm: 5 kez yeniden denenir, olmazsa dosya `<ad>.new` olarak
+  BEKLETİLİR ve bir sonraki açılışta — henüz hiçbir yt-dlp süreci yokken —
+  `apply_pending_ytdlp` ile devreye alınır.
+• **⭐ SAĞLIK TESTİ İŞE YARAYAN KATMANI ELİYORDU.** `probe_url` dosyanın SON
+  1 KB'ını istiyor; kullanıcının ağında yt-dlp'nin çözdüğü adres bu atlamalı
+  isteği reddediyor (403) ama BAŞTAN indirmeye izin veriyor. Test "adres
+  kısıtlı" deyip katman 2'yi komple bırakıyordu — yani pratikte kurtaran tek
+  yolu. Artık: InnerTube adreslerinde kural KATI (orada 403 gerçekten
+  "PO Token yok" demek), yt-dlp adreslerinde son parça reddedilirse
+  `bytes=0-1023` denenir; baştan iniyorsa sıralı indirmeye devam edilir.
+  Log'a artık HTTP KODU da yazılıyor (eskiden yalnız "kısıtlı" diyordu).
+• **⭐ TEŞHİS PANELİ YANLIŞ SUÇLUYORDU.** Panel yalnız HIZLI YOLU (kendi
+  indiricimiz) test edip başarısız olunca "baytlar indirilemiyor, güvenlik
+  duvarı/antivirüs olabilir" diyordu — oysa uygulama yt-dlp'nin kendi
+  indirmesine düşüp şarkıyı çalabiliyor. Artık **tam zincir** (`ensure_audio`:
+  tüm katmanlar + ffmpeg) da deneniyor ve sonuç ona göre yazılıyor
+  ("hızlı yol engelli ama şarkılar iniyor" ayrı bir teşhis). Panel ayrıca
+  **yt-dlp'nin YAŞINI** gösteriyor (>21 gün ise "ESKİ" uyarısı).
 v1.8.8 (SES KALİTESİ + WINDOWS KİLİTLENMELERİ):
 • **⭐⭐ "SES KALİTESİ REZİL" — SUÇLU UYGULAMA DEĞİL, ÇIKIŞ CİHAZININ MODU.**
   ÖLÇÜLDÜ (log kanıtı): `ses çıkışı: SteelSeries Arctis Nova 5 @ 16000 Hz,

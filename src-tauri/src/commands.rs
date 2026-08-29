@@ -1181,6 +1181,31 @@ fn ytdlp_target_name() -> &'static str {
     }
 }
 
+/// Bekleyen güncelleme dosyasının yolu (bkz. `update_ytdlp`).
+fn pending_ytdlp_path(dir: &std::path::Path) -> PathBuf {
+    dir.join(format!("{}.new", ytdlp_target_name()))
+}
+
+/// AÇILIŞTA çağrılır: bekleyen bir yt-dlp güncellemesi varsa devreye alır.
+///
+/// Bu an, dosyanın kullanımda OLMADIĞI tek güvenli an — henüz hiçbir arama,
+/// ısıtma ya da indirme başlamadı. (Windows'ta çalışan exe değiştirilemez.)
+pub fn apply_pending_ytdlp(app: &AppHandle) {
+    let Ok(dir) = ytdlp_bin_dir(app) else { return };
+    let pending = pending_ytdlp_path(&dir);
+    if !pending.exists() {
+        return;
+    }
+    let dest = dir.join(ytdlp_target_name());
+    if dest.exists() {
+        let _ = std::fs::remove_file(&dest);
+    }
+    match std::fs::rename(&pending, &dest) {
+        Ok(()) => log::info!("bekleyen yt-dlp güncellemesi devreye alındı"),
+        Err(e) => log::warn!("bekleyen yt-dlp güncellemesi uygulanamadı: {e}"),
+    }
+}
+
 /// GitHub'dan en güncel yt-dlp'yi indirip app_config/bin'e yazar. Bir sonraki
 /// arama/indirme bunu kullanır. İndirilen sürüm metnini döndürür.
 #[tauri::command]
@@ -1212,16 +1237,38 @@ pub async fn update_ytdlp(app: AppHandle) -> Result<String, String> {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
         }
-        // Windows: hedef varsa rename hata verir → önce kaldır.
-        if dest.exists() {
-            let _ = std::fs::remove_file(&dest);
-        }
-        // ⚠️ Windows'ta o an ÇALIŞAN bir yt-dlp varsa silme/taşıma başarısız
-        // olur. Yarım kalan `.download` dosyasını bırakmayalım: bir dahaki
-        // güncelleme onu "hazır" sanmasın diye temizliyoruz.
-        if let Err(e) = std::fs::rename(&tmp, &dest) {
-            let _ = std::fs::remove_file(&tmp);
-            anyhow::bail!("yt-dlp değiştirilemedi (kullanımda olabilir): {e}");
+        // ⚠️⚠️ WINDOWS: ÇALIŞAN BİR .exe SİLİNEMEZ/DEĞİŞTİRİLEMEZ.
+        //
+        // ÖLÇÜLDÜ (kullanıcının makinesi): yt-dlp 2026.06.09'da kalmıştı, oysa
+        // güncel sürüm 2026.08.19 — yani haftalık otomatik güncelleme 10
+        // haftadır SESSİZCE başarısız oluyordu. Sebep: güncelleme açılışta
+        // çalışıyor ve tam o sırada adres ısıtma da yt-dlp süreçleri
+        // başlatıyor; kullanımdaki dosya değiştirilemiyor. Eskiyen yt-dlp,
+        // Windows'ta "hiçbir şarkı açılmıyor" tablosunun bir numaralı sebebi.
+        //
+        // Çözüm: değiştiremezsek dosyayı `<ad>.new` olarak BEKLETİYORUZ;
+        // bir sonraki açılışta (henüz hiçbir yt-dlp süreci yokken) devreye
+        // giriyor (`apply_pending_ytdlp`).
+        for attempt in 0..5 {
+            if dest.exists() {
+                let _ = std::fs::remove_file(&dest);
+            }
+            match std::fs::rename(&tmp, &dest) {
+                Ok(()) => break,
+                Err(e) => {
+                    if attempt == 4 {
+                        let pending = pending_ytdlp_path(&dir);
+                        let _ = std::fs::remove_file(&pending);
+                        if std::fs::rename(&tmp, &pending).is_ok() {
+                            log::warn!("yt-dlp kullanımda ({e}) — bir sonraki açılışta devreye girecek");
+                            return Ok("bir sonraki açılışta devreye girecek".to_string());
+                        }
+                        let _ = std::fs::remove_file(&tmp);
+                        anyhow::bail!("yt-dlp değiştirilemedi (kullanımda): {e}");
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(600));
+                }
+            }
         }
         log::info!("yt-dlp güncellendi: {}", dest.display());
 

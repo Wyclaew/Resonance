@@ -138,7 +138,7 @@ const NON_SONG_CHANNEL =
 // 10 dk'lık bir podcast'in öneri olarak gelmesine izin verdi.
 const MIN_SONG_MS = 40_000;
 const MAX_SONG_MS = 9 * 60_000;
-function isLikelySong(t: Track): boolean {
+export function isLikelySong(t: Track): boolean {
   const ms = t.durationMs;
   // Süre 0 = bilinmiyor → eleme, desenlere bırak.
   if (ms > 0 && (ms < MIN_SONG_MS || ms > MAX_SONG_MS)) return false;

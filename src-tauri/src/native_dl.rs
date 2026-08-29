@@ -415,16 +415,49 @@ pub fn probe_url(src: &AudioSource) -> bool {
     let Ok(c) = http() else { return true };
     let from = src.content_length - 1024;
     let to = src.content_length - 1;
-    match c
+    let end_status = match c
         .get(&src.url)
         .header("User-Agent", &src.user_agent)
         .header("Range", format!("bytes={from}-{to}"))
         .send()
     {
-        Ok(r) => r.status().is_success(),
+        Ok(r) => {
+            if r.status().is_success() {
+                return true;
+            }
+            r.status().as_u16()
+        }
         // Ağ hatasında adresi suçlama: indirme yolu kendi retry'ını yapsın.
-        Err(_) => true,
+        Err(_) => return true,
+    };
+
+    // ⚠️ SON PARÇA REDDEDİLDİ. Bu, InnerTube adresleri için "kısıtlı" demek
+    // (PO Token yok → ilk ~1 MB iner, gerisi 403). AMA yt-dlp'nin çözdüğü
+    // adreslerde durum farklı olabilir: bazı ağlarda/istemcilerde YouTube
+    // dosyanın SONUNA yapılan atlamalı isteği reddederken sıralı indirmeye
+    // izin veriyor (ölçüm: Windows'ta teşhis panelinde "adres kısıtlı" çıkan
+    // makinede baştan indirme çalışıyordu). Böyle bir adresi tümden ELEMEK,
+    // gerçekten işe yarayan tek katmanı kaybettiriyordu.
+    if src.via.starts_with("innertube") {
+        log::info!("adres kısıtlı (sağlık testi, HTTP {end_status}): {}", src.via);
+        return false;
     }
+    let head_ok = c
+        .get(&src.url)
+        .header("User-Agent", &src.user_agent)
+        .header("Range", "bytes=0-1023")
+        .send()
+        .map(|r| r.status().is_success())
+        .unwrap_or(true);
+    if head_ok {
+        log::warn!(
+            "adres son parçayı vermiyor (HTTP {end_status}) ama baştan iniyor —              sıralı indirmeye devam: {}",
+            src.via
+        );
+    } else {
+        log::info!("adres kısıtlı (sağlık testi, HTTP {end_status}): {}", src.via);
+    }
+    head_ok
 }
 
 /// URL'yi PARÇALI indirir: her parça ayrı `Range` isteği, parça başına

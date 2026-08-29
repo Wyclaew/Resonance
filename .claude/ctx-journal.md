@@ -1,4 +1,4 @@
-_Otomatik — 2026-08-29 11:59, son olculen baglam ~505K_
+_Otomatik — 2026-08-29 12:23, son olculen baglam ~537K_
 
 **Degistirilen dosyalar**
 - `../MusicPlayer/src/store/usePlayerStore.ts` (52x)
@@ -21,15 +21,15 @@ _Otomatik — 2026-08-29 11:59, son olculen baglam ~505K_
 - `src/views/DiscoverView.tsx` (7x)
 
 **Son komutlar**
-- `for i in $(seq 1 16); do if grep -q "EXIT=" /tmp/build17.log 2>/dev/null; then break; fi; sleep 15; done; tail`
-- `grep -n "Toasts\|{!idle" src/App.tsx | head -8`
-- `sed -n '55,75p' src/store/useToastStore.ts`
-- `sed -n '256,276p' src/App.tsx`
-- `awk 'NR>=273 && NR<=345' src/App.tsx | grep -n "await\|\.then(\|\.catch(" | head -20`
-- `sed -n '277,290p' src/App.tsx`
-- `grep -n "pub fn backup_db\|pub async fn backup_db" -A 15 src-tauri/src/commands.rs | grep -n "3600\|son\|skip\`
-- `ls -lt ~/Library/"Application Support"/com.resonance.app/backups | head -5; date "+şimdi %H:%M:%S"`
-- `pkill -f "Resonance.app"; sleep 1; open "src-tauri/target/debug/bundle/macos/Resonance.app" --stdout /tmp/res_`
+- `sed -n '196,250p' docs/MOBILE.md`
+- `sed -n '285,325p' docs/MOBILE.md`
 - `python3 -`
-- `for i in $(seq 1 16); do if grep -q "EXIT=" /tmp/build18.log 2>/dev/null; then break; fi; sleep 15; done; tail`
-- `git status --short | grep -v "^ M .claude" | head -25; echo "=== sürüm ==="; grep '"version"' package.json | h`
+- `(npm run build > /tmp/fe17.log 2>&1 && npm run tauri build -- --debug --bundles app > /tmp/build19.log 2>&1; e`
+- `for i in $(seq 1 16); do if grep -q "EXIT=" /tmp/build19.log 2>/dev/null; then break; fi; sleep 15; done; tail`
+- `cd /Users/erne/Desktop/Resonance && pkill -f "Resonance.app"; sleep 1; : > /tmp/res_err.log; open "src-tauri/t`
+- `git log --oneline -3; git remote -v | head -2; git branch --show-current; git tag | tail -3`
+- `git commit -q -F -`
+- `git push origin main 2>&1 | tail -3 && git tag v1.8.8 && git push origin v1.8.8 2>&1 | tail -3`
+- `sleep 20; gh run list --limit 3 2>&1 | head -5`
+- `for i in $(seq 1 30); do st=$(gh run view 33244937269 --json status,conclusion -q '.status+" "+(.conclusion//"`
+- `gh release view v1.8.8 --json isDraft,assets -q '"taslak: "+(.isDraft|tostring), (.assets[]|.name+" ("+(.size/`
