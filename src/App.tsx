@@ -93,18 +93,20 @@ function CurrentView() {
   }
 }
 
-// ⭐ CİHAZLAR ARASI DEVAM (v1.8.0): başka cihazın kuyruğu bu cihazınkinden
-// YENİYSE doğrudan oynatıcıya yükle (duraklatılmış, kaldığı saniyeden).
+// ⭐ CİHAZLAR ARASI DEVAM — ARTIK SORARAK (v1.9.0).
 //
-// Kullanıcının şikâyeti: "Windows'taki çalan şarkı yalnız Şu An sayfasında bir
-// kart olarak görünüyordu, ben doğrudan oynatıcıya gelsin istemiştim" — ayrıca
-// Keşfet kuyruğu hiç gelmiyordu (settings senkronlanmadığı için).
+// ⚠️ ESKİDEN OTOMATİKTİ ve kullanıcı bunu istemedi: "benim isteğim dışında
+// Windows keşfetim Mac'e geçebiliyor; keşfet ben istersem değişsin". Haklı —
+// başka bir cihazda gezinirken burada kurulmuş Keşfet partisinin sessizce
+// değişmesi, en sinir bozucu senkron davranışı. Artık hiçbir şeyi kendiliğinden
+// DEĞİŞTİRMİYORUZ: yalnız "getirmek ister misin?" diye soruyoruz; kuyruk
+// ancak düğmeye basılırsa değişir.
 //
-// ⚠️ GÜVENLİK KOŞULU: kullanıcı bu cihazda zaten bir şey çaldıysa DOKUNMA.
-// Kuyruğu ayağının altından çekmek en sinir bozucu senkron hatasıdır.
-let adoptedRemote = false;
-async function adoptRemoteQueue(): Promise<void> {
-  if (adoptedRemote) return;
+// Diğer iki açık yol duruyor: Şu An'daki "kaldığın yer" kartı ve Keşfet'teki
+// "Başka cihaz" seçici.
+const OFFER_KEY = "resonance.lastOfferedRemoteQueue";
+
+async function offerRemoteQueue(): Promise<void> {
   const st = usePlayerStore.getState();
   if (st.status === "playing" || st.status === "loading") return;
 
@@ -113,24 +115,41 @@ async function adoptRemoteQueue(): Promise<void> {
     localQueueUpdatedAt(),
   ]);
   if (!remote || remote.updatedAt <= localAt) return;
-  adoptedRemote = true;
-
-  if (remote.mode === "discovery") {
-    usePlayerStore.getState().restoreDiscovery({
-      queue: remote.queue,
-      queueIndex: remote.queueIndex,
-      seedArtists: remote.seeds,
-      filters: remote.filters,
-      positionMs: remote.positionMs,
-    });
-  } else {
-    usePlayerStore
-      .getState()
-      .restoreQueue(remote.queue, remote.queueIndex, remote.positionMs);
+  // Aynı kuyruk için bir kez sor, her açılışta dırdır etme.
+  try {
+    if (localStorage.getItem(OFFER_KEY) === String(remote.updatedAt)) return;
+    localStorage.setItem(OFFER_KEY, String(remote.updatedAt));
+  } catch {
+    /* localStorage yoksa yine de sor */
   }
-  useToastStore
-    .getState()
-    .show(t("sync.resumedFrom", { device: remote.deviceName }), "info");
+
+  useToastStore.getState().show(
+    t("sync.remoteQueueOffer", { device: remote.deviceName }),
+    "info",
+    {
+      label: t("sync.remoteQueueBring"),
+      fn: async () => {
+        if (remote.mode === "discovery") {
+          usePlayerStore.getState().restoreDiscovery({
+            queue: remote.queue,
+            queueIndex: remote.queueIndex,
+            seedArtists: remote.seeds,
+            filters: remote.filters,
+            positionMs: remote.positionMs,
+          });
+        } else {
+          usePlayerStore
+            .getState()
+            .restoreQueue(remote.queue, remote.queueIndex, remote.positionMs);
+        }
+        useToastStore
+          .getState()
+          .show(t("sync.resumedFrom", { device: remote.deviceName }), "info");
+      },
+    },
+    // Fark edilmesi için biraz uzun dursun; yine de kendiliğinden kaybolur.
+    14_000
+  );
 }
 
 /**
@@ -409,6 +428,16 @@ function MainApp() {
     return () => cancelAnimationFrame(id);
   }, [miniDeps, miniTheme, miniAccent, miniLang]);
 
+  // Menü çubuğundaki (tepsi) metin: çalan parça. Uygulama gizliyken bile
+  // orada ne çaldığı görünsün.
+  const trackLabel = usePlayerStore((s) =>
+    s.current ? `${s.current.title} — ${s.current.artist}` : ""
+  );
+  useEffect(() => {
+    if (!isTauri()) return;
+    invoke("set_tray_title", { text: trackLabel }).catch(() => {});
+  }, [trackLabel]);
+
   // ⭐ TEMA/VURGU DOM'DAN İZLENİR. Yukarıdaki efekt yalnız AYAR değişince
   // çalışır; ama efektif tema ayar sabitken de değişebilir: tema "sistem"
   // iken macOS/Windows koyu↔açık geçtiğinde `data-theme` güncellenir, hiçbir
@@ -431,7 +460,7 @@ function MainApp() {
         void useLibraryStore.getState().refresh();
         void usePlaylistStore.getState().refresh();
         void useSettingsStore.getState().load(); // senkronlanan ayarlar (tema/dil…)
-        void adoptRemoteQueue();
+        void offerRemoteQueue();
       }),
     []
   );

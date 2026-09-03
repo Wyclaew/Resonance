@@ -4,6 +4,7 @@ mod commands;
 mod media_controls;
 mod spotify;
 mod native_dl;
+mod tray;
 mod ytdlp;
 
 use tauri::Manager;
@@ -405,6 +406,7 @@ pub fn run() {
             commands::scan_local_files,
             commands::toggle_mini_player,
             commands::focus_main_window,
+            commands::set_tray_title,
             commands::export_data,
             commands::backup_db,
             commands::list_backups,
@@ -455,6 +457,14 @@ pub fn run() {
                 // güvenli an (henüz arama/ısıtma başlamadı).
                 commands::apply_pending_ytdlp(app.handle());
 
+                // ⭐ İNDİRME DURUMUNU DİSKTEN YÜKLE (v1.9.0): çözülmüş
+                // adresler + "hangi yol işe yarıyor" bilgisi. Ölçüm: hazır
+                // olma süresinin ~%70'i adres çözümü; bu bilgi eskiden yalnız
+                // bellekteydi ve her açılışta sıfırlanıyordu.
+                if let Ok(dir) = app.path().app_config_dir() {
+                    native_dl::set_state_dir(dir);
+                }
+
                 const MAX_AGE_DAYS: u64 = 7;
                 let needs_update = match std::fs::metadata(&exe) {
                     Err(_) => true, // hiç yok → ilk indirme
@@ -480,18 +490,25 @@ pub fn run() {
                 }
             }
 
-            // ⚠️ Mini oynatıcı açıkken ANA pencere kapatılırsa uygulama açık
-            // kalıyordu: mini pencere taskbar'da görünmediği (skip_taskbar)
-            // ve ana pencere de olmadığı için kullanıcı uygulamaya
-            // erişemeden arka planda asılı kalıyordu. Ana pencere kapanınca
-            // mini de kapanır.
+            // ⭐ MENÜ ÇUBUĞU OYNATICISI (v1.9.0): simge + menü.
+            if let Err(e) = tray::setup(app.handle()) {
+                log::warn!("menü çubuğu simgesi kurulamadı: {e}");
+            }
+
+            // ⭐ ANA PENCERE KAPANINCA UYGULAMA ÇIKMAZ, GİZLENİR.
+            // Kullanıcının isteği: "ana pencereyi kapatıp arka planda mini
+            // oynatıcıyla takılabilelim". Artık menü çubuğu simgesi olduğu
+            // için uygulama görünmez biçimde asılı kalmıyor: dönüş yolu
+            // (simge → Ana pencereyi göster) ve gerçek çıkış (simge → Çıkış)
+            // hep elin altında. ⌘Q / Alt+F4 yine normal şekilde çıkarır.
             if let Some(main) = app.get_webview_window("main") {
-                let handle = app.handle().clone();
+                let w = main.clone();
+                // ⚠️ `on_window_event` bir SETTER'dır: ikinci çağrı birincinin
+                // yerine geçer. İki iş de tek kapanışta yapılmalı.
                 main.on_window_event(move |e| {
-                    if matches!(e, tauri::WindowEvent::CloseRequested { .. }) {
-                        if let Some(mini) = handle.get_webview_window("mini") {
-                            let _ = mini.close();
-                        }
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = e {
+                        api.prevent_close();
+                        let _ = w.hide();
                     }
                 });
             }

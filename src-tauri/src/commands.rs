@@ -299,6 +299,42 @@ fn prewarm_semaphore() -> &'static tokio::sync::Semaphore {
     SEM.get_or_init(|| tokio::sync::Semaphore::new(1))
 }
 
+/// ⭐ EŞZAMANLILIK BAĞLANTIYA GÖRE (v1.9.0). Sabit 3 idi: hızlı bağlantıda
+/// kuyruk gereksiz yavaş doluyor, kopan bağlantıda 3 paralel indirme birbirini
+/// yiyordu. `native_dl::health()` son 20 indirmenin hızını ve hata oranını
+/// zaten ölçüyor — aynı veriyi burada da kullanıyoruz.
+///
+/// ⚠️ play_track bu sınırı KULLANMAZ (çalma her zaman öncelikli); burada
+/// ayarlanan yalnız arka plan hazırlığı ve toplu indirmedir.
+static DL_PERMITS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(3);
+
+fn tune_dl_concurrency() {
+    let (mbps, fails, _) = crate::native_dl::health();
+    let want = if fails > 0.25 || (mbps > 0.0 && mbps < 0.8) {
+        2
+    } else if mbps > 4.0 {
+        6
+    } else if mbps > 2.0 {
+        4
+    } else {
+        3
+    };
+    let cur = DL_PERMITS.load(std::sync::atomic::Ordering::Relaxed);
+    if want == cur {
+        return;
+    }
+    if want > cur {
+        dl_semaphore().add_permits(want - cur);
+        DL_PERMITS.store(want, std::sync::atomic::Ordering::Relaxed);
+    } else if let Ok(p) = dl_semaphore().try_acquire_many((cur - want) as u32) {
+        // İzinleri "unut" → havuz kalıcı olarak küçülür (şu an kullanımda
+        // olanları beklemeden; boşta izin yoksa bir dahaki tura kalır).
+        p.forget();
+        DL_PERMITS.store(want, std::sync::atomic::Ordering::Relaxed);
+    }
+    log::debug!("indirme eşzamanlılığı {cur} → {want} (hız {mbps:.1} MB/sn, hata {fails:.2})");
+}
+
 fn dl_semaphore() -> &'static tokio::sync::Semaphore {
     static SEM: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
     // 2 → 3: yerel indirici sayesinde her hazırlık artık ayrı bir yt-dlp
@@ -367,6 +403,29 @@ fn position_on_screen(app: &AppHandle, x: f64, y: f64) -> bool {
             && x <= pos.x + size.width - 80.0
             && y <= pos.y + size.height - 40.0
     })
+}
+
+/// Menü çubuğundaki metni günceller (çalan parça). Boş string temizler.
+///
+/// macOS'ta menü çubuğunda simgenin yanında görünür; Windows'ta tepsi
+/// ipucuna düşer. Frontend parça değişince çağırır.
+#[tauri::command]
+pub fn set_tray_title(app: AppHandle, text: String) {
+    let t = text.trim();
+    crate::tray::set_title(
+        &app,
+        if t.is_empty() {
+            None
+        } else {
+            // Menü çubuğu dar: uzun başlıkları kısalt.
+            let short: String = t.chars().take(28).collect();
+            Some(if short.len() < t.len() {
+                format!("{short}…")
+            } else {
+                short
+            })
+        },
+    );
 }
 
 /// Mini oynatıcıdaki "ana pencere" düğmesi: ana pencereyi öne getirir
@@ -722,6 +781,7 @@ pub async fn download_audio(
     source_id: String,
     cookies_browser: Option<String>,
 ) -> Result<DownloadResult, String> {
+    tune_dl_concurrency();
     let _permit = dl_semaphore().acquire().await; // eşzamanlılık sınırı
     let cache = audio_cache_dir(&app).map_err(|e| e.to_string())?;
     let sid = source_id.clone();
@@ -752,6 +812,7 @@ pub async fn prefetch_audio(
     source_id: String,
     cookies_browser: Option<String>,
 ) -> Result<(), String> {
+    tune_dl_concurrency();
     let _permit = dl_semaphore().acquire().await; // eşzamanlılık sınırı
     let cache = audio_cache_dir(&app).map_err(|e| e.to_string())?;
     let _ = tauri::async_runtime::spawn_blocking(move || {

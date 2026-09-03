@@ -1,4 +1,4 @@
-_Otomatik — 2026-08-29 12:23, son olculen baglam ~537K_
+_Otomatik — 2026-08-29 18:55, son olculen baglam ~589K_
 
 **Degistirilen dosyalar**
 - `../MusicPlayer/src/store/usePlayerStore.ts` (52x)
@@ -21,15 +21,15 @@ _Otomatik — 2026-08-29 12:23, son olculen baglam ~537K_
 - `src/views/DiscoverView.tsx` (7x)
 
 **Son komutlar**
-- `sed -n '196,250p' docs/MOBILE.md`
-- `sed -n '285,325p' docs/MOBILE.md`
-- `python3 -`
-- `(npm run build > /tmp/fe17.log 2>&1 && npm run tauri build -- --debug --bundles app > /tmp/build19.log 2>&1; e`
-- `for i in $(seq 1 16); do if grep -q "EXIT=" /tmp/build19.log 2>/dev/null; then break; fi; sleep 15; done; tail`
+- `for i in $(seq 1 16); do if grep -q "EXIT=" /tmp/build21.log 2>/dev/null; then break; fi; sleep 15; done; tail`
 - `cd /Users/erne/Desktop/Resonance && pkill -f "Resonance.app"; sleep 1; : > /tmp/res_err.log; open "src-tauri/t`
-- `git log --oneline -3; git remote -v | head -2; git branch --show-current; git tag | tail -3`
-- `git commit -q -F -`
-- `git push origin main 2>&1 | tail -3 && git tag v1.8.8 && git push origin v1.8.8 2>&1 | tail -3`
-- `sleep 20; gh run list --limit 3 2>&1 | head -5`
-- `for i in $(seq 1 30); do st=$(gh run view 33244937269 --json status,conclusion -q '.status+" "+(.conclusion//"`
-- `gh release view v1.8.8 --json isDraft,assets -q '"taslak: "+(.isDraft|tostring), (.assets[]|.name+" ("+(.size/`
+- `python3 -`
+- `(npm run build > /tmp/fe18.log 2>&1 && npm run tauri build -- --debug --bundles app > /tmp/build22.log 2>&1; e`
+- `cd /Users/erne/Desktop/Resonance && for i in $(seq 1 16); do if grep -q "EXIT=" /tmp/build22.log 2>/dev/null; `
+- `git add -A && git commit -q -F -`
+- `git push origin main 2>&1 | tail -2 && git tag v1.8.9 && git push origin v1.8.9 2>&1 | tail -2`
+- `sleep 25; gh run list --limit 1 2>&1 | head -2`
+- `until gh run list --limit 1 2>/dev/null | grep -q "v1.8.9"; do sleep 5; done; gh run list --limit 1 | head -1`
+- `until [ "$(gh run view 33261030562 --json status -q .status 2>/dev/null)" = "completed" ]; do sleep 30; done; `
+- `gh run view 33261030562 --json status,conclusion,jobs -q '.status, (.conclusion//"-"), (.jobs[] | .name + ": "`
+- `gh release view v1.8.9 --json isDraft,assets -q '"taslak: "+(.isDraft|tostring), (.assets[]|.name)' 2>&1 | hea`

@@ -129,6 +129,9 @@ pub fn note_native_failure() {
             now_secs() + NATIVE_COOLDOWN_SECS,
             std::sync::atomic::Ordering::Relaxed,
         );
+        // Askıyı da KAYDET: bu makinede hiç çalışmayan katman, uygulama her
+        // açıldığında baştan denenip her şarkıda ~0.4 sn boşa harcıyordu.
+        mark_dirty();
         log::info!(
             "yerel çözüm {} dk askıya alındı (üst üste {} başarısızlık)",
             NATIVE_COOLDOWN_SECS / 60,
@@ -238,6 +241,151 @@ pub fn resolve_innertube(video_id: &str, prefer_low: bool) -> Result<AudioSource
 }
 
 
+// ═══ KALICI DURUM (disk) ═════════════════════════════════════════════════
+// ⭐ NEDEN: aşağıdaki URL önbelleği ve "hangi yol işe yarıyor" bilgisi yalnız
+// BELLEKTEYDİ → uygulama her kapanışta unutuluyordu. Ölçüm: bir şarkının hazır
+// olma süresinin ~%70'i URL çözümü (2.45 sn). Açılışta kuyruktaki 9 şarkının
+// adresi yeniden çözülüyor, üstelik bu makinede hiç çalışmayan katmanlar
+// yeniden deneniyordu. Adresler `expire` damgasına kadar (genelde ~6 saat)
+// geçerli; diske yazılınca açılış sonrası ilk şarkı ANINDA iniyor.
+//
+// ⚠️ Bu dosya yalnız HIZ içindir: bozuk/eksik olması hiçbir şeyi kırmaz,
+// en kötü ihtimalle her şey eskisi gibi yeniden çözülür.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PersistUrl {
+    u: String,
+    ua: String,
+    len: u64,
+    exp: u64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct DlState {
+    #[serde(default)]
+    urls: std::collections::HashMap<String, PersistUrl>,
+    #[serde(default)]
+    native_skip_until: u64,
+    #[serde(default)]
+    last_good_strategy: Option<usize>,
+}
+
+static STATE_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+static STATE_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static STORED_STRATEGY: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(-1);
+
+fn state_path() -> Option<std::path::PathBuf> {
+    STATE_DIR.get().map(|d| d.join("dl_state.json"))
+}
+
+fn mark_dirty() {
+    STATE_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Uygulama açılışında bir kez çağrılır: durumu yükler ve arka planda
+/// periyodik kaydeden thread'i başlatır.
+pub fn set_state_dir(dir: std::path::PathBuf) {
+    if STATE_DIR.set(dir).is_err() {
+        return; // zaten kurulmuş
+    }
+    load_state();
+    std::thread::spawn(|| loop {
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        if STATE_DIRTY.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            save_state();
+        }
+    });
+}
+
+fn load_state() {
+    let Some(p) = state_path() else { return };
+    let Ok(raw) = std::fs::read(&p) else { return };
+    let Ok(st) = serde_json::from_slice::<DlState>(&raw) else {
+        log::warn!("indirme durumu okunamadı (bozuk) — sıfırdan başlanıyor");
+        return;
+    };
+    let now = now_secs();
+    let mut live = 0usize;
+    if let Ok(mut m) = url_cache().lock() {
+        for (id, v) in st.urls {
+            if v.exp > now + 30 {
+                live += 1;
+                m.insert(
+                    id,
+                    CachedUrl {
+                        url: v.u,
+                        user_agent: v.ua,
+                        content_length: v.len,
+                        expires_at: v.exp,
+                    },
+                );
+            }
+        }
+    }
+    if st.native_skip_until > now {
+        NATIVE_SKIP_UNTIL.store(st.native_skip_until, std::sync::atomic::Ordering::Relaxed);
+    }
+    if let Some(i) = st.last_good_strategy {
+        STORED_STRATEGY.store(i as i64, std::sync::atomic::Ordering::Relaxed);
+    }
+    log::info!("indirme durumu yüklendi: {live} geçerli adres");
+}
+
+fn save_state() {
+    let Some(p) = state_path() else { return };
+    let now = now_secs();
+    let mut urls = std::collections::HashMap::new();
+    if let Ok(m) = url_cache().lock() {
+        for (id, v) in m.iter() {
+            if v.expires_at > now {
+                urls.insert(
+                    id.clone(),
+                    PersistUrl {
+                        u: v.url.clone(),
+                        ua: v.user_agent.clone(),
+                        len: v.content_length,
+                        exp: v.expires_at,
+                    },
+                );
+            }
+        }
+    }
+    let strat = STORED_STRATEGY.load(std::sync::atomic::Ordering::Relaxed);
+    let st = DlState {
+        urls,
+        native_skip_until: NATIVE_SKIP_UNTIL.load(std::sync::atomic::Ordering::Relaxed),
+        last_good_strategy: if strat >= 0 { Some(strat as usize) } else { None },
+    };
+    if let Ok(json) = serde_json::to_vec(&st) {
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        // Önce geçici dosya: yarım yazılmış JSON bir dahaki açılışta okunamaz.
+        let tmp = p.with_extension("json.tmp");
+        if std::fs::write(&tmp, &json).is_ok() {
+            let _ = replace_file(&tmp, &p);
+        }
+    }
+}
+
+/// Kaydedilmiş "en son işe yarayan indirme yolu" (ytdlp.rs okur).
+pub fn stored_strategy() -> Option<usize> {
+    let v = STORED_STRATEGY.load(std::sync::atomic::Ordering::Relaxed);
+    if v >= 0 {
+        Some(v as usize)
+    } else {
+        None
+    }
+}
+
+/// İşe yarayan yolu KAYDET — bir sonraki açılışta ilk o denenir.
+pub fn store_strategy(idx: usize) {
+    if stored_strategy() == Some(idx) {
+        return;
+    }
+    STORED_STRATEGY.store(idx as i64, std::sync::atomic::Ordering::Relaxed);
+    mark_dirty();
+}
+
 // ═══ URL ÖNBELLEĞİ ═══════════════════════════════════════════════════════
 // ⭐ ÖLÇÜM (2026-08-19): bir şarkının hazır olma süresi ~3.3 sn ve bunun
 // 2.45 sn'si URL ÇÖZÜMÜ (yt-dlp süreci + çıkarım). İndirmenin kendisi 0.8 sn.
@@ -290,6 +438,7 @@ pub fn cache_url(video_id: &str, url: &str, user_agent: &str, content_length: u6
         let now = now_secs();
         m.retain(|_, v| v.expires_at > now);
     }
+    mark_dirty();
 }
 
 /// Önbellekte geçerli bir URL var mı?
@@ -317,6 +466,7 @@ pub fn forget_url(video_id: &str) {
     if let Ok(mut m) = url_cache().lock() {
         m.remove(video_id);
     }
+    mark_dirty();
 }
 
 pub fn cached_count() -> usize {

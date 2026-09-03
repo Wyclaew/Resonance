@@ -208,6 +208,8 @@ const tr = {
   "stats.empty": "Bu aralıkta dinleme kaydı yok.",
 
   // — Zevk profili (modelin içi + elle düzeltme)
+  "sync.remoteQueueOffer": "{device} cihazında bıraktığın sıra var — getirilsin mi?",
+  "sync.remoteQueueBring": "Getir",
   "sync.sessionLost":
     "Senkron oturumu düştü — Hesap & Senkron'dan tekrar giriş yap (o zamana kadar veriler yalnız bu cihazda kalır).",
   "sync.resumedFrom": "{device} cihazındaki sıra yüklendi — çalmaya basınca devam eder",
@@ -963,6 +965,8 @@ const en: Record<TrKey, string> = {
   "stats.history": "History",
   "stats.empty": "No listening in this range.",
 
+  "sync.remoteQueueOffer": "{device} has a queue you left behind — bring it here?",
+  "sync.remoteQueueBring": "Bring it",
   "sync.sessionLost":
     "Sync signed out — sign in again from Account & Sync (until then your data stays on this device only).",
   "sync.resumedFrom": "Loaded the queue from {device} — press play to continue",

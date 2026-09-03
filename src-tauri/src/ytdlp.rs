@@ -1121,16 +1121,54 @@ pub fn diagnose(cache_dir: &Path, cookies: Option<&str>) -> String {
 
     const TEST_ID: &str = "dQw4w9WgXcQ";
     let t0 = std::time::Instant::now();
+
+    // Hızı okunabilir yazan yardımcı: "3.3 MB / 1.2 sn (2.8 MB/sn)".
+    fn speed(bytes: u64, secs: f32) -> String {
+        let mb = bytes as f32 / 1_048_576.0;
+        if secs <= 0.01 {
+            return format!("{mb:.1} MB");
+        }
+        format!("{mb:.1} MB / {secs:.1} sn ({:.1} MB/sn)", mb / secs)
+    }
+
+    // ── KATMAN 1: kendi indiricimiz, adresi de KENDİMİZ çözüyoruz ──────────
+    // (InnerTube). Bu yol yt-dlp süreci hiç başlatmaz — en hızlısı, ama
+    // PO Token kısıtı yüzünden çoğu ağda baytlar 403 alır.
     let native = native_dl::resolve_innertube(TEST_ID, false);
     line(
         &mut out,
-        "\nyerel adres çözümü",
+        "\nkatman 1 · kendi indirici (kendi adres çözümümüz)",
         match &native {
-            Ok(s) => format!("tamam ({}, {} bayt)", s.via, s.content_length),
-            Err(e) => format!("olmadı — {e}"),
+            Ok(s) => format!("adres tamam ({}, {} bayt)", s.via, s.content_length),
+            Err(e) => format!("adres ÇÖZÜLEMEDİ — {e}"),
         },
     );
+    let mut native_ok = false;
+    if let Ok(src) = &native {
+        let t = std::time::Instant::now();
+        match native_dl::fetch_with_url(
+            cache_dir,
+            "diag_native",
+            &src.url,
+            &src.user_agent,
+            src.content_length,
+        ) {
+            Ok(p) => {
+                native_ok = true;
+                let sz = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+                line(
+                    &mut out,
+                    "  └ indirme",
+                    format!("tamam — {}", speed(sz, t.elapsed().as_secs_f32())),
+                );
+                let _ = std::fs::remove_file(&p);
+            }
+            Err(e) => line(&mut out, "  └ indirme", format!("BAŞARISIZ — {e}")),
+        }
+    }
 
+    // ── KATMAN 2: adresi yt-dlp çözer, baytları BİZ indiririz ─────────────
+    // Pratikte kurtaran yol genelde bu.
     let base = format!("https://www.youtube.com/watch?v={TEST_ID}");
     let args: Vec<&str> = vec![
         "-f",
@@ -1140,6 +1178,7 @@ pub fn diagnose(cache_dir: &Path, cookies: Option<&str>) -> String {
         "--",
         &base,
     ];
+    let t_res = std::time::Instant::now();
     let resolved = resolve_url_with_ytdlp(&args, Some("youtube:player_client=web_embedded"), None)
         .or_else(|| resolve_url_with_ytdlp(&args, None, None))
         .or_else(|| {
@@ -1151,39 +1190,50 @@ pub fn diagnose(cache_dir: &Path, cookies: Option<&str>) -> String {
         });
     line(
         &mut out,
-        "yt-dlp adres çözümü",
+        "katman 2 · kendi indirici (yt-dlp adres çözümü)",
         match &resolved {
-            Some((_, _, len)) => format!("tamam ({len} bayt)"),
-            None => "BAŞARISIZ".to_string(),
+            Some((_, _, len)) => format!(
+                "adres tamam ({len} bayt, {:.1} sn)",
+                t_res.elapsed().as_secs_f32()
+            ),
+            None => "adres ÇÖZÜLEMEDİ".to_string(),
         },
     );
 
     let mut downloaded = false;
     if let Some((u, ua, len)) = &resolved {
+        let t = std::time::Instant::now();
         match native_dl::fetch_with_url(cache_dir, "diag", u, ua, *len) {
             Ok(p) => {
                 downloaded = true;
                 let sz = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-                line(&mut out, "test indirme", format!("tamam ({sz} bayt)"));
+                line(
+                    &mut out,
+                    "  └ indirme",
+                    format!("tamam — {}", speed(sz, t.elapsed().as_secs_f32())),
+                );
                 let _ = std::fs::remove_file(&p);
             }
-            Err(e) => line(&mut out, "test indirme", format!("BAŞARISIZ — {e}")),
+            Err(e) => line(&mut out, "  └ indirme", format!("BAŞARISIZ — {e}")),
         }
     }
+
+    // ── KATMAN 3 + ffmpeg: uygulamanın GERÇEK yolu ────────────────────────
     // ⭐ ASIL SORU BU: "bu bilgisayar bir şarkıyı ÇALINABİLİR hâle getirebiliyor
-    // mu?" Yukarıdaki testler yalnız HIZLI YOLU (kendi indiricimiz) deniyordu;
-    // o başarısız olsa bile uygulama yt-dlp'nin kendi indirmesine düşüyor ve
-    // şarkı çalabiliyor. Eski panel bunu hiç denemeden "baytlar indirilemiyor"
-    // diyip kullanıcıyı güvenlik duvarı aramaya yolluyordu.
+    // mu?" Üstteki katmanlar başarısız olsa bile uygulama yt-dlp'nin kendi
+    // indirmesine düşüp şarkıyı çalabiliyor. Eski panel bunu hiç denemeden
+    // "baytlar indirilemiyor" diyip kullanıcıyı güvenlik duvarı aramaya
+    // yolluyordu.
     let _ = std::fs::remove_file(cache_dir.join(format!("{TEST_ID}.aac")));
+    let t_full = std::time::Instant::now();
     let full_chain = ensure_audio(cache_dir, TEST_ID, cookies);
     line(
         &mut out,
-        "tam zincir (yt-dlp indirmesi + dönüştürme)",
+        "tam zincir (tüm katmanlar + ffmpeg)",
         match &full_chain {
             Ok(p) => {
                 let sz = std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
-                format!("tamam ({sz} bayt)")
+                format!("tamam — {}", speed(sz, t_full.elapsed().as_secs_f32()))
             }
             Err(e) => format!("BAŞARISIZ — {e}"),
         },
@@ -1200,6 +1250,12 @@ pub fn diagnose(cache_dir: &Path, cookies: Option<&str>) -> String {
     );
 
     out.push_str("\nSONUÇ: ");
+    if playable && native_ok {
+        out.push_str(
+            "her şey çalışıyor ve EN HIZLI yol (kendi indiricimiz, kendi adres çözümümüz)              da açık — şarkılar en kısa sürede başlıyor.\n",
+        );
+        return out;
+    }
     out.push_str(match (playable, downloaded, resolved.is_some(), ffok) {
         (true, true, _, _) => {
             "her şey çalışıyor. Bir şarkı yine de açılmıyorsa sorun bu bilgisayarda değil;              o şarkı kısıtlı/kaldırılmış olabilir."
@@ -1450,6 +1506,50 @@ fn find_src(cache_dir: &Path, video_id: &str) -> Option<PathBuf> {
 /// (~2sn) maliyetini kaldırır ve rodio'nun m4a/MP4 başlatma paniğini önler
 /// (panik MP4 konteynerinde; ADTS akışında yok). m4a değilse (opus/webm)
 /// aac'ye transcode'a düşülür.
+/// ⭐ BORU HATTI: İNDİRİRKEN DÖNÜŞTÜR (v1.9.0).
+///
+/// Klasik yol: önce dosyanın TAMAMI inip diske yazılır, SONRA ffmpeg onu
+/// ADTS'ye çevirir — iki iş sırayla yapılır. Oysa indirdiğimiz baytları
+/// doğrudan ffmpeg'in borusuna verirsek dönüştürme indirmeyle BİRLİKTE akar
+/// ve dönüştürme süresi (~0.3-0.5 sn) tamamen kaybolur. Akış yolu (v1.8.1)
+/// zaten bunu yapıyordu; burada aynı motoru "sonuna kadar bekleyen" biçimde
+/// normal indirmede de kullanıyoruz.
+///
+/// ⚠️ Yalnız GÜVENLİ olduğu durumda: kaynak mp4/m4a (ADTS'ye `-c:a copy` ile
+/// geçebilir) ve kalite ayarı yeniden kodlama istemiyor. Aksi hâlde None döner
+/// ve çağıran klasik yola devam eder — davranış değişmez.
+fn pipeline_to_aac(
+    cache_dir: &Path,
+    video_id: &str,
+    src: native_dl::AudioSource,
+) -> Option<std::path::PathBuf> {
+    if audio_quality() == "medium" {
+        return None; // 96k yeniden kodlama gerekir, `copy` yetmez
+    }
+    // googlevideo adresi taşıdığı mime'ı söyler; mp4 değilse `copy` başarısız
+    // olur ve dosyayı BOŞUNA bir kez daha indirmek zorunda kalırdık.
+    let is_mp4 = src.url.contains("mime=audio%2Fmp4") || src.url.contains("mime=audio/mp4");
+    if !is_mp4 {
+        return None;
+    }
+    if !native_dl::probe_url(&src) {
+        return None;
+    }
+    let dest = cache_dir.join(format!("{video_id}.stream.aac"));
+    let h = native_dl::stream_to_adts(src, dest, ffmpeg()).ok()?;
+    // Akış yolundan farkı: burada SONUNA KADAR bekliyoruz.
+    while !h.done.load(std::sync::atomic::Ordering::Relaxed) {
+        std::thread::sleep(std::time::Duration::from_millis(40));
+    }
+    let _ = std::fs::remove_file(&h.path); // geçici .stream.aac
+    if h.failed.load(std::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
+    // stream_to_adts başarıda nihai ada kopyalar.
+    let final_path = cache_dir.join(format!("{video_id}.aac"));
+    final_path.exists().then_some(final_path)
+}
+
 pub fn ensure_audio(
     cache_dir: &Path,
     video_id: &str,
@@ -1607,6 +1707,21 @@ pub fn ensure_audio(
                 continue;
             };
             native_dl::cache_url(video_id, &u, &ua, len);
+            // ⭐ Önce BORU HATTI: indirirken dönüştür (dönüştürme süresi kaybolur).
+            let piped = pipeline_to_aac(
+                cache_dir,
+                video_id,
+                native_dl::AudioSource {
+                    url: u.clone(),
+                    user_agent: ua.clone(),
+                    content_length: len,
+                    via: format!("yt-dlp:{name}"),
+                },
+            );
+            if let Some(p) = piped {
+                log::info!("boru hattı ({name}) ile hazır {video_id}");
+                return Ok(p);
+            }
             match native_dl::fetch_with_url(cache_dir, video_id, &u, &ua, len) {
                 Ok(_) => {
                     log::info!("yerel indirici + {name} URL ile kurtarıldı {video_id}");
@@ -1667,7 +1782,9 @@ pub fn ensure_audio(
     // ⭐ ÖĞRENEN SIRA: en son işe yarayan yol bir sonraki indirmede İLK denenir.
     // YouTube'un hangi yolu kapattığı zamanla değişiyor; sabit sıra her seferinde
     // ölü yola çarpıp saniyeler kaybettirirdi.
-    let start = LAST_GOOD_STRATEGY.load(Ordering::Relaxed) % STRATEGIES.len();
+    let start = native_dl::stored_strategy()
+        .unwrap_or_else(|| LAST_GOOD_STRATEGY.load(Ordering::Relaxed))
+        % STRATEGIES.len();
     let mut out: Option<std::process::Output> = None;
     let mut last_err = String::new();
 
@@ -1692,6 +1809,10 @@ pub fn ensure_audio(
             let o = run_yt_dlp_timeout(&a, if use_cookies { cookies } else { None }, 240)?;
             if o.status.success() {
                 LAST_GOOD_STRATEGY.store(idx, Ordering::Relaxed);
+                // ⭐ Diske de yaz: bir sonraki AÇILIŞTA da ilk bu denensin.
+                // Yoksa her açılışta bu makinede çalışmayan yollar yeniden
+                // deneniyor ve ilk şarkılar boşuna geç başlıyordu.
+                native_dl::store_strategy(idx);
                 if k > 0 || round > 0 {
                     log::info!("indirme kurtarıldı {video_id} — yol: {name}");
                 }

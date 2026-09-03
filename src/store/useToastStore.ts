@@ -30,7 +30,13 @@ interface ToastState {
    * sayaç artar — 20 kere "indirilemedi" görmek yerine "×20" görürsün.
    */
   problems: ProblemEntry[];
-  show: (message: string, kind?: ToastKind, action?: ToastAction) => void;
+  show: (
+    message: string,
+    kind?: ToastKind,
+    action?: ToastAction,
+    /** Görünme süresi (ms). Verilmezse aksiyonluda 6 sn, düzde 4 sn. */
+    durationMs?: number
+  ) => void;
   dismiss: (id: number) => void;
   clearProblems: () => void;
 }
@@ -42,7 +48,7 @@ const MAX_PROBLEMS = 20;
 export const useToastStore = create<ToastState>((set) => ({
   toasts: [],
   problems: [],
-  show: (message, kind = "info", action) => {
+  show: (message, kind = "info", action, durationMs) => {
     const id = ++counter;
     set((s) => {
       const next: Partial<ToastState> = {
@@ -65,7 +71,7 @@ export const useToastStore = create<ToastState>((set) => ({
       () => {
         set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
       },
-      action ? 6000 : 4000 // aksiyon (ör. "Geri al") varsa biraz daha uzun dursun
+      durationMs ?? (action ? 6000 : 4000) // aksiyonlu ("Geri al") biraz uzun dursun
     );
   },
   dismiss: (id) =>

@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.8.9** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.9.0** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,49 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.9.0 (MENÜ ÇUBUĞU OYNATICISI + HIZ):
+• **⭐ MENÜ ÇUBUĞU / TEPSİ OYNATICISI** (`src-tauri/src/tray.rs`): macOS menü
+  çubuğunda (Windows'ta tepside) simge + çalan parçanın adı. SOL tık mini
+  paneli SİMGENİN ALTINDA açar/kapatır, sağ tık menü (oynat/duraklat, önceki,
+  sonraki, mini oynatıcı, ana pencereyi göster, çıkış). Menü eylemleri Rust'ta
+  İŞLENMEZ: `mini-command` olayı yayılır, ANA pencere uygular (mini oynatıcıyla
+  aynı sözleşme — kuyruk mantığı tek yerde kalsın).
+  ⚠️ **ANA PENCERE KAPANINCA UYGULAMA ARTIK ÇIKMIYOR, GİZLENİYOR** (kullanıcının
+  isteği: "arka planda uygulamayı kapatıp küçük oynatıcıyla takılabilelim").
+  Gerçek çıkış: tepsi menüsü → Çıkış (ya da ⌘Q). Tepsi simgesi olduğu için
+  uygulama görünmez biçimde asılı kalmıyor — v1.8.6'daki "mini açıkken ana
+  kapanınca uygulama erişilemez oluyordu" sorununun doğru çözümü bu.
+  ⚠️ **`on_window_event` bir SETTER'dır**: ikinci çağrı birincinin YERİNE geçer
+  (iki iş tek handler'da yapılmalı — bu hata bir kez yapıldı).
+  ⚠️ **Menü çubuğu simgesi UYGULAMA İKONU OLAMAZ**: macOS tek renk (template)
+  bekler, renkli ikon orada boş bir kare gibi görünüyor. `icons/tray.png`
+  logonun 7 çubuğunun yalnız-alfa hâli (üreteci bu commit'in mesajında).
+• **⭐ ADRESLER ARTIK DİSKTE** (`native_dl::set_state_dir` → `dl_state.json`):
+  çözülmüş URL'ler (kendi `expire` damgalarıyla), "en son işe yarayan indirme
+  yolu" ve "katman 1 bu makinede askıda" bilgisi kapanışta unutuluyordu.
+  ÖLÇÜM: hazır olma süresinin ~%70'i adres çözümü (2.45 sn) → açılıştan sonraki
+  ilk şarkılar boşuna yeniden çözülüyordu. Dosya bozulursa hiçbir şey kırılmaz,
+  yalnız eski davranışa dönülür.
+• **⭐ BORU HATTI: İNDİRİRKEN DÖNÜŞTÜR** (`pipeline_to_aac`): klasik yolda önce
+  dosyanın tamamı iniyor, SONRA ffmpeg çalışıyordu. Artık baytlar doğrudan
+  ffmpeg'e veriliyor (akış yolunun motoru, "sonuna kadar bekleyen" biçimde) →
+  dönüştürme süresi indirmenin içinde eriyor. ⚠️ Yalnız kaynak mp4/m4a ise
+  (`mime=audio/mp4`) ve kalite "medium" DEĞİLSE; aksi hâlde `-c:a copy`
+  başarısız olur ve dosya BOŞUNA ikinci kez inerdi.
+• **⭐ EŞZAMANLILIK BAĞLANTIYA GÖRE** (`tune_dl_concurrency`): sabit 3 yerine
+  `native_dl::health()` ölçümüyle 2-6 arası. Hızlı bağlantıda kuyruk daha çabuk
+  dolar, kopan bağlantıda paralel indirmeler birbirini yemez.
+• **⭐ TEŞHİS PANELİ KATMAN KATMAN**: "katman 1 · kendi indirici (kendi adres
+  çözümümüz)", "katman 2 · kendi indirici (yt-dlp adresi)", "tam zincir" —
+  her biri için MB/sn hızıyla. Hangi yolun çalıştığı ve ne kadar hızlı olduğu
+  artık tek bakışta görünüyor.
+• **⛔ CİHAZLAR ARASI KUYRUK DEVRALMA ARTIK OTOMATİK DEĞİL**: kullanıcı
+  "benim isteğim dışında Windows keşfetim Mac'e geçiyor" dedi. Haklı — başka
+  cihazda gezinirken buradaki Keşfet partisinin sessizce değişmesi en sinir
+  bozucu senkron davranışı. Artık yalnız TOAST ile soruluyor ("… getirilsin
+  mi? · Getir") ve aynı kuyruk için bir kez sorulur (localStorage damgası).
+  Diğer açık yollar duruyor: Şu An'daki "kaldığın yer" kartı ve Keşfet'teki
+  "Başka cihaz" seçici.
 v1.8.9 (WINDOWS'TA "HİÇBİR ŞARKI AÇILMIYOR" — ÜÇ AYRI SEBEP):
 • **⭐⭐ HAFTALIK yt-dlp GÜNCELLEMESİ WINDOWS'TA 10 HAFTADIR SESSİZCE
   BAŞARISIZDI.** ÖLÇÜLDÜ (kullanıcının teşhis çıktısı): ikili **2026.06.09**,
@@ -374,6 +417,10 @@ sonra `cd src-tauri && cargo check --target x86_64-pc-windows-gnu`. Bitince saht
 - **yt-dlp/ffmpeg** (`ytdlp.rs`): `resolve_bin()` sırası → sistem → **app_data/bin (runtime güncellenen)** →
   sidecar → PATH.
 - **Öneri** (`src/lib/recommender.ts`): tek skorlama modeli (aşağıda ayrı bölüm).
+- **Menü çubuğu / tepsi** (`src-tauri/src/tray.rs`): simge + menü + çalan parça adı.
+  Sol tık mini paneli simgenin altında açar. Menü eylemleri `mini-command` olayıyla
+  ANA pencereye gider (mini oynatıcıyla aynı sözleşme). Ana pencere kapanınca
+  uygulama GİZLENİR; çıkış tepsi menüsünden.
 - **Mini oynatıcı köprüsü** (`src/lib/miniPlayer.ts`): iki pencerenin ORTAK sözleşmesi
   (`MiniState` / `MiniCommand` tipleri, boyutlar, konum kaydı). Mini ayrı JS bağlamıdır:
   store/DB/ayar GÖREMEZ → durum ana pencereden `mini-state` ile iter, eylemler
