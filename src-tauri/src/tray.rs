@@ -112,8 +112,10 @@ fn toggle_panel(app: &AppHandle, near: Option<tauri::PhysicalPosition<f64>>) {
     if let Some(win) = app.get_webview_window("mini") {
         let visible = win.is_visible().unwrap_or(false);
         if visible {
+            log::info!("mini panel kapatıldı (menü çubuğu tıklaması)");
             let _ = win.hide();
         } else {
+            log::info!("mini panel açıldı (menü çubuğu tıklaması)");
             place(&win, near);
             let _ = win.show();
             let _ = win.set_focus();
@@ -137,6 +139,7 @@ fn toggle_panel(app: &AppHandle, near: Option<tauri::PhysicalPosition<f64>>) {
     .build();
     match built {
         Ok(win) => {
+            log::info!("mini panel ilk kez kuruldu (menü çubuğu)");
             place(&win, near);
             let _ = win.show();
             let _ = win.set_focus();

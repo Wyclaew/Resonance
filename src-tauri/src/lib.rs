@@ -509,6 +509,16 @@ pub fn run() {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = e {
                         api.prevent_close();
                         let _ = w.hide();
+                        // ⭐ macOS: pencere kapanınca uygulama TAMAMEN menü
+                        // çubuğuna çekilsin — Dock'taki ikon da kaybolur
+                        // (kullanıcının isteği: "sadece yukarıya hapsetme").
+                        // Geri dönüş `focus_main_window`'da Regular'a alır.
+                        #[cfg(target_os = "macos")]
+                        {
+                            let _ = w
+                                .app_handle()
+                                .set_activation_policy(tauri::ActivationPolicy::Accessory);
+                        }
                     }
                 });
             }

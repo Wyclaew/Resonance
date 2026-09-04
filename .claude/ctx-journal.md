@@ -1,4 +1,4 @@
-_Otomatik — 2026-08-29 18:55, son olculen baglam ~589K_
+_Otomatik — 2026-09-03 22:47, son olculen baglam ~678K_
 
 **Degistirilen dosyalar**
 - `../MusicPlayer/src/store/usePlayerStore.ts` (52x)
@@ -21,15 +21,15 @@ _Otomatik — 2026-08-29 18:55, son olculen baglam ~589K_
 - `src/views/DiscoverView.tsx` (7x)
 
 **Son komutlar**
-- `for i in $(seq 1 16); do if grep -q "EXIT=" /tmp/build21.log 2>/dev/null; then break; fi; sleep 15; done; tail`
-- `cd /Users/erne/Desktop/Resonance && pkill -f "Resonance.app"; sleep 1; : > /tmp/res_err.log; open "src-tauri/t`
 - `python3 -`
-- `(npm run build > /tmp/fe18.log 2>&1 && npm run tauri build -- --debug --bundles app > /tmp/build22.log 2>&1; e`
-- `cd /Users/erne/Desktop/Resonance && for i in $(seq 1 16); do if grep -q "EXIT=" /tmp/build22.log 2>/dev/null; `
+- `for i in $(seq 1 20); do if grep -q "EXIT=" /tmp/build27.log 2>/dev/null; then break; fi; sleep 15; done; tail`
+- `tail -12 ~/Library/Logs/com.resonance.app/Resonance.log | grep -vE "adres ısıtma|önden çözüldü"`
+- `grep -E "boru hattı|yerel indirici|hazır dQw" ~/Library/Logs/com.resonance.app/Resonance.log | tail -5`
+- `git status --short | grep -v "^ M .claude" | head -20; git check-ignore -v src-tauri/icons/tray.png || echo "t`
 - `git add -A && git commit -q -F -`
-- `git push origin main 2>&1 | tail -2 && git tag v1.8.9 && git push origin v1.8.9 2>&1 | tail -2`
-- `sleep 25; gh run list --limit 1 2>&1 | head -2`
-- `until gh run list --limit 1 2>/dev/null | grep -q "v1.8.9"; do sleep 5; done; gh run list --limit 1 | head -1`
-- `until [ "$(gh run view 33261030562 --json status -q .status 2>/dev/null)" = "completed" ]; do sleep 30; done; `
-- `gh run view 33261030562 --json status,conclusion,jobs -q '.status, (.conclusion//"-"), (.jobs[] | .name + ": "`
-- `gh release view v1.8.9 --json isDraft,assets -q '"taslak: "+(.isDraft|tostring), (.assets[]|.name)' 2>&1 | hea`
+- `git push origin main 2>&1 | tail -2 && git tag v1.9.0 && git push origin v1.9.0 2>&1 | tail -2`
+- `until gh run list --limit 1 2>/dev/null | grep -q "v1.9.0"; do sleep 5; done; gh run list --limit 1 | head -1`
+- `until [ "$(gh run view 33797121208 --json status -q .status 2>/dev/null)" = "completed" ]; do sleep 45; done; `
+- `gh run view 33797121208 --json status,conclusion,jobs -q '.status, (.conclusion//"-"), (.jobs[] | .name + ": "`
+- `until [ "$(gh run view 33797121208 --json status -q .status 2>/dev/null)" = "completed" ]; do sleep 60; done; `
+- `gh release view v1.9.0 --json assets -q '.assets[].name' | head -5`

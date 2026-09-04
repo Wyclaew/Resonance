@@ -433,6 +433,13 @@ pub fn set_tray_title(app: AppHandle, text: String) {
 /// pencere gizlenmişse kullanıcının başka dönüş yolu yok.
 #[tauri::command]
 pub async fn focus_main_window(app: AppHandle) -> Result<(), String> {
+    // macOS'ta pencere gizlenirken uygulama menü çubuğuna çekilmişti
+    // (Accessory); pencereyi geri getirirken normal uygulamaya dönüyoruz,
+    // yoksa Dock ikonu ve ⌘Tab sırası eksik kalır.
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+    }
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.unminimize();
         let _ = w.show();

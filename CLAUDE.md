@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.9.0** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.9.1** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,18 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.9.1 (MENÜ ÇUBUĞUNA TAM ÇEKİLME):
+• **macOS'ta ana pencere kapanınca DOCK İKONU DA KAYBOLUYOR**
+  (`ActivationPolicy::Accessory`): kullanıcının isteği "mini ui'ı da kapatıp
+  sadece yukarıya hapsetme". Artık pencere kapalıyken uygulama yalnız menü
+  çubuğunda yaşıyor; simgeye basınca mini panel açılıyor, tekrar basınca
+  kapanıyor, ekranda başka hiçbir iz kalmıyor.
+  ⚠️ Geri dönüşte (`focus_main_window`) politika `Regular`a ÇEKİLMELİ — yoksa
+  pencere geri gelir ama Dock ikonu ve ⌘Tab sırası eksik kalır.
+  ⚠️ Accessory modda ⌘Q çalışmayabilir; gerçek çıkış tepsi menüsünde.
+• Panel aç/kapa artık log'a yazıyor ("mini panel açıldı/kapatıldı") — tepsi
+  davranışı ekran görüntüsü olmadan da doğrulanabilsin diye.
+
 v1.9.0 (MENÜ ÇUBUĞU OYNATICISI + HIZ):
 • **⭐ MENÜ ÇUBUĞU / TEPSİ OYNATICISI** (`src-tauri/src/tray.rs`): macOS menü
   çubuğunda (Windows'ta tepside) simge + çalan parçanın adı. SOL tık mini
