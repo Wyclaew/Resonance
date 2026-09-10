@@ -2,6 +2,7 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 import { getDb, isTauri } from "../db";
 import { getSupabase, getUserId } from "./client";
 import { isSyncConfigured } from "./config";
+import { loadSettings, setSetting } from "../settings";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Resonance senkron motoru — local-first, delta sync, last-write-wins.
@@ -197,6 +198,13 @@ const NUM_DEFAULT_0 = new Set([
 const NUM_DEFAULT_1 = new Set(["weight"]);
 
 const PAGE = 500; // pull sayfa boyutu
+
+// ⭐ 24 SAATTE BİR TAM TUR ("derin onarım"). Geriye pay yeni kaymayı önler ama
+// GEÇMİŞTE kaçmış satırları geri getirmez. Tablolar küçük (birkaç yüz satır),
+// günde bir kez baştan çekmek ucuz ve iki cihazı kendiliğinden eşitler.
+const DEEP_PULL_EVERY_MS = 24 * 3600 * 1000;
+const DEEP_PULL_KEY = "sync.lastDeepPull";
+let deepSyncPending = false;
 const CHUNK = 400; // push yığın boyutu
 const EPOCH0 = "1970-01-01T00:00:00Z";
 
@@ -341,7 +349,28 @@ async function pullTable(spec: TableSpec, userId: string): Promise<number> {
   const sql = upsertSql(spec);
 
   const { lastPulled } = await readWatermarks(spec.name);
-  let since = lastPulled || EPOCH0;
+  // ⭐⭐ SU TERAZİSİNE GERİYE PAY (v1.9.2) — CİHAZLAR ARASI SATIR KAYBININ KÖKÜ.
+  //
+  // `synced_at` sunucuda TRIGGER ile yazılır ve Postgres'te `now()` işlem
+  // BAŞLANGIÇ zamanıdır. İki cihaz aynı anda yazarken: A işlemi T1'de başlar,
+  // B işlemi T2'de (T2 > T1) başlar ama B ÖNCE commit eder. Tam bu aralıkta
+  // pull yapan cihaz yalnız B'yi görür ve su terazisini T2'ye taşır; A commit
+  // ettiğinde damgası T1 (< T2) olduğu için `gt(synced_at, T2)` filtresine
+  // ARTIK HİÇ TAKILMAZ → o satır o cihaza SONSUZA DEK gelmez.
+  // Kullanıcının gördüğü tablo: "Favorite Songs Mac'te 240, Windows'ta 241".
+  //
+  // Çözüm: pencereyi biraz geriden başlat. Upsert'ler idempotent (LWW), aynı
+  // satırı tekrar almak zararsız — sadece birkaç satırlık fazladan iş.
+  const OVERLAP_MS = 2 * 60 * 1000;
+  const base = lastPulled || EPOCH0;
+  let since = base;
+  if (deepSyncPending) {
+    // 24 saatte bir TAM tur: eski kaçmış satırlar da onarılsın.
+    since = EPOCH0;
+  } else if (lastPulled) {
+    const t = Date.parse(lastPulled);
+    if (Number.isFinite(t)) since = new Date(t - OVERLAP_MS).toISOString();
+  }
   let applied = 0;
 
   for (;;) {
@@ -375,7 +404,13 @@ async function pullTable(spec: TableSpec, userId: string): Promise<number> {
         applied++;
         if (!stopAdvancing) safeWatermark = String(row.synced_at);
       } catch (e) {
-        console.error(`[sync] ${spec.name} satırı uygulanamadı:`, e);
+        // Satırın KİMLİĞİNİ de yaz: kimliksiz hata ayıklanamıyor (mobilde
+        // 54 satır bu yüzden sessizce düşerken sebebi bulunamadı).
+        const key = spec.conflict
+          .split(",")
+          .map((c) => `${c.trim()}=${String((row as Record<string, unknown>)[c.trim()] ?? "?")}`)
+          .join(" ");
+        console.error(`[sync] ${spec.name} satırı uygulanamadı (${key}):`, e);
         stopAdvancing = true;
       }
     }
@@ -400,12 +435,26 @@ async function pushTable(spec: TableSpec, userId: string): Promise<number> {
   if (!sb) return 0;
   const db = await getDb();
   const { lastPushed } = await readWatermarks(spec.name);
+  // ⭐⭐ PUSH TARAFINDA DA GERİYE PAY (v1.9.2) — kaybolan satırın ASIL yeri.
+  //
+  // Su terazisi, gönderilen satırların EN BÜYÜK `updated_at`'ine taşınıyor.
+  // Ama `updated_at` cihaz saatinden gelir ve TOPLU yazımlarda (liste içe
+  // aktarma, çoklu ekleme) çok sayıda satır AYNI milisaniyeyi taşır. Seçim
+  // yapıldıktan sonra aynı damgayla yazılan bir satır `> lastPushed`
+  // koşuluna bir daha TAKILMAZ → o satır buluta HİÇ çıkmaz.
+  // Kullanıcının tablosu: "Windows'ta 241, Mac'te 240" — eksik satır Mac'e
+  // gelmiyordu çünkü buluta hiç ulaşmamıştı.
+  //
+  // Çözüm: pencereyi 60 sn geriden başlat (upsert idempotent, LWW zaten
+  // eskiyi ezmiyor) + derin turda HER ŞEYİ yeniden gönder.
+  const PUSH_OVERLAP_MS = 60 * 1000;
+  const from = deepSyncPending ? 0 : Math.max(0, lastPushed - PUSH_OVERLAP_MS);
 
   const rows = await db.select<Record<string, unknown>[]>(
     `SELECT ${spec.cols.join(", ")} FROM ${spec.name}
      WHERE updated_at > $1${spec.pushWhere ? ` AND ${spec.pushWhere}` : ""}
      ORDER BY updated_at ASC`,
-    [lastPushed]
+    [from]
   );
   if (rows.length === 0) return 0;
 
@@ -481,6 +530,19 @@ export async function syncNow(mode: "full" | "push" | "pull" = "full"): Promise<
 
     // ÖNCE PUSH: yereldeki değişiklik buluta çıkmadan pull edilirse, gelen
     // eski satır LWW'de kaybeder ama gereksiz iş olur. Push→pull daha temiz.
+    // Derin onarım turu mu? (günde bir; push'u da kapsar → kaçmış satırlar
+    // buluta çıkar, sonra diğer cihaz onları çeker.)
+    deepSyncPending = false;
+    if (mode === "full") {
+      try {
+        const last = Number((await loadSettings())[DEEP_PULL_KEY] ?? 0);
+        deepSyncPending = !Number.isFinite(last) || Date.now() - last > DEEP_PULL_EVERY_MS;
+      } catch {
+        deepSyncPending = false;
+      }
+      if (deepSyncPending) console.info("[resonance] senkron: derin onarım turu");
+    }
+
     if (mode !== "pull") {
       for (const spec of TABLES) {
         pushed += await guard(`${spec.name} push`, () => pushTable(spec, userId));
@@ -489,6 +551,15 @@ export async function syncNow(mode: "full" | "push" | "pull" = "full"): Promise<
     if (mode !== "push") {
       for (const spec of TABLES) {
         pulled += await guard(`${spec.name} pull`, () => pullTable(spec, userId));
+      }
+      if (deepSyncPending) {
+        deepSyncPending = false;
+        try {
+          await setSetting(DEEP_PULL_KEY, String(Date.now()));
+          console.info("[resonance] senkron: derin onarım turu tamamlandı");
+        } catch {
+          /* damga yazılamadıysa bir dahaki turda yine denenir */
+        }
       }
     }
 

@@ -273,10 +273,26 @@ export async function getPlaylistTracks(
   );
 
   // Karma için oy olaylarını çek ve parça başına decay'li topla.
+  //
+  // ⭐⭐ OY PARÇAYA AİTTİR, LİSTEYE DEĞİL (v1.9.2). Eskiden buradaki sorgu
+  // `playlist_id = $1` ile SÜZÜLÜYORDU → aynı şarkı alt barda (Keşfet
+  // bağlamı) 2, listede 1 görünüyordu ve kullanıcı 40 saniye arayla İKİ kez
+  // oy verebiliyordu (saatlik cooldown da liste bazındaydı).
+  // ⚠️ Öneri motoru oyları ZATEN parça bazında topluyor (recommender.ts,
+  // `votes v JOIN tracks t`, playlist süzgeci YOK) — yani öğrenme parça
+  // bazındaydı, yalnız GÖSTERİM liste bazındaydı. Bu düzeltme ikisini
+  // hizalıyor. `playlist_id` sütunu olay bağlamı olarak KALIR (nerede oy
+  // verildiği bilgisi öneri geçmişi için değerli).
   const events = await db.select<
     { track_id: string; value: number; created_at: number }[]
   >(
-    `SELECT track_id, value, created_at FROM votes WHERE playlist_id = $1 AND deleted = 0`,
+    `SELECT v.track_id, v.value, v.created_at
+       FROM votes v
+      WHERE v.deleted = 0
+        AND v.track_id IN (
+          SELECT track_id FROM playlist_tracks
+           WHERE playlist_id = $1 AND deleted = 0
+        )`,
     [playlistId]
   );
   const byTrack = new Map<string, VoteEvent[]>();
@@ -312,15 +328,21 @@ export async function getPlaylistTracks(
 
 // Tek bir parçanın (bir liste bağlamındaki) karma + son oy bilgisi.
 // Alt baradan (NowPlayingBar) çalan şarkıyı oylamak için.
+/**
+ * Bir parçanın karması — HANGİ LİSTEDEN oy verildiğine bakılmaz.
+ *
+ * ⚠️ `playlistId` yalnız geriye dönük imza uyumu için duruyor; hesaba
+ * KATILMAZ (bkz. getPlaylistTracks'teki uzun not).
+ */
 export async function getTrackKarma(
-  playlistId: string,
+  _playlistId: string,
   trackId: string
 ): Promise<{ karma: number; lastVoteAt?: number; myVote: Vote }> {
   const db = await getDb();
   const events = await db.select<{ value: number; created_at: number }[]>(
     `SELECT value, created_at FROM votes
-     WHERE playlist_id = $1 AND track_id = $2 AND deleted = 0`,
-    [playlistId, trackId]
+     WHERE track_id = $1 AND deleted = 0`,
+    [trackId]
   );
   const voteEvents: VoteEvent[] = events.map((e) => ({
     value: e.value,
@@ -350,11 +372,13 @@ export async function voteTrack(
 ): Promise<{ ok: boolean; cooldownRemainingMs: number }> {
   const db = await getDb();
 
-  // Cooldown kontrolü: bu (playlist, şarkı) için son oy ne zamandı?
+  // Cooldown kontrolü: bu ŞARKI için son oy ne zamandı?
+  // ⚠️ Liste bazında olduğu sürece kullanıcı aynı şarkıya Keşfet'ten ve
+  // listeden ayrı ayrı oy verebiliyordu (ölçüldü: 40 saniye arayla iki oy).
   const lastRows = await db.select<{ last: number | null }[]>(
     `SELECT MAX(created_at) AS last FROM votes
-     WHERE playlist_id = $1 AND track_id = $2 AND deleted = 0`,
-    [playlistId, trackId]
+     WHERE track_id = $1 AND deleted = 0`,
+    [trackId]
   );
   const last = lastRows[0]?.last ?? 0;
   const now = Date.now();
@@ -397,10 +421,13 @@ export async function undoVote(
   trackId: string
 ): Promise<boolean> {
   const db = await getDb();
+  // ⚠️ Son oy BAŞKA bir bağlamda (ör. Keşfet) verilmiş olabilir; oy artık
+  // parça bazında sayıldığı için geri alma da öyle olmalı — yoksa "Geri al"
+  // görünürdeki sayıyı değiştirmez.
   const rows = await db.select<{ id: number }[]>(
-    `SELECT id FROM votes WHERE playlist_id = $1 AND track_id = $2 AND deleted = 0
+    `SELECT id FROM votes WHERE track_id = $1 AND deleted = 0
      ORDER BY created_at DESC LIMIT 1`,
-    [playlistId, trackId]
+    [trackId]
   );
   const id = rows[0]?.id;
   if (id == null) return false;
@@ -411,9 +438,9 @@ export async function undoVote(
     [now, id]
   );
   const last = await db.select<{ value: number }[]>(
-    `SELECT value FROM votes WHERE playlist_id = $1 AND track_id = $2 AND deleted = 0
+    `SELECT value FROM votes WHERE track_id = $1 AND deleted = 0
      ORDER BY created_at DESC LIMIT 1`,
-    [playlistId, trackId]
+    [trackId]
   );
   const v = last[0]?.value ?? 0;
   await db.execute(

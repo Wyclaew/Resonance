@@ -15,6 +15,12 @@ export function getSupabase(): SupabaseClient | null {
         // giriş istemez. Tauri webview'inde localStorage kalıcıdır.
         persistSession: true,
         autoRefreshToken: true,
+        // ⚠️ Depoyu AÇIKÇA veriyoruz. supabase-js "tarayıcıda mıyım" sorusunu
+        // `document`in varlığıyla yanıtlıyor; React Native'de `document` YOK →
+        // kendi bellek deposuna düşüyor ve oturum her açılışta kayboluyordu
+        // (ölçüldü: mobilde AsyncStorage'da oturum anahtarı hiç oluşmadı).
+        // Masaüstünde bu değer zaten localStorage → davranış değişmez.
+        storage: typeof localStorage !== "undefined" ? localStorage : undefined,
       },
     });
   }

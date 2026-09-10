@@ -428,6 +428,39 @@ function MainApp() {
     return () => cancelAnimationFrame(id);
   }, [miniDeps, miniTheme, miniAccent, miniLang]);
 
+  // ⭐ OTOMATİK GÜNCELLEME (v1.9.2): açılıştan bir süre sonra GitHub'daki
+  // sürümü denetle. Sessiz başarısızlık BİLEREK: ağ yoksa ya da henüz
+  // yayımlanmış sürüm yoksa kullanıcıyı hata toast'ıyla rahatsız etmeyiz.
+  useEffect(() => {
+    if (!isTauri()) return;
+    const id = setTimeout(() => {
+      invoke<string | null>("check_app_update")
+        .then((version) => {
+          if (!version) return;
+          useToastStore.getState().show(
+            t("update.available", { version }),
+            "info",
+            {
+              label: t("update.install"),
+              fn: async () => {
+                useToastStore.getState().show(t("update.installing"), "info", undefined, 30_000);
+                try {
+                  await invoke("install_app_update");
+                } catch (e) {
+                  useToastStore
+                    .getState()
+                    .show(t("update.failed", { error: String(e) }), "error");
+                }
+              },
+            },
+            20_000
+          );
+        })
+        .catch(() => {});
+    }, 20_000);
+    return () => clearTimeout(id);
+  }, []);
+
   // Menü çubuğundaki (tepsi) metin: çalan parça. Uygulama gizliyken bile
   // orada ne çaldığı görünsün.
   const trackLabel = usePlayerStore((s) =>

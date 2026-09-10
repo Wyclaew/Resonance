@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Resonance",
-  "version": "1.9.1",
+  "version": "1.9.2",
   "identifier": "com.resonance.app",
   "build": {
     "frontendDist": "../dist",
@@ -30,7 +30,10 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "externalBin": ["binaries/yt-dlp", "binaries/ffmpeg"],
+    "externalBin": [
+      "binaries/yt-dlp",
+      "binaries/ffmpeg"
+    ],
     "macOS": {
       "signingIdentity": "-"
     },
@@ -43,6 +46,18 @@
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/Wyclaew/Resonance/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMwMDFBODI2Q0E0MkUwRkMKUldUODRFTEtKcWdCTU1CUXdIYkhEZ3ZhYmthTG5lSkltcU9RcFlYajdWQW5aUTRjTllQTXpzQjMK",
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

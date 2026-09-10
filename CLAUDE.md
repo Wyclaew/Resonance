@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.9.1** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.9.2** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,48 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.9.2 (OYLAR PARÇAYA AİT + SENKRON KAYBI + OTOMATİK GÜNCELLEME):
+• **⭐⭐ OY LİSTEYE DEĞİL PARÇAYA AİTTİR.** Kullanıcı ekran görüntüsüyle
+  yakaladı: aynı şarkı alt barda **2**, listede **1** görünüyordu ve aynı
+  şarkıya 40 saniye arayla İKİ kez oy verilebiliyordu. KÖK NEDEN: `votes`
+  satırı `playlist_id` taşıyor ve GÖSTERİM + COOLDOWN bu sütunla süzülüyordu;
+  Keşfet'ten verilen oy `__discovery__`, listeden verilen oy liste kimliğiyle
+  yazılıyor → aynı şarkı için İKİ AYRI SAYAÇ.
+  ⚠️ Öğrenme ZATEN parça bazındaydı (`recommender.ts`, `votes ⨝ tracks`,
+  playlist süzgeci YOK) — yani motor doğru sayıyor, yalnız arayüz yanlış
+  gösteriyordu. Artık `getTrackKarma`, `getPlaylistTracks` karma sorgusu,
+  cooldown ve `undoVote` PARÇA bazında. `playlist_id` sütunu olay bağlamı
+  olarak kalır (nerede oy verildiği bilgisi değerli).
+  ÖLÇÜLDÜ (canlı): düzeltmeden önce liste 1 / alt bar 2 → sonra ikisi de **3**
+  (parçanın gerçek oy sayısı).
+• **⭐⭐ CİHAZLAR ARASI SATIR KAYBI — SU TERAZİSİ YARIŞI.** "Favorite Songs
+  Mac'te 240, Windows'ta 241" şikâyetinin kökü:
+  - **PULL**: `synced_at` sunucuda TRIGGER ile `now()` (işlem BAŞLANGIÇ
+    zamanı) yazılıyor. A işlemi önce başlayıp SONRA commit ederse, aradaki
+    pull yalnız B'yi görür ve terazi B'ye taşınır → A satırı `gt(synced_at)`
+    süzgecine BİR DAHA takılmaz.
+  - **PUSH**: terazi gönderilen satırların MAX(`updated_at`)'ine taşınıyor;
+    toplu yazımlarda (içe aktarma/çoklu ekleme) çok satır AYNI milisaniyeyi
+    taşıdığı için seçimden sonra yazılan satır `> lastPushed` koşuluna hiç
+    takılmıyor → buluta HİÇ çıkmıyor. Eksik satır burada kalmıştı.
+  Çözüm: **her iki yönde de geriye pay** (pull 2 dk, push 60 sn; upsert'ler
+  idempotent, LWW zaten eskiyi ezmiyor) + **günde bir DERİN ONARIM TURU**
+  (push ve pull sıfırdan; tablolar birkaç yüz satır, maliyeti önemsiz).
+  ÖLÇÜLDÜ (canlı): derin tur sonrası Mac 240 → **241**, Windows'la eşitlendi.
+• **⭐ OTOMATİK GÜNCELLEME (masaüstü)**: `tauri-plugin-updater`, uç nokta
+  `releases/latest/download/latest.json`. Açılıştan 20 sn sonra denetler,
+  yeni sürüm varsa "Güncelle" düğmeli toast çıkar; Ayarlar → Hakkında'da elle
+  denetim düğmesi de var. İndirir, kurar, uygulamayı yeniden başlatır.
+  ⚠️ **İKİ ŞART** (biri eksikse sessizce çalışmaz):
+  1. CI **imzalı** üretmeli — `TAURI_SIGNING_PRIVATE_KEY` +
+     `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` gizli anahtarları (eklendi). Özel
+     anahtar repoda DEĞİL: `~/.tauri/resonance-updater.key`. **Kaybolursa
+     kurulu istemciler bir daha güncelleme alamaz** — yedekle.
+  2. Release **taslak olamaz** (`releaseDraft: false`) — `latest/download`
+     yolu yalnız yayımlanmış sürümde çalışır.
+  ⚠️ v1.9.1 ve öncesinde updater YOK → o sürümler kendini güncelleyemez;
+  1.9.2 bir kez ELLE kurulmalı, sonrası otomatik.
+
 v1.9.1 (MENÜ ÇUBUĞUNA TAM ÇEKİLME):
 • **macOS'ta ana pencere kapanınca DOCK İKONU DA KAYBOLUYOR**
   (`ActivationPolicy::Accessory`): kullanıcının isteği "mini ui'ı da kapatıp
@@ -634,6 +676,11 @@ Tüm sinyaller tek skorda birleşir:
     yt-dlp` veya sistemden kaldır). Son kullanıcıda sistemde yt-dlp yok → auto-update düzgün kullanılır.
 12. **`tracks`'e ASLA `INSERT OR REPLACE` YAPMA** → satırı silip ekler, `ON DELETE CASCADE` şarkıyı TÜM
     listelerden uçurur. `ensureTrack` (`src/lib/playlists.ts`) `ON CONFLICT(id) DO UPDATE` kullanır; onu çağır.
+13b. **⭐ OY PARÇAYA AİTTİR (v1.9.2)**: `votes.playlist_id` yalnız BAĞLAM
+    bilgisidir; karma gösterimi, saatlik cooldown ve "geri al" HANGİ listeden
+    oy verildiğine BAKMAZ. Yeni bir oy sorgusu yazarken `playlist_id` ile
+    SÜZME — aynı şarkı iki farklı sayıya bölünür (bu hata bir kez yapıldı ve
+    kullanıcı ekran görüntüsüyle yakaladı).
 13. **Oy verirken VE dinleme kaydederken ÖNCE `ensureTrack` çağır — yoksa SİNYAL SAYILMAZ.** `recommender.ts` oyları
     `votes v JOIN tracks t ON t.id = v.track_id` (INNER) ile okur. Keşfet/radyo önerisi hiçbir listede
     olmadığı için `tracks`'te de yoktu → JOIN oyu düşürüyordu, Keşfet'te oy vermek öğrenmeye HİÇ etki

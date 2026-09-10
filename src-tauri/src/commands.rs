@@ -1249,6 +1249,60 @@ fn ytdlp_target_name() -> &'static str {
     }
 }
 
+// ═══ UYGULAMA GÜNCELLEMESİ ════════════════════════════════════════════════
+// ⭐ v1.9.2: GitHub'daki yeni sürümü kendisi bulur, indirir, kurar.
+//
+// ⚠️ İKİ ŞART VAR, ikisi de kolay unutuluyor:
+//  1. CI imzalı üretmeli (`TAURI_SIGNING_PRIVATE_KEY` gizli anahtarı) — imza
+//     yoksa `latest.json` üretilmez ve istemci güncellemeyi REDDEDER.
+//  2. Release TASLAK OLMAMALI — `releases/latest/download/latest.json` yalnız
+//     YAYIMLANMIŞ sürümde çalışır (bu yüzden workflow'da `releaseDraft: false`).
+
+/// Yeni sürüm var mı? Varsa sürüm numarasını döndürür.
+#[tauri::command]
+pub async fn check_app_update(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    match updater.check().await {
+        Ok(Some(u)) => {
+            log::info!("yeni sürüm bulundu: {}", u.version);
+            Ok(Some(u.version))
+        }
+        Ok(None) => Ok(None),
+        Err(e) => {
+            // Ağ yoksa ya da sürüm henüz yayımlanmadıysa bu NORMAL bir durum;
+            // kullanıcıyı hata toast'ıyla rahatsız etmeye değmez.
+            log::info!("güncelleme kontrolü yapılamadı: {e}");
+            Err(e.to_string())
+        }
+    }
+}
+
+/// Güncellemeyi indirir, kurar ve uygulamayı yeniden başlatır.
+#[tauri::command]
+pub async fn install_app_update(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
+        return Err("güncelleme bulunamadı".into());
+    };
+    let mut downloaded = 0usize;
+    update
+        .download_and_install(
+            |chunk, total| {
+                downloaded += chunk;
+                if let Some(t) = total {
+                    log::debug!("güncelleme indiriliyor: {downloaded}/{t}");
+                }
+            },
+            || log::info!("güncelleme indirildi, kuruluyor"),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    log::info!("güncelleme kuruldu, uygulama yeniden başlatılıyor");
+    app.restart();
+}
+
 /// Bekleyen güncelleme dosyasının yolu (bkz. `update_ytdlp`).
 fn pending_ytdlp_path(dir: &std::path::Path) -> PathBuf {
     dir.join(format!("{}.new", ytdlp_target_name()))

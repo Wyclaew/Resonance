@@ -62,6 +62,11 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # ⭐ OTOMATİK GÜNCELLEME İMZASI (v1.9.2). Bu anahtar olmadan
+          # `latest.json` + `.sig` üretilmez ve istemci güncellemeyi REDDEDER
+          # (build de hata verir, çünkü createUpdaterArtifacts açık).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           # macOS'ta hedefi AÇIKÇA ver: sidecar'lar aarch64 adıyla indiriliyor,
           # runner mimarisi değişirse eşleşmeyip build kırılırdı.
@@ -74,5 +79,7 @@ jobs:
             > macOS: ad-hoc imzalı (notarize değil). İlk açılışta uygulamaya
             > **sağ tık → Aç → Aç** de (bir kez); sonra normal çift tıkla açılır.
             > Windows: "bilinmeyen yayıncı" uyarısında "Yine de çalıştır".
-          releaseDraft: true
+          # ⚠️ TASLAK OLAMAZ: güncelleyici `releases/latest/download/latest.json`
+          # adresine bakar ve taslak sürümler orada GÖRÜNMEZ.
+          releaseDraft: false
           prerelease: false

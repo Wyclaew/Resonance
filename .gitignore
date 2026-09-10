@@ -29,3 +29,6 @@ npm-debug.log*
 # Oturum defteri / bağlam dökümleri (context-diet eklentisi) — repoya girmez
 .claude/ctx-spill/
 .claude/context-ledger.md
+
+# Eklenti günlüğü (alt dizinde de oluşabiliyor)
+src-tauri/.claude/

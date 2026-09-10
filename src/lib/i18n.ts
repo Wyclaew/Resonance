@@ -208,6 +208,13 @@ const tr = {
   "stats.empty": "Bu aralıkta dinleme kaydı yok.",
 
   // — Zevk profili (modelin içi + elle düzeltme)
+  "update.available": "Yeni sürüm hazır: v{version}",
+  "update.install": "Güncelle",
+  "update.installing": "Güncelleme indiriliyor — bitince uygulama yeniden başlayacak…",
+  "update.failed": "Güncelleme yapılamadı: {error}",
+  "update.check": "Güncellemeleri denetle",
+  "update.none": "Zaten en güncel sürümdesin",
+  "update.checking": "Denetleniyor…",
   "sync.remoteQueueOffer": "{device} cihazında bıraktığın sıra var — getirilsin mi?",
   "sync.remoteQueueBring": "Getir",
   "sync.sessionLost":
@@ -965,6 +972,13 @@ const en: Record<TrKey, string> = {
   "stats.history": "History",
   "stats.empty": "No listening in this range.",
 
+  "update.available": "A new version is ready: v{version}",
+  "update.install": "Update",
+  "update.installing": "Downloading the update — the app will restart when it's done…",
+  "update.failed": "Update failed: {error}",
+  "update.check": "Check for updates",
+  "update.none": "You're already on the latest version",
+  "update.checking": "Checking…",
   "sync.remoteQueueOffer": "{device} has a queue you left behind — bring it here?",
   "sync.remoteQueueBring": "Bring it",
   "sync.sessionLost":

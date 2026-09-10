@@ -1050,6 +1050,8 @@ const CAT_CLICKS = 7;
 
 function AboutSettings() {
   const t = useT();
+  const toast = useToastStore((s) => s.show);
+  const [updateBusy, setUpdateBusy] = useState(false);
   const [version, setVersion] = useState("");
   const [clicks, setClicks] = useState(0);
   const [party, setParty] = useState(false);
@@ -1091,6 +1093,32 @@ function AboutSettings() {
       <p className="mt-4">{t("about.tagline")}</p>
       <p className="mt-3 text-faint">{t("about.disclaimer")}</p>
       <p className="mt-3 text-faint">{t("about.builtWith")}</p>
+
+      {/* ⭐ Elle güncelleme denetimi. Otomatik denetim açılışta zaten yapılıyor;
+          bu, "yeni sürüm çıktı mı?" diye merak edildiğinde bakılacak yer. */}
+      <button
+        onClick={async () => {
+          setUpdateBusy(true);
+          try {
+            const v = await invoke<string | null>("check_app_update");
+            if (v) {
+              toast(t("update.installing"), "info");
+              await invoke("install_app_update");
+            } else {
+              toast(t("update.none"), "info");
+            }
+          } catch (e) {
+            toast(t("update.failed", { error: String(e) }), "error");
+          } finally {
+            setUpdateBusy(false);
+          }
+        }}
+        disabled={updateBusy}
+        className="mt-4 flex items-center gap-2 rounded-md bg-surface-2 px-3 py-2 text-sm text-muted transition-colors hover:text-text disabled:opacity-50"
+      >
+        <RefreshCw size={14} className={updateBusy ? "animate-spin" : ""} />
+        {updateBusy ? t("update.checking") : t("update.check")}
+      </button>
 
       {/* İmza. Kedi açılana kadar HİÇBİR ipucu yok — gerçek easter egg. */}
       <div className="mt-6 flex items-center gap-2 border-t border-border pt-4">
