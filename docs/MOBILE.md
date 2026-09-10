@@ -313,6 +313,17 @@ yol açıyordu (cihaz açılışta yoksa ya da çalarken kaybolursa). Mobilde
 karşılığı: foreground service / player servisi bir hatada çökerse tüm oynatma
 biter — hataları yut, servisi yaşat, kullanıcıya bildir.
 
+## 5.3 Otomatik güncelleme (mobilde de MÜMKÜN)
+
+Masaüstü v1.9.2'den beri kendini güncelliyor (`tauri-plugin-updater` →
+GitHub sürümündeki `latest.json`). **Android'de de yapılabilir**, mağaza
+gerekmez: sürüm iş akışına APK'yı da ekle, uygulama açılışta aynı
+`latest.json`'ı okusun, yeni sürüm varsa APK'yı indirip
+`ACTION_VIEW`/`PackageInstaller` ile kurulum ekranını açsın.
+⚠️ `REQUEST_INSTALL_PACKAGES` izni gerekir ve kullanıcı "bilinmeyen kaynak"
+onayını bir kez vermek zorundadır. İmza AYNI anahtarla atılmalı — anahtar
+değişirse Android güncellemeyi reddeder (kaldırıp yeniden kurmak gerekir).
+
 ## 6. Senkron protokolü — ✅ uygulandı
 
 Detay: `docs/SYNC.md`. Motor masaüstünde `src/lib/sync/engine.ts`'te çalışıyor;
