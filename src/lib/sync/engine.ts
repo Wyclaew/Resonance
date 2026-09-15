@@ -571,10 +571,13 @@ export async function syncNow(mode: "full" | "push" | "pull" = "full"): Promise<
       lastError: errors.length > 0 ? describeSyncError(errors) : null,
     });
     if (pulled > 0) notifyRemoteApplied();
+    if (errors.length > 0) scheduleRetry(errors);
+    else retryAttempt = 0;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[sync] tur başarısız:", e);
     setState({ status: "error", lastError: msg });
+    scheduleRetry([msg]);
   } finally {
     running = false;
     if (rerunRequested) {
@@ -582,6 +585,24 @@ export async function syncNow(mode: "full" | "push" | "pull" = "full"): Promise<
       void syncNow();
     }
   }
+}
+
+// ⭐ HATADAN SONRA KENDİLİĞİNDEN YENİDEN DENE (v1.9.3): ağ hatasıyla biten tur
+// eskiden bir sonraki odak/10 dk'lık tura kadar bekliyordu; bu arada verilen
+// oy diğer cihaza geçmiyordu. 30 sn → 1 → 2 → 4 → en çok 5 dk. Şema hatası
+// kendiliğinden düzelmez → yeniden denenmez.
+let retryAttempt = 0;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleRetry(errors: string[]): void {
+  if (!started) return;
+  if (errors.some((e) => /could not find the table/i.test(e) || /PGRST205/.test(e))) return;
+  if (retryTimer) return;
+  const delay = Math.min(5 * 60_000, 30_000 * 2 ** retryAttempt);
+  retryAttempt++;
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    void syncNow("full");
+  }, delay);
 }
 
 /**
@@ -678,19 +699,55 @@ export async function startSync(): Promise<void> {
         () => scheduleRemotePull()
       );
     }
-    channel.subscribe();
+    // ⭐ KOPUP YENİDEN BAĞLANINCA ÇEK (v1.9.3): kanal koptuğu sürede gelen
+    // bildirimler KAYBOLUR (realtime geçmişi yeniden oynatmaz). Eskiden bu
+    // aradaki değişiklikler 10 dakikalık periyodik tura kadar bekliyordu —
+    // üstelik pencere gizliyken (menü çubuğu kipi) odak olayı da gelmiyor.
+    let hadError = false;
+    channel.subscribe((status) => {
+      if (status === "SUBSCRIBED") {
+        if (hadError) {
+          hadError = false;
+          console.info("[resonance] senkron: canlı kanal yeniden bağlandı");
+          scheduleRemotePull();
+        }
+      } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+        hadError = true;
+      }
+    });
   }
 
-  // Yedek tetikler: realtime kopabilir (uyku, ağ değişimi).
   // Yedek tam tur: realtime kopabilir (uyku, ağ değişimi).
   periodic = setInterval(() => void syncNow("full"), 10 * 60 * 1000);
   window.addEventListener("focus", onFocus);
+  window.addEventListener("online", onOnline);
+  // ⭐ UYKUDAN UYANMA: bilgisayar uyurken zamanlayıcılar durur; uyanınca ne
+  // odak ne ağ olayı garanti. Duvar saati beklenenden çok ilerlediyse uyku
+  // olmuştur → tam tur.
+  lastBeat = Date.now();
+  heartbeat = setInterval(() => {
+    const nowMs = Date.now();
+    if (nowMs - lastBeat > HEARTBEAT_MS * 3) {
+      console.info("[resonance] senkron: uykudan uyanma algılandı");
+      void syncNow("full");
+    }
+    lastBeat = nowMs;
+  }, HEARTBEAT_MS);
 
   void syncNow();
 }
 
+const HEARTBEAT_MS = 30_000;
+let heartbeat: ReturnType<typeof setInterval> | null = null;
+let lastBeat = 0;
+
 function onFocus() {
   void syncNow();
+}
+
+function onOnline() {
+  // Ağ yeni geldiğinde DNS/TLS birkaç saniye tutmayabilir.
+  setTimeout(() => void syncNow("full"), 2000);
 }
 
 export function stopSync(): void {
@@ -707,7 +764,17 @@ export function stopSync(): void {
     clearTimeout(changeTimer);
     changeTimer = null;
   }
+  if (retryTimer) {
+    clearTimeout(retryTimer);
+    retryTimer = null;
+  }
+  retryAttempt = 0;
+  if (heartbeat) {
+    clearInterval(heartbeat);
+    heartbeat = null;
+  }
   window.removeEventListener("focus", onFocus);
+  window.removeEventListener("online", onOnline);
   setState({ status: "off", pushed: 0, pulled: 0 });
 }
 

@@ -1,10 +1,13 @@
 mod audio;
+mod browser_login;
 mod commands;
+mod durable;
 #[cfg(desktop)]
 mod media_controls;
 mod spotify;
 mod native_dl;
 mod tray;
+mod version_match;
 mod ytdlp;
 
 use tauri::Manager;
@@ -411,6 +414,10 @@ pub fn run() {
             commands::set_tray_title,
             commands::check_app_update,
             commands::install_app_update,
+            durable::durable_load,
+            durable::durable_save,
+            browser_login::start_browser_login,
+            browser_login::take_browser_login,
             commands::export_data,
             commands::backup_db,
             commands::list_backups,

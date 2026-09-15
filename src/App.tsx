@@ -627,10 +627,14 @@ function MainApp() {
           <div className="flex min-h-0 flex-1">
             <Sidebar />
             <main className="relative min-w-0 flex-1 overflow-hidden bg-bg">
+              <div
+                aria-hidden
+                className="ambient-glow pointer-events-none absolute inset-x-0 top-0 h-80"
+              />
               {/* view (ve aktif liste) değişince yumuşak fade-in */}
               <div
                 key={`${view}:${activePlaylistId ?? ""}`}
-                className="h-full animate-fade-in"
+                className="relative h-full animate-fade-in"
               >
                 <CurrentView />
               </div>

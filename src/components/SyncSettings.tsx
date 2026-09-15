@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   Cloud,
   CloudOff,
@@ -9,7 +10,9 @@ import {
   Download,
   AlertTriangle,
   Check,
+  KeyRound,
 } from "lucide-react";
+import { useSettingsStore } from "../store/useSettingsStore";
 import { useT } from "../lib/i18n";
 import { getDeviceId } from "../lib/device";
 import { isSyncConfigured } from "../lib/sync/config";
@@ -67,8 +70,62 @@ export default function SyncSettings() {
   const [sync, setSync] = useState<SyncState | null>(null);
 
   const configured = isSyncConfigured();
+  const language = useSettingsStore((s) => s.language);
+  const [browserWaiting, setBrowserWaiting] = useState(false);
 
   useEffect(() => subscribeSync(setSync), []);
+
+  // ⭐ TARAYICIDA GİRİŞ (v1.9.3): şifre yöneticisi eklentileri (Bitwarden…)
+  // uygulama penceresine giremez → form tarayıcıda açılır, doldurulan bilgiler
+  // yerel sunucu üzerinden buraya gelir (src-tauri/src/browser_login.rs).
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    let alive = true;
+    void listen("browser-login", async () => {
+      const creds = await invoke<{ email: string; password: string } | null>(
+        "take_browser_login"
+      ).catch(() => null);
+      if (!creds || !alive) return;
+      setBrowserWaiting(false);
+      setEmail(creds.email);
+      setBusy(true);
+      setErr(null);
+      try {
+        await signIn(creds.email, creds.password);
+        void invoke("focus_main_window").catch(() => {});
+      } catch (e) {
+        setErr(authError(e));
+      } finally {
+        setBusy(false);
+      }
+    }).then((u) => {
+      if (alive) off = u;
+      else u();
+    });
+    return () => {
+      alive = false;
+      off?.();
+    };
+  }, []);
+
+  // Supabase'in İngilizce hata metinleri → arayüz dili.
+  const authError = (e: unknown): string => {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/invalid login credentials/i.test(msg)) return t("sync.badCredentials");
+    if (/email not confirmed/i.test(msg)) return t("sync.emailNotConfirmed");
+    return msg;
+  };
+
+  const startBrowserLogin = async () => {
+    setErr(null);
+    setNotice(null);
+    try {
+      await invoke("start_browser_login", { lang: language });
+      setBrowserWaiting(true);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   // Oturum durumunu izle (giriş/çıkış anında UI güncellensin).
   useEffect(() => {
@@ -126,7 +183,7 @@ export default function SyncSettings() {
       setPassword("");
       setPassword2("");
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(authError(e));
     } finally {
       setBusy(false);
     }
@@ -297,6 +354,23 @@ export default function SyncSettings() {
               )}
             </div>
           </form>
+
+          {authMode === "in" && (
+            <div className="mt-4 border-t border-border pt-4">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void startBrowserLogin()}
+                className="inline-flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm text-text transition-colors hover:border-accent/60 disabled:opacity-40"
+              >
+                <KeyRound size={15} className="text-accent" />
+                {t("sync.browserLogin")}
+              </button>
+              <p className="mt-2 text-xs leading-relaxed text-faint">
+                {browserWaiting ? t("sync.browserLoginWaiting") : t("sync.browserLoginHint")}
+              </p>
+            </div>
+          )}
 
           {authMode === "up" && (
             <p className="mt-3 text-xs text-faint">{t("sync.signUpNote")}</p>

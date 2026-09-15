@@ -680,8 +680,10 @@ pub fn download_ranged(src: &AudioSource, dest: &Path) -> Result<u64> {
     // ⚠️ yt-dlp'nin `-N` seçeneği geçmişte 403/416 üretmişti (bkz. CLAUDE.md);
     // fark şu: orada parça sayısı sabit ve agresifti, burada eşzamanlılık 4 ile
     // sınırlı ve her parça kendi içinde yeniden deneniyor.
+    // truncate(false): devam eden indirmede önceki baytlar KORUNUR.
     let mut f = std::fs::OpenOptions::new()
         .create(true)
+        .truncate(false)
         .write(true)
         .open(&part)?;
     f.seek(SeekFrom::Start(have))?;

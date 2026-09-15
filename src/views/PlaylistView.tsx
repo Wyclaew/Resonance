@@ -30,6 +30,8 @@ import { usePlaylistStore } from "../store/usePlaylistStore";
 import { useAppStore } from "../store/useAppStore";
 import * as pl from "../lib/playlists";
 import { isTauri } from "../lib/db";
+import { onRemoteApplied } from "../lib/sync/engine";
+import { KARMA_EVENT } from "../lib/vote";
 import { useToastStore } from "../store/useToastStore";
 
 export default function PlaylistView({ playlistId }: { playlistId: string | null }) {
@@ -72,12 +74,12 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
     setBatch(null);
   }
 
-  async function load() {
+  async function load(silent = false) {
     if (!playlistId || !isTauri()) {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!silent) setLoading(true);
     const [m, t] = await Promise.all([
       pl.getPlaylist(playlistId),
       pl.getPlaylistTracks(playlistId),
@@ -89,6 +91,22 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
 
   useEffect(() => {
     load();
+    // ⛔ BUG'DI (v1.9.3): açık liste sayfası diğer cihazdan gelen parçaları ve
+    // oyları, alt bardan verilen oyu da GÖSTERMİYORDU — sayfadan çıkıp girmek
+    // gerekiyordu ("Mac'te 240, Windows'ta 241" karşılaştırmasını da yanıltır).
+    // Sessiz yeniden yükleme: kaydırma konumu ve arama korunur.
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const reload = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => void load(true), 300);
+    };
+    const off = onRemoteApplied(reload);
+    window.addEventListener(KARMA_EVENT, reload);
+    return () => {
+      off();
+      window.removeEventListener(KARMA_EVENT, reload);
+      if (timer) clearTimeout(timer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playlistId]);
 
@@ -207,7 +225,7 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
               className="w-full max-w-md rounded-md border border-border-strong bg-surface px-2 py-1 text-2xl font-semibold tracking-tight outline-none"
             />
           ) : (
-            <h1 className="truncate text-2xl font-semibold tracking-tight">
+            <h1 className="font-display truncate text-[28px] font-semibold leading-tight">
               {meta?.name ?? t("playlist.title")}
             </h1>
           )}

@@ -114,7 +114,7 @@ export default function Sidebar() {
             <div className="grid h-7 w-7 place-items-center rounded-md bg-accent/15 text-accent">
               <Logo className="h-[18px] w-[18px]" />
             </div>
-            <span className="text-[15px] font-semibold tracking-tight">
+            <span className="font-display text-[16px] font-semibold">
               Resonance
             </span>
           </div>

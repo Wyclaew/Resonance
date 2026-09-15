@@ -28,6 +28,7 @@ import { useT } from "../lib/i18n";
 import { reasonText } from "../lib/recommender";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { getTrackKarma } from "../lib/playlists";
+import { onRemoteApplied } from "../lib/sync/engine";
 import { voteCurrent, KARMA_EVENT, type KarmaEventDetail } from "../lib/vote";
 import { toggleMiniPlayer } from "../lib/miniPlayer";
 import AddToPlaylistButton from "./AddToPlaylistButton";
@@ -87,20 +88,28 @@ export default function NowPlayingBar() {
   );
   const playlistId = current?.playlistId;
   useEffect(() => {
-    if (playlistId && current?.id && isTauri()) {
-      getTrackKarma(playlistId, current.id)
-        .then((k) => setKarma({ karma: k.karma, lastVoteAt: k.lastVoteAt }))
-        .catch(() => setKarma(null));
-    } else {
-      setKarma(null);
-    }
+    const load = () => {
+      if (playlistId && current?.id && isTauri()) {
+        getTrackKarma(playlistId, current.id)
+          .then((k) => setKarma({ karma: k.karma, lastVoteAt: k.lastVoteAt }))
+          .catch(() => setKarma(null));
+      } else {
+        setKarma(null);
+      }
+    };
+    load();
+    // ⛔ BUG'DI (v1.9.3): diğer cihazdan senkronla gelen oy, şarkı değişene
+    // kadar görünmüyordu — kullanıcı "Mac'te verdiğim oy Windows'ta yok" dedi,
+    // oy aslında gelmişti. Uzak veri uygulanınca yeniden oku.
+    return onRemoteApplied(load);
   }, [current?.id, playlistId]);
 
   // Mini oynatıcıdan (ya da başka bir yoldan) oy verilirse gösterge tazelensin.
+  // Oy PARÇAYA aittir (v1.9.2) → hangi listeden verildiğine bakılmaz.
   useEffect(() => {
     function onKarma(e: Event) {
       const d = (e as CustomEvent<KarmaEventDetail>).detail;
-      if (d.trackId !== current?.id || d.playlistId !== playlistId) return;
+      if (d.trackId !== current?.id) return;
       setKarma({ karma: d.karma, lastVoteAt: d.lastVoteAt });
     }
     window.addEventListener(KARMA_EVENT, onKarma);
@@ -116,7 +125,17 @@ export default function NowPlayingBar() {
   const pct = durationMs > 0 ? (positionMs / durationMs) * 100 : 0;
 
   return (
-    <footer className="flex h-20 shrink-0 items-center gap-4 border-t border-border bg-surface px-4">
+    <footer className="relative isolate flex h-20 shrink-0 items-center gap-4 overflow-hidden border-t border-border bg-surface px-4">
+      {/* Çalan kapağın çok hafif, bulanık yansıması — mini oynatıcıyla aynı dil. */}
+      {current?.thumbnail && (
+        <img
+          aria-hidden
+          src={current.thumbnail}
+          alt=""
+          draggable={false}
+          className="pointer-events-none absolute -left-10 top-1/2 -z-10 h-64 w-[36rem] -translate-y-1/2 object-cover opacity-[0.16] blur-3xl saturate-150"
+        />
+      )}
       {/* Sol: şu an çalan */}
       <div className="flex min-w-0 flex-1 items-center gap-3">
         <div

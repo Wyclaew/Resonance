@@ -542,13 +542,19 @@ async function computeRecommendations(
   // "sevdiklerim dönsün, keşifler dönmesin". Sevdiğin şarkı 45 gün boyunca
   // yasaklanırsa "geçen hafta beğendiğim şarkı bu saatte yine gelsin" olamaz.
   const recentlyRecommended = new Set<string>();
+  // Parça başına EN SON öneri zamanı — favori dönüşünün kendi bekleme süresi için.
+  const lastRecommendedAt = new Map<string, number>();
   try {
     const RECENT_MS = 45 * 24 * 60 * 60 * 1000;
-    const histRows = await db.select<{ track_id: string }[]>(
-      `SELECT DISTINCT track_id FROM recommendation_history WHERE recommended_at >= $1`,
+    const histRows = await db.select<{ track_id: string; last_at: number }[]>(
+      `SELECT track_id, MAX(recommended_at) AS last_at FROM recommendation_history
+        WHERE recommended_at >= $1 GROUP BY track_id`,
       [now - RECENT_MS]
     );
-    for (const h of histRows) recentlyRecommended.add(h.track_id);
+    for (const h of histRows) {
+      recentlyRecommended.add(h.track_id);
+      lastRecommendedAt.set(h.track_id, Number(h.last_at) || 0);
+    }
   } catch {
     /* tablo henüz yoksa yoksay */
   }
@@ -584,6 +590,14 @@ async function computeRecommendations(
   // Ayrıca kuyruğun en fazla ~%15'i (20'de 3) → Keşfet keşif olarak kalır.
   const FAVORITE_SHARE = 0.15;
   const FAVORITE_MIN_CONTEXT = 0.35; // bu saate gerçekten ait mi?
+  // ⛔ BUG'DI (v1.9.3): favoriler puana göre KATI sıralanıyordu → en yüksek
+  // puanlı favori HER Keşfet partisinin başına geliyordu. Ölçüldü: "Psychomachia"
+  // (karma 2) 4 cihazda 15 kez önerilmiş, bir telefonda 10 dakikada 3 kez.
+  // Kullanıcı "ilk açılışta hep aynı şarkı" ve "Mac, Android'in önerdiğini
+  // öneriyor" diye bildirdi — ikisi de bu. Artık (1) cihazlar arası ortak
+  // `recommendation_history`'e göre FAVORİ DE birkaç gün bekler, (2) seçim
+  // puanla AĞIRLIKLI RASTGELE (Gumbel) — sevdiğin şarkılar sırayla döner.
+  const FAVORITE_COOLDOWN_MS = 4 * 24 * 60 * 60 * 1000;
   if (opts.useLibrary) {
     const favLimit = Math.max(1, Math.round(opts.limit * FAVORITE_SHARE));
     const cands = await db.select<CandidateRow[]>(
@@ -605,7 +619,12 @@ async function computeRecommendations(
         return { c, tk, ctx, score: tk * ctx };
       })
       .filter((x) => x.tk > 0 && x.ctx >= FAVORITE_MIN_CONTEXT)
-      .sort((a, b) => b.score - a.score);
+      .filter((x) => now - (lastRecommendedAt.get(x.c.id) ?? 0) > FAVORITE_COOLDOWN_MS)
+      .map((x) => ({
+        ...x,
+        key: -Math.log(Math.random() || 1e-9) / Math.max(0.02, x.score),
+      }))
+      .sort((a, b) => a.key - b.key);
 
     // Çeşitlilik: aynı sanatçıdan en fazla 1 favori (kontenjan zaten 3).
     const favArtists = new Set<string>();

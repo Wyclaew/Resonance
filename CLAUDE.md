@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.9.2** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.9.3** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,52 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.9.3 (AYNI MAC 4 CİHAZ + KEŞFET TEKRARI + TARAYICIDA GİRİŞ + TASARIM):
+• **⭐⭐ CİHAZ KİMLİĞİ VE OTURUM KAYBOLUYORDU.** Kullanıcı Keşfet'in "Başka
+  cihaz" listesinde (3 cihazı varken) üç ayrı "Mac" gördü. ÖLÇÜLDÜ:
+  `device_queue`'da AYNI Mac'e ait 4 kimlik (08-24 ×2, 09-09, 09-15).
+  Kimlik ve Supabase oturumu webview `localStorage`'ında; WebKit veri klasörü
+  macOS güncellemesinde sıfırdan oluşmuştu → her sıfırlamada yeni "Mac" +
+  yeniden giriş. Çözüm: `durableStorage.ts` + `durable.rs` — bu anahtarlar
+  uygulama klasöründe `webstore.json`'a da yazılır, açılışta RENDER'DAN ÖNCE
+  geri yüklenir. ÖLÇÜLDÜ (ayrı kimlikli test paketi): WebKit klasörü silinip
+  açılınca aynı cihaz kimliği geri geldi. Liste ayrıca cihaz ADI başına tek
+  satır gösterir ve bu cihazla aynı adı taşıyan eski kimlikleri gizler
+  (`listRemoteQueues`, `latestRemoteQueue`, `otherDevicePlayback`).
+  ⚠️ Paylaşılan dosyalar (`device.ts`, `sync/client.ts`) localStorage
+  kullanmaya DEVAM eder — yedek masaüstüne özgü, mobil etkilenmez.
+• **⭐ "KEŞFET İLK AÇILIŞTA HEP AYNI ŞARKI / MAC ANDROID'İN ÖNERDİĞİNİ ÖNERİYOR"**:
+  favori dönüşü puana göre KATI sıralıydı → en yüksek puanlı favori her
+  partinin başına. ÖLÇÜLDÜ: "Psychomachia" (karma 2) 4 cihazda 15 kez, bir
+  telefonda 10 dakikada 3 kez önerilmiş. Artık favori de cihazlar arası ortak
+  geçmişe göre 4 gün bekler ve seçim ağırlıklı rastgele (Gumbel).
+• **⭐ UZAKTAN GELEN OY/PARÇA GÖRÜNMÜYORDU**: alt bardaki karma yalnız şarkı
+  değişince, açık liste sayfası yalnız yeniden girilince okunuyordu →
+  "Mac'te verdiğim oy Windows'ta yok" (oy aslında gelmişti). İkisi de
+  `onRemoteApplied` ile tazelenir; liste ayrıca `KARMA_EVENT`'i dinler.
+• **SENKRON DAYANIKLILIĞI**: realtime kanal kopup yeniden bağlanınca PULL
+  (kopukken gelen bildirimler kaybolur); `online` olayı; uykudan uyanma
+  (30 sn'lik nabız, duvar saati sıçraması); hatalı turdan sonra artan
+  beklemeyle kendiliğinden yeniden deneme (30 sn → 5 dk; şema hatası hariç).
+• **⭐ TARAYICIDA GİRİŞ** (`browser_login.rs`): şifre yöneticisi eklentileri
+  (Bitwarden) webview'e giremez. Uygulama 127.0.0.1:47831'de tek kullanımlık,
+  jetonlu bir form sunar, tarayıcıda açar; gönderilen bilgi
+  `take_browser_login` ile BİR KEZ alınır. ÖLÇÜLDÜ: form → sunucu → uygulama →
+  Supabase zinciri (sahte bilgiyle "hatalı şifre" döndü, sunucu kapandı);
+  jetonsuz istek 404.
+• **ALTERNATİF KAYNAK YANLIŞ ŞARKIYA BAĞLIYORDU** (mobil raporu "Midnight City"
+  → "Outro"): `find_alternative` yalnız süreye bakıyordu. `version_match.rs`
+  mobilin `versionMatch.ts`'inin karşılığı + konuk sanatçı ("ft. …") fazla
+  kelime sayılmaz (yoksa resmi yükleme elenirdi — Get Lucky ile ölçüldü).
+• **TASARIM TURU**: yazı tipleri uygulamayla geliyor (@fontsource: Archivo
+  başlık, Inter gövde, JetBrains Mono veri — mobille aynı kimlik; eskiden
+  "Inter" yüklü değildi, Mac'te SF, Windows'ta Segoe görünüyordu), köşe ölçeği
+  bir kademe yumuşak (`--radius-*`), içerik üstünde vurgu renginden hafif ışık
+  (`.ambient-glow`), alt barda kapağın bulanık yansıması, yeniden çizilmiş
+  cihaz seçici.
+⚠️ Mobil için: `recommender.ts`, `deviceQueue.ts`, `nowPlaying.ts`,
+`sync/engine.ts`, `i18n.ts` değişti → mobil depoda `python3 scripts/sync-core.py`.
+
 v1.9.2 (OYLAR PARÇAYA AİT + SENKRON KAYBI + OTOMATİK GÜNCELLEME):
 • **⭐⭐ OY LİSTEYE DEĞİL PARÇAYA AİTTİR.** Kullanıcı ekran görüntüsüyle
   yakaladı: aynı şarkı alt barda **2**, listede **1** görünüyordu ve aynı

@@ -661,6 +661,11 @@ const tr = {
   "sync.passwordMismatch": "Şifreler aynı değil.",
   "sync.passwordTooShort": "Şifre en az 6 karakter olmalı.",
   "sync.forgot": "Şifremi unuttum",
+  "sync.browserLogin": "Tarayıcıda giriş yap",
+  "sync.badCredentials": "E-posta ya da şifre hatalı.",
+  "sync.emailNotConfirmed": "E-posta adresi henüz doğrulanmamış — gelen kutundaki bağlantıya tıkla.",
+  "sync.browserLoginHint": "Bitwarden gibi şifre yöneticileri formu tarayıcıda otomatik doldurur; bilgiler yalnız bu bilgisayardaki uygulamaya gelir.",
+  "sync.browserLoginWaiting": "Tarayıcıda giriş formu açıldı — doldurup gönderince burada oturum açılacak (5 dk geçerli).",
   "sync.resetSent":
     "Sıfırlama bağlantısı e-postana gönderildi. Bağlantı gelmezse Supabase panelinden de sıfırlayabilirsin.",
   "sync.signUpNote":
@@ -1410,6 +1415,11 @@ const en: Record<TrKey, string> = {
   "sync.passwordMismatch": "Passwords don't match.",
   "sync.passwordTooShort": "Password must be at least 6 characters.",
   "sync.forgot": "Forgot password",
+  "sync.browserLogin": "Sign in with the browser",
+  "sync.badCredentials": "Wrong email or password.",
+  "sync.emailNotConfirmed": "Email not confirmed yet — click the link in your inbox.",
+  "sync.browserLoginHint": "Password managers like Bitwarden fill the form in your browser; the details only reach the app on this computer.",
+  "sync.browserLoginWaiting": "A sign-in form opened in your browser — submit it and you'll be signed in here (valid for 5 min).",
   "sync.resetSent":
     "A reset link has been sent to your email. If it doesn't arrive, you can also reset it from the Supabase dashboard.",
   "sync.signUpNote":

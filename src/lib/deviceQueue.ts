@@ -123,8 +123,9 @@ export async function latestRemoteQueue(): Promise<RemoteQueue | null> {
               position_ms, filters_json, seeds_json, updated_at
          FROM device_queue
         WHERE deleted = 0 AND device_id <> $1 AND queue_json <> ''
+          AND COALESCE(device_name, '') <> $2
         ORDER BY updated_at DESC LIMIT 1`,
-      [getDeviceId()]
+      [getDeviceId(), deviceName() === "Device" ? "\u0000" : deviceName()]
     );
     const r = rows[0];
     if (!r) return null;
@@ -181,10 +182,21 @@ export async function listRemoteQueues(): Promise<RemoteQueue[]> {
       [getDeviceId()]
     );
     const out: RemoteQueue[] = [];
+    const seenNames = new Set<string>();
+    const ownName = deviceName();
     for (const r of rows) {
+      // ⛔ Aynı makine birden çok kimlikle görünebiliyor (webview verisi
+      // sıfırlanınca yeni cihaz kimliği üretiliyordu — bkz. durableStorage.ts).
+      // Kullanıcı üç cihazı varken listede üç ayrı "Mac" gördü. Cihaz adı
+      // başına yalnız EN YENİ satır; bu cihazla aynı adı taşıyanlar bu
+      // makinenin eski kimlikleridir → gösterilmez.
+      const name = r.device_name || "Device";
+      if (name === ownName && ownName !== "Device") continue;
+      if (seenNames.has(name)) continue;
       try {
         const queue = JSON.parse(r.queue_json) as QueueItem[];
         if (!Array.isArray(queue) || queue.length === 0) continue;
+        seenNames.add(name);
         out.push({
           deviceId: r.device_id,
           deviceName: r.device_name || "Device",

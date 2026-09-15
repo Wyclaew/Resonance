@@ -14,11 +14,11 @@ import { useToastStore } from "../store/useToastStore";
 // Otomatik devralma dururken bu düğme AÇIK seçim sunar.
 // ═══════════════════════════════════════════════════════════════════════════
 
-function DeviceIcon({ name }: { name: string }) {
+function DeviceIcon({ name, size = 14 }: { name: string; size?: number }) {
   const n = name.toLowerCase();
-  if (n.includes("android") || n.includes("ios")) return <Smartphone size={14} />;
-  if (n.includes("mac")) return <Laptop size={14} />;
-  return <Monitor size={14} />;
+  if (n.includes("android") || n.includes("ios")) return <Smartphone size={size} />;
+  if (n.includes("mac")) return <Laptop size={size} />;
+  return <Monitor size={size} />;
 }
 
 function ago(t: ReturnType<typeof useT>, ms: number): string {
@@ -85,40 +85,57 @@ export default function DeviceQueuePicker() {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-50 mt-1 w-72 overflow-hidden rounded-lg border border-border bg-surface shadow-xl">
-          <p className="border-b border-border px-3 py-2 text-xs text-muted">
+        <div className="animate-pop-in absolute right-0 z-50 mt-2 w-80 origin-top-right overflow-hidden rounded-xl border border-border bg-surface/95 p-1.5 shadow-2xl shadow-black/40 backdrop-blur-xl">
+          <p className="px-2.5 pb-2 pt-1.5 text-xs text-muted">
             {t("device.pickHint")}
           </p>
-          {rows.map((r) => (
-            <button
-              key={r.deviceId}
-              onClick={() => load(r)}
-              className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-surface-2"
-            >
-              <span className="mt-0.5 text-accent">
-                <DeviceIcon name={r.deviceName} />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm">
-                  {r.deviceName}
-                  {r.mode === "discovery" && (
-                    <span className="ml-1.5 text-xs text-accent">
-                      · {t("nav.discover")}
-                    </span>
+          {rows.map((r) => {
+            const cur = r.queue[r.queueIndex];
+            return (
+              <button
+                key={r.deviceId}
+                onClick={() => load(r)}
+                className="group flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-surface-2"
+              >
+                <span className="relative shrink-0">
+                  {cur?.thumbnail ? (
+                    <img
+                      src={cur.thumbnail}
+                      alt=""
+                      className="h-10 w-10 rounded-md object-cover"
+                      draggable={false}
+                    />
+                  ) : (
+                    <span className="block h-10 w-10 rounded-md bg-surface-3" />
                   )}
+                  <span className="absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full border border-border bg-surface text-accent">
+                    <DeviceIcon name={r.deviceName} size={11} />
+                  </span>
                 </span>
-                <span className="block truncate text-xs text-muted">
-                  {t("device.queueInfo", {
-                    count: r.queue.length,
-                    title: r.queue[r.queueIndex]?.title ?? "—",
-                  })}
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-baseline gap-1.5">
+                    <span className="truncate text-sm font-medium text-text">
+                      {r.deviceName}
+                    </span>
+                    {r.mode === "discovery" && (
+                      <span className="shrink-0 rounded-full bg-accent/12 px-1.5 py-px text-[10px] font-medium text-accent">
+                        {t("nav.discover")}
+                      </span>
+                    )}
+                    <span className="ml-auto shrink-0 text-[11px] text-faint">
+                      {ago(t, r.updatedAt)}
+                    </span>
+                  </span>
+                  <span className="mt-0.5 block truncate text-xs text-muted">
+                    {t("device.queueInfo", {
+                      count: r.queue.length,
+                      title: cur?.title ?? "—",
+                    })}
+                  </span>
                 </span>
-                <span className="block text-[11px] text-faint">
-                  {ago(t, r.updatedAt)}
-                </span>
-              </span>
-            </button>
-          ))}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

@@ -27,12 +27,24 @@
   --color-down: #d4634e;
   --color-down-dim: #9a4537;
 
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
-    sans-serif;
-  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code",
-    Menlo, monospace;
+  /* Yazı tipleri UYGULAMAYLA GELİR (@fontsource, main.tsx) — mobille aynı
+     kimlik: Archivo başlık, Inter gövde, JetBrains Mono veri. Eskiden "Inter"
+     yüklü değildi → macOS'ta SF, Windows'ta Segoe UI görünüyordu; iki
+     masaüstü ve telefon üç ayrı uygulama gibi duruyordu. */
+  --font-sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", system-ui, sans-serif;
+  --font-display: "Archivo Variable", "Inter Variable", -apple-system,
+    BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono",
+    "Cascadia Code", Menlo, monospace;
 
   --radius: 0.5rem;
+
+  /* Köşe ölçeği bir kademe yumuşak (v1.9.3 tasarım turu): tüm bileşenler
+     rounded-md/lg/xl kullandığı için tek yerden değişir. */
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
 }
 
 :root {
@@ -86,6 +98,8 @@ body {
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.5;
+  /* Inter'in daha sakin rakam/harf biçimleri: tek katlı "a" değil, düz "1". */
+  font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   /* Hiçbir şey seçilemesin (masaüstü app hissi); inputlar hariç. */
@@ -113,6 +127,29 @@ textarea {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-border-strong);
+}
+
+/* Başlıklar: Archivo, sıkı aralık. */
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+/* İçerik alanının üstünde vurgu renginden çok hafif bir ışık — düz siyah
+   zemin yerine derinlik. Renk inline --color-accent'ten gelir → kullanıcının
+   seçtiği vurguyu ve açık/koyu temayı izler. */
+.ambient-glow {
+  background:
+    radial-gradient(
+      60rem 22rem at 78% -6rem,
+      color-mix(in oklab, var(--color-accent) 9%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      40rem 18rem at 8% -8rem,
+      color-mix(in oklab, var(--color-accent) 4%, transparent),
+      transparent 70%
+    );
 }
 
 /* Tabüler rakamlar — karma sayaçları ve süreler için */

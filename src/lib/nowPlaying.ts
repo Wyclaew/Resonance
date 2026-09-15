@@ -129,8 +129,11 @@ export async function otherDevicePlayback(
       `SELECT * FROM now_playing
        WHERE device_id <> $1 AND deleted = 0 AND track_id IS NOT NULL
          AND updated_at > $2
+         AND COALESCE(device_name, '') <> $3
        ORDER BY updated_at DESC LIMIT 1`,
-      [getDeviceId(), Date.now() - maxAgeMs]
+      // Bu makinenin ESKİ kimlikleri (aynı ad) "başka cihaz" sayılmasın —
+      // bkz. deviceQueue.ts listRemoteQueues notu.
+      [getDeviceId(), Date.now() - maxAgeMs, deviceName() === "Device" ? "\u0000" : deviceName()]
     );
     const r = rows[0];
     if (!r) return null;

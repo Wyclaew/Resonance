@@ -991,8 +991,10 @@ pub fn find_alternative(
     } else {
         format!("{artist} {title}")
     };
-    let results = search(&q, 8, cookies).ok()?;
-    let mut best: Option<(u64, SearchResult)> = None;
+    let results = search(&q, 10, cookies).ok()?;
+    // ⛔ Eskiden yalnız süreye bakılıyordu → aynı sanatçının BAŞKA şarkısı ya
+    // da slowed/canlı kayıt seçilebiliyordu (bkz. version_match.rs).
+    let mut best: Option<(f64, SearchResult)> = None;
     for r in results {
         if r.source_id == exclude_id {
             continue;
@@ -1000,18 +1002,18 @@ pub fn find_alternative(
         if !is_likely_song(&r.title, &r.artist, r.duration_ms) {
             continue;
         }
-        // Süre yakınlığı: aynı şarkı olduğuna dair en güvenilir sinyal.
-        if duration_ms > 0 && r.duration_ms > 0 {
-            let diff = duration_ms.abs_diff(r.duration_ms);
-            if diff * 5 > duration_ms {
-                continue; // %20'den fazla sapma → başka bir kayıt
-            }
-            let score = diff;
-            if best.as_ref().map(|(b, _)| score < *b).unwrap_or(true) {
-                best = Some((score, r));
-            }
-        } else if best.is_none() {
-            best = Some((u64::MAX, r));
+        let cand = crate::version_match::Candidate {
+            title: &r.title,
+            artist: &r.artist,
+            duration_ms: r.duration_ms,
+        };
+        let Some(score) = crate::version_match::version_score(title, artist, duration_ms, &cand)
+        else {
+            log::info!("alternatif elendi (aynı şarkı değil): {} — {}", r.artist, r.title);
+            continue;
+        };
+        if best.as_ref().map(|(b, _)| score > *b).unwrap_or(true) {
+            best = Some((score, r));
         }
     }
     let (_, r) = best?;

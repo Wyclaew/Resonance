@@ -4,7 +4,11 @@ Bu dosya, mobil uygulamayı **sıfırdan başka bir sohbette** yapacak olan içi
 Masaüstünün mimarisi ve tuzakları için önce **`CLAUDE.md`**'yi oku; senkron protokolü
 `docs/SYNC.md`'de. Bu doküman "mobil nasıl yapılır"ı anlatır.
 
-> **Masaüstü şu an v1.8.8** — bu doküman o sürüme göre günceldir. Aşağıdaki
+> **Masaüstü şu an v1.9.3.** v1.9.3'te paylaşılan dosyalar değişti (öneri motorunda
+> favori bekleme süresi, cihaz listesinde eski kimliklerin gizlenmesi, senkronun
+> yeniden bağlanma/uyanma/yeniden deneme tetikleri) → mobil depoda
+> `python3 scripts/sync-core.py`. Mobilin `versionMatch.ts`'i masaüstüne de
+> taşındı (`src-tauri/src/version_match.rs`). Bu doküman genel olarak v1.8.8'e göre yazıldı. Aşağıdaki
 > "§5.2 v1.8.5 → v1.8.8 dersleri" bölümü, mobilde AYNI hataları yapmamak için
 > masaüstünde ÖLÇÜLEREK bulunmuş tuzakları taşır; ses yolunu yazmadan önce oku.
 

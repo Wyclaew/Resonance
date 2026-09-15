@@ -12,7 +12,7 @@ export default function ViewHeader({ title, subtitle, children }: ViewHeaderProp
     // kısalır, aksiyonlar sıkışmak yerine ALT SATIRA taşar.
     <header className="flex items-end justify-between gap-4 px-8 pb-5 pt-7">
       <div className="min-w-0">
-        <h1 className="truncate text-2xl font-semibold tracking-tight">{title}</h1>
+        <h1 className="font-display truncate text-[28px] font-semibold leading-tight">{title}</h1>
         {subtitle && (
           <p className="mt-1 truncate text-sm text-muted">{subtitle}</p>
         )}
