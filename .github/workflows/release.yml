@@ -58,36 +58,6 @@ jobs:
           curl -L https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-win32-x64 \
             -o src-tauri/binaries/ffmpeg-${{ matrix.triple }}.exe
 
-      # ⭐ APPLE İMZASI (v1.9.3). Sertifika gizli anahtarı VARSA gerçek
-      # "Developer ID Application" kimliğiyle imzalanır ve notarize edilir →
-      # kullanıcı "sağ tık → Aç" yapmak zorunda kalmaz. Sertifika YOKSA hiçbir
-      # şey değişmez, eskisi gibi ad-hoc imzalanır (tauri.conf'taki "-").
-      #
-      # ⚠️ Kimliği env'e bırakmıyoruz, tauri.conf'a YAZIYORUZ: config'te "-"
-      # dururken env'in kazanıp kazanmadığı sürüme bağlı bir ayrıntı ve sessizce
-      # ad-hoc imzalı sürüm yayınlamak istemiyoruz.
-      - name: macOS imza kimliğini yaz (sertifika varsa)
-        if: matrix.platform == 'macos-latest'
-        shell: bash
-        env:
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-        run: |
-          if [ -z "$APPLE_SIGNING_IDENTITY" ]; then
-            echo "Apple sertifikası yok → ad-hoc imza (mevcut davranış)"
-            exit 0
-          fi
-          python3 - <<'PY'
-          import json, os
-          p = "src-tauri/tauri.conf.json"
-          d = json.load(open(p))
-          mac = d["bundle"].setdefault("macOS", {})
-          mac["signingIdentity"] = os.environ["APPLE_SIGNING_IDENTITY"]
-          # Hardened runtime altında yt-dlp/ffmpeg çalışabilsin diye.
-          mac["entitlements"] = "entitlements.plist"
-          json.dump(d, open(p, "w"), indent=2, ensure_ascii=False)
-          print("imza kimliği yazıldı:", mac["signingIdentity"])
-          PY
-
       - name: Derle & sürüm oluştur
         uses: tauri-apps/tauri-action@v0
         env:
@@ -97,16 +67,10 @@ jobs:
           # (build de hata verir, çünkü createUpdaterArtifacts açık).
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # Apple: sertifikayı geçici keychain'e kurar (tauri-action yapar).
-          # Boşsa bu adımlar atlanır.
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          # Notarizasyon (Apple sunucusuna gönderip damgalama). Üçü de doluysa
-          # yapılır; biri boşsa yalnız imza kalır.
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # ⛔ APPLE_* değişkenlerini BOŞ olarak bile EKLEME: gizli anahtar yokken
+          # secrets.X ifadesi boş dize olarak tanımlanır, bundler "sertifika var"
+          # sanıp içe aktarmaya çalışır ve macOS derlemesi çöker
+          # ("failed to import keychain certificate" — v1.9.3'te yaşandı).
         with:
           # macOS'ta hedefi AÇIKÇA ver: sidecar'lar aarch64 adıyla indiriliyor,
           # runner mimarisi değişirse eşleşmeyip build kırılırdı.
@@ -116,9 +80,7 @@ jobs:
           releaseBody: |
             Otomatik sürüm. macOS `.dmg` ve Windows `.exe` ekte.
 
-            > macOS: sürüm Apple sertifikasıyla imzalıysa doğrudan çift tıkla
-            > açılır. İmzasız (ad-hoc) üretilmişse ilk açılışta **sağ tık → Aç →
-            > Aç** gerekir (bir kez).
+            > macOS: ilk açılışta **sağ tık → Aç → Aç** gerekebilir (bir kez).
             > Windows: imzasızken "bilinmeyen yayıncı" uyarısında "Yine de çalıştır".
 
             > Uygulama v1.9.2'den itibaren kendini günceller; bu sürümü bir kez
