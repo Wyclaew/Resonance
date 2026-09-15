@@ -1308,12 +1308,48 @@ fn pending_ytdlp_path(dir: &std::path::Path) -> PathBuf {
     dir.join(format!("{}.new", ytdlp_target_name()))
 }
 
+/// Uygulamanın yönettiği yt-dlp'nin yolu: bu platformda klasör sürümü varsa
+/// o, yoksa tek dosya. Açılıştaki "güncelleme gerekli mi?" denetimi kullanır.
+/// Dönüş: (çalıştırılabilir, yaşına bakılacak damga dosyası). Klasör
+/// sürümünde damga `VERSION`: zip'ten çıkan dosyaların zamanı güvenilmez ve
+/// "zaten güncel" denetimi yalnız damgayı tazeler.
+pub fn managed_ytdlp_exe(dir: &std::path::Path) -> (PathBuf, PathBuf) {
+    match ytdlp::ytdlp_dist_exe_name() {
+        Some(n) => {
+            let d = dir.join(ytdlp::YTDLP_DIST_DIR);
+            (d.join(n), d.join("VERSION"))
+        }
+        None => {
+            let exe = dir.join(ytdlp_target_name());
+            (exe.clone(), exe)
+        }
+    }
+}
+
 /// AÇILIŞTA çağrılır: bekleyen bir yt-dlp güncellemesi varsa devreye alır.
 ///
 /// Bu an, dosyanın kullanımda OLMADIĞI tek güvenli an — henüz hiçbir arama,
 /// ısıtma ya da indirme başlamadı. (Windows'ta çalışan exe değiştirilemez.)
 pub fn apply_pending_ytdlp(app: &AppHandle) {
     let Ok(dir) = ytdlp_bin_dir(app) else { return };
+    // Klasör sürümü: `yt-dlp-dist.new` → `yt-dlp-dist`.
+    let dist = dir.join(ytdlp::YTDLP_DIST_DIR);
+    let old = dir.join(format!("{}.old", ytdlp::YTDLP_DIST_DIR));
+    let _ = std::fs::remove_dir_all(&old); // önceki değişimden kalan
+    let pending_dist = dir.join(format!("{}.new", ytdlp::YTDLP_DIST_DIR));
+    if pending_dist.exists() {
+        let _ = std::fs::rename(&dist, &old);
+        match std::fs::rename(&pending_dist, &dist) {
+            Ok(()) => {
+                let _ = std::fs::remove_dir_all(&old);
+                log::info!("bekleyen yt-dlp güncellemesi devreye alındı (klasör)");
+            }
+            Err(e) => {
+                let _ = std::fs::rename(&old, &dist);
+                log::warn!("bekleyen yt-dlp güncellemesi uygulanamadı: {e}");
+            }
+        }
+    }
     let pending = pending_ytdlp_path(&dir);
     if !pending.exists() {
         return;
@@ -1334,6 +1370,9 @@ pub fn apply_pending_ytdlp(app: &AppHandle) {
 pub async fn update_ytdlp(app: AppHandle) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || -> anyhow::Result<String> {
         let dir = ytdlp_bin_dir(&app)?;
+        if let Some(exe_name) = ytdlp::ytdlp_dist_exe_name() {
+            return install_ytdlp_dist(&dir, exe_name);
+        }
         let url = if cfg!(windows) {
             "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
         } else if cfg!(target_os = "macos") {
@@ -1417,6 +1456,115 @@ pub async fn update_ytdlp(app: AppHandle) -> Result<String, String> {
     .map_err(|e| e.to_string())
 }
 
+/// ⭐ yt-dlp KLASÖR SÜRÜMÜNÜ kurar (v1.9.3).
+///
+/// NEDEN: tek dosyalık yt-dlp (PyInstaller "onefile") HER çalıştırmada
+/// kendini geçici klasöre açıyor. ÖLÇÜLDÜ (Mac, 2026.08.19): `--version`
+/// 5.9 sn, bir arama 7.4 sn; aynı sürümün klasör hâli 0.33 sn / 2.0 sn.
+/// Uygulama şarkı başına birkaç yt-dlp çağrısı yapıyor (adres çözümü, ısıtma,
+/// radyo) → Homebrew'u olmayan her makine (Windows dahil) şarkı başına
+/// saniyelerce boşuna bekliyordu.
+///
+/// Güvenli değişim: geçici klasöre aç → çalıştığını doğrula → eskisini kenara
+/// al → yenisini yerine koy. Windows'ta çalışan yt-dlp klasörü taşınamaz →
+/// `yt-dlp-dist.new` olarak bekletilir, açılışta devreye girer.
+fn install_ytdlp_dist(dir: &std::path::Path, exe_name: &str) -> anyhow::Result<String> {
+    let asset = if cfg!(target_os = "macos") { "yt-dlp_macos.zip" } else { "yt-dlp_win.zip" };
+    let url = format!("https://github.com/yt-dlp/yt-dlp/releases/latest/download/{asset}");
+    // Zaten en güncel mi? Arşiv 18-54 MB; haftalık denetimde her seferinde
+    // indirmek boşa bant genişliği. `releases/latest` yönlendirmesinin
+    // hedefi etiketi (= sürümü) söyler, gövde indirilmez.
+    let stamp = dir.join(ytdlp::YTDLP_DIST_DIR).join("VERSION");
+    if let Ok(installed) = std::fs::read_to_string(&stamp) {
+        let latest = reqwest::blocking::Client::builder()
+            .user_agent("Resonance")
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(std::time::Duration::from_secs(20))
+            .build()?
+            .get("https://github.com/yt-dlp/yt-dlp/releases/latest")
+            .send()
+            .ok()
+            .and_then(|r| {
+                r.headers()
+                    .get(reqwest::header::LOCATION)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|l| l.rsplit('/').next())
+                    .map(|t| t.to_string())
+            });
+        if latest.as_deref() == Some(installed.trim()) {
+            // Damgayı tazele → açılıştaki yaş denetimi bir hafta susar.
+            let _ = std::fs::write(&stamp, installed.trim());
+            log::info!("yt-dlp zaten güncel: {}", installed.trim());
+            return Ok(installed.trim().to_string());
+        }
+    }
+
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("Resonance")
+        .timeout(std::time::Duration::from_secs(600))
+        .build()?;
+    let bytes = client.get(&url).send()?.error_for_status()?.bytes()?;
+    if bytes.len() < 5_000_000 {
+        anyhow::bail!("İndirilen arşiv beklenenden küçük ({} B)", bytes.len());
+    }
+
+    let tmp = dir.join(format!("{}.tmp", ytdlp::YTDLP_DIST_DIR));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp)?;
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes.as_ref()))?;
+    // `extract` yol kaçışlarını (../) reddeder ve Unix izinlerini korur.
+    archive.extract(&tmp)?;
+    let exe = tmp.join(exe_name);
+    if !exe.is_file() {
+        let _ = std::fs::remove_dir_all(&tmp);
+        anyhow::bail!("arşivde {exe_name} yok");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755))?;
+    }
+
+    // Çalışıyor mu? (İlk çalıştırma macOS'ta güvenlik taraması yüzünden
+    // birkaç saniye sürebilir — arka planda, bir kez.)
+    let mut vc = std::process::Command::new(&exe);
+    vc.arg("--version");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        vc.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let out = vc.output()?;
+    let ver = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if !out.status.success() || ver.is_empty() {
+        let _ = std::fs::remove_dir_all(&tmp);
+        anyhow::bail!("indirilen yt-dlp çalışmadı");
+    }
+    // `resolve_bin` sürümü buradan okur — yavaş ikiliyi hiç çalıştırmadan seçer.
+    std::fs::write(tmp.join("VERSION"), &ver)?;
+
+    let dist = dir.join(ytdlp::YTDLP_DIST_DIR);
+    let old = dir.join(format!("{}.old", ytdlp::YTDLP_DIST_DIR));
+    let _ = std::fs::remove_dir_all(&old);
+    let moved_old = !dist.exists() || std::fs::rename(&dist, &old).is_ok();
+    if moved_old && std::fs::rename(&tmp, &dist).is_ok() {
+        let _ = std::fs::remove_dir_all(&old);
+        // Eski tek dosyalık kopya artık gereksiz (37 MB) ve yanlışlıkla
+        // seçilmesin. Windows'ta kullanımdaysa silinemez, sorun değil.
+        let _ = std::fs::remove_file(dir.join(ytdlp_target_name()));
+        log::info!("yt-dlp klasör sürümü kuruldu: {ver}");
+        return Ok(ver);
+    }
+    if moved_old && old.exists() {
+        let _ = std::fs::rename(&old, &dist); // geri al
+    }
+    let pending = dir.join(format!("{}.new", ytdlp::YTDLP_DIST_DIR));
+    let _ = std::fs::remove_dir_all(&pending);
+    std::fs::rename(&tmp, &pending)?;
+    log::warn!("yt-dlp kullanımda — yeni sürüm ({ver}) bir sonraki açılışta devreye girecek");
+    Ok(format!("{ver} (bir sonraki açılışta devreye girecek)"))
+}
+
 /// Uygulama log dosyasının son satırlarını döndürür (Ayarlar → Hata Günlüğü).
 #[tauri::command]
 pub fn read_log(app: AppHandle, lines: Option<usize>) -> Result<String, String> {
@@ -1436,4 +1584,85 @@ pub fn read_log(app: AppHandle, lines: Option<usize>) -> Result<String, String> 
     let all: Vec<&str> = content.lines().collect();
     let start = all.len().saturating_sub(n);
     Ok(all[start..].join("\n"))
+}
+
+#[derive(serde::Serialize)]
+pub struct VideoMeta {
+    pub id: String,
+    pub title: String,
+    pub author: String,
+    pub thumbnail: Option<String>,
+}
+
+/// YouTube oEmbed ile video başlığı/kanalı/kapağı (anahtarsız, ~0.2 sn).
+///
+/// Senkronda parçası hiç gelmeyen liste üyelikleri için açılan YER TUTUCU
+/// parçaların adını doldurmak için (v1.9.3). Başarısız olanlar (silinmiş /
+/// özel video) listede yer almaz.
+#[tauri::command]
+pub async fn youtube_oembed(ids: Vec<String>) -> Result<Vec<VideoMeta>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let client = reqwest::blocking::Client::builder()
+            .user_agent("Mozilla/5.0 Resonance")
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map_err(|e| e.to_string())?;
+        let ids: Vec<String> = ids
+            .into_iter()
+            .filter(|id| id.len() == 11 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+            .take(400)
+            .collect();
+        let out = std::sync::Mutex::new(Vec::new());
+        for chunk in ids.chunks(6) {
+            std::thread::scope(|s| {
+                for id in chunk {
+                    let client = &client;
+                    let out = &out;
+                    s.spawn(move || {
+                        let url = format!(
+                            "https://www.youtube.com/oembed?format=json&url=https://www.youtube.com/watch?v={id}"
+                        );
+                        let Ok(r) = client.get(&url).send() else { return };
+                        if !r.status().is_success() {
+                            return;
+                        }
+                        let Ok(v) = r.json::<serde_json::Value>() else { return };
+                        let title = v["title"].as_str().unwrap_or("").trim().to_string();
+                        if title.is_empty() {
+                            return;
+                        }
+                        let author = v["author_name"]
+                            .as_str()
+                            .unwrap_or("")
+                            .trim_end_matches(" - Topic")
+                            .trim()
+                            .to_string();
+                        out.lock().unwrap_or_else(|e| e.into_inner()).push(VideoMeta {
+                            id: id.clone(),
+                            title,
+                            author,
+                            thumbnail: Some(format!("https://i.ytimg.com/vi/{id}/mqdefault.jpg")),
+                        });
+                    });
+                }
+            });
+        }
+        Ok(out.into_inner().unwrap_or_else(|e| e.into_inner()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// JS tarafındaki önemli uyarı/hataları uygulama log dosyasına yazar.
+///
+/// NEDEN (v1.9.3): senkron hataları yalnız webview konsoluna gidiyordu; log
+/// dosyasında hiç görünmüyordu. Windows'ta "liste eksik" gibi sorunlar bu
+/// yüzden teşhis edilemiyordu.
+#[tauri::command]
+pub fn log_from_js(level: String, message: String) {
+    let msg: String = message.chars().take(2000).collect();
+    match level.as_str() {
+        "error" => log::error!("[js] {msg}"),
+        _ => log::warn!("[js] {msg}"),
+    }
 }

@@ -32,6 +32,7 @@ import * as pl from "../lib/playlists";
 import { isTauri } from "../lib/db";
 import { onRemoteApplied } from "../lib/sync/engine";
 import { KARMA_EVENT } from "../lib/vote";
+import { LIBRARY_CHANGED_EVENT } from "../lib/placeholderRepair";
 import { useToastStore } from "../store/useToastStore";
 
 export default function PlaylistView({ playlistId }: { playlistId: string | null }) {
@@ -102,9 +103,11 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
     };
     const off = onRemoteApplied(reload);
     window.addEventListener(KARMA_EVENT, reload);
+    window.addEventListener(LIBRARY_CHANGED_EVENT, reload);
     return () => {
       off();
       window.removeEventListener(KARMA_EVENT, reload);
+      window.removeEventListener(LIBRARY_CHANGED_EVENT, reload);
       if (timer) clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

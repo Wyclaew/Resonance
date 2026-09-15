@@ -211,6 +211,42 @@ begin
   end loop;
 end $$;
 
+-- ── Son-yazan-kazanır koruması (v1.9.3) ───────────────────────────────────
+-- ⛔ NEDEN: upsert satırı KOŞULSUZ eziyordu. Bir cihazın ESKİ kopyası (ör. günlük
+-- derin push) diğer cihazda yapılmış YENİ bir değişikliği — silme, oy geri alma —
+-- buluta geri yazabiliyordu. Artık gelen yazım mevcut satırdan yeni değilse
+-- (updated_at küçük ya da EŞİT) o satır için güncelleme ATLANIR.
+-- EŞİT de atlanır: aynı satırı yeniden göndermek synced_at'i tazeleyip tüm
+-- cihazlara boşuna yeniden çektiriyordu.
+-- Tetikleyici adı "trg_lww_" → "trg_touch_"tan ÖNCE çalışır (alfabetik);
+-- NULL döndürünce synced_at dokunulmaz.
+create or replace function public.keep_newer_row()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.updated_at <= old.updated_at then
+    return null;
+  end if;
+  return new;
+end;
+$$;
+
+do $$
+declare tbl text;
+begin
+  foreach tbl in array array[
+    'tracks','playlists','playlist_tracks',
+    'votes','play_history','recommendation_history','now_playing',
+    'blocked_artists','artist_prefs','settings','device_queue'
+  ] loop
+    execute format('drop trigger if exists trg_lww_%1$s on public.%1$I', tbl);
+    execute format(
+      'create trigger trg_lww_%1$s before update on public.%1$I
+       for each row execute function public.keep_newer_row()', tbl);
+  end loop;
+end $$;
+
 -- ── Pull sorgusu indeksleri (user_id + synced_at) ─────────────────────────
 
 create index if not exists idx_tracks_sync   on public.tracks(user_id, synced_at);

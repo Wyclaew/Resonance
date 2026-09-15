@@ -110,6 +110,109 @@ fn ffmpeg_path() -> Option<PathBuf> {
 // (PyInstaller onefile) her çağrıda ~12sn açılırken sistemdeki ~1.7sn'de
 // çalışıyor. Sistemde yoksa (temiz makine) uygulamaya gömülü sidecar'a düş →
 // kurulum gerekmeden çalışmaya devam eder.
+/// Uygulamanın kurduğu yt-dlp KLASÖR sürümünün dizini (`bin/` altında).
+pub const YTDLP_DIST_DIR: &str = "yt-dlp-dist";
+
+/// Klasör sürümündeki çalıştırılabilir dosyanın adı; bu platform için klasör
+/// sürümü yoksa `None` (Linux'ta tek dosyalık `yt-dlp` zaten Python betiği).
+pub fn ytdlp_dist_exe_name() -> Option<&'static str> {
+    if cfg!(target_os = "macos") {
+        Some("yt-dlp_macos")
+    } else if cfg!(all(windows, target_arch = "x86_64")) {
+        Some("yt-dlp.exe")
+    } else {
+        None
+    }
+}
+
+/// "2026.08.19" → bugünden kaç gün önce. Takvim hesabı için gün sayısı
+/// (1970'ten) Howard Hinnant'ın `days_from_civil` formülüyle.
+fn version_age_days(v: &str) -> Option<u64> {
+    let mut it = v.trim().split('.');
+    let y: i64 = it.next()?.parse().ok()?;
+    let m: i64 = it.next()?.parse().ok()?;
+    let d: i64 = it.next()?.parse().ok()?;
+    if !(2000..3000).contains(&y) || !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    let yy = if m <= 2 { y - 1 } else { y };
+    let era = yy.div_euclid(400);
+    let yoe = yy - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs() as i64
+        / 86_400;
+    Some((now - days).max(0) as u64)
+}
+
+/// İki yt-dlp'den sürümü yeni olanı seçer. Sonuç dosyaların değişme
+/// zamanına göre önbelleklenir: `resolve_bin` her çağrıda çalışıyor, her
+/// seferinde iki süreç başlatmak kabul edilemez; güncelleme dosyayı
+/// değiştirince önbellek kendiliğinden geçersizleşir.
+fn newer_ytdlp(sys: std::path::PathBuf, app: std::path::PathBuf) -> std::path::PathBuf {
+    use std::sync::Mutex;
+    use std::time::SystemTime;
+    type Key = (Option<SystemTime>, Option<SystemTime>);
+    static CACHE: Mutex<Option<(Key, std::path::PathBuf)>> = Mutex::new(None);
+
+    let mtime = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    let key = (mtime(&sys), mtime(&app));
+    if let Some((k, chosen)) = CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if *k == key {
+            return chosen.clone();
+        }
+    }
+    let version = |p: &Path| -> Option<String> {
+        // Uygulamanın kurduğu klasör sürümü sürümünü dosyaya yazar.
+        if let Some(v) = p
+            .parent()
+            .map(|d| d.join("VERSION"))
+            .and_then(|f| std::fs::read_to_string(f).ok())
+        {
+            return Some(v.trim().to_string());
+        }
+        // ⚠️ Tek dosyalık eski kopyayı ÇALIŞTIRMA (5.9 sn): sürümü bilinmiyor
+        // say — klasör sürümü inene kadar sistemdeki kullanılır.
+        if p.parent().and_then(|d| d.file_name()) != Some(std::ffi::OsStr::new(YTDLP_DIST_DIR))
+            && std::env::var_os("RESONANCE_YTDLP_DIR")
+                .map(|d| p.starts_with(d))
+                .unwrap_or(false)
+        {
+            return None;
+        }
+        let mut c = Command::new(p);
+        c.arg("--version");
+        no_window(&mut c);
+        let out = c.output().ok()?;
+        out.status
+            .success()
+            .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    };
+    // Sürümler "YYYY.MM.DD[.N]" → sayısal parça parça karşılaştır.
+    let parse = |v: &Option<String>| -> Vec<u64> {
+        v.as_deref()
+            .unwrap_or("")
+            .split('.')
+            .map(|x| x.parse().unwrap_or(0))
+            .collect()
+    };
+    let (vs, va) = (version(&sys), version(&app));
+    let chosen = if va.is_some() && parse(&va) >= parse(&vs) { app } else { sys };
+    log::info!(
+        "yt-dlp seçimi: sistem {:?}, uygulama {:?} → {}",
+        vs,
+        va,
+        chosen.display()
+    );
+    *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some((key, chosen.clone()));
+    chosen
+}
+
 fn resolve_bin(name: &str) -> std::ffi::OsString {
     // 1) Sistemde kurulu mu? (hızlı)
     let exe_name = if cfg!(windows) {
@@ -117,25 +220,42 @@ fn resolve_bin(name: &str) -> std::ffi::OsString {
     } else {
         name.to_string()
     };
-    for dir in [
+    let system = [
         "/opt/homebrew/bin",
         "/usr/local/bin",
         "/usr/bin",
         "/bin",
-    ] {
-        let p = Path::new(dir).join(&exe_name);
-        if p.exists() {
-            return p.into_os_string();
-        }
-    }
+    ]
+    .iter()
+    .map(|dir| Path::new(dir).join(&exe_name))
+    .find(|p| p.exists());
     // 1.5) Çalışma anında indirilen GÜNCEL ikili (app_data/bin). Gömülü sidecar
     // eskidiğinde (YouTube nsig/format değişiklikleri) onu geçersiz kılar.
-    // Sidecar'dan ÖNCE denenir. Yol setup'ta RESONANCE_YTDLP_DIR ile verilir.
-    if let Some(d) = std::env::var_os("RESONANCE_YTDLP_DIR") {
-        let p = Path::new(&d).join(&exe_name);
-        if p.exists() {
-            return p.into_os_string();
+    // Yol setup'ta RESONANCE_YTDLP_DIR ile verilir.
+    //
+    // ⭐ KLASÖR SÜRÜMÜ ÖNCE (v1.9.3): tek dosyalık yt-dlp her çalışmada kendini
+    // geçici klasöre açıyor. ÖLÇÜLDÜ (Mac): `--version` 5.9 sn, bir arama
+    // 7.4 sn; klasör sürümü (`yt-dlp_macos.zip`) 0.33 sn / 2.0 sn.
+    let managed = std::env::var_os("RESONANCE_YTDLP_DIR").and_then(|d| {
+        let d = Path::new(&d);
+        let dist = (name == "yt-dlp")
+            .then(ytdlp_dist_exe_name)
+            .flatten()
+            .map(|n| d.join(YTDLP_DIST_DIR).join(n))
+            .filter(|p| p.exists());
+        dist.or_else(|| Some(d.join(&exe_name)).filter(|p| p.exists()))
+    });
+    match (system, managed) {
+        // ⛔ BUG'DI (v1.9.3): sistemdeki ikili HER ZAMAN önce seçiliyordu.
+        // ÖLÇÜLDÜ (kullanıcının Mac'i): Homebrew yt-dlp 2026.07.04, uygulamanın
+        // haftalık güncellediği 2026.08.19 — uygulama 6 hafta eski çıkarıcıyla
+        // çalışıyordu (log'da web_embedded 403'leri). İkisi de varsa YENİ olan.
+        (Some(sys), Some(app)) if name == "yt-dlp" => {
+            return newer_ytdlp(sys, app).into_os_string();
         }
+        (Some(sys), _) => return sys.into_os_string(),
+        (None, Some(app)) => return app.into_os_string(),
+        (None, None) => {}
     }
 
     // 2) Uygulamaya gömülü sidecar (temiz makineler için).
@@ -1079,11 +1199,18 @@ pub fn diagnose(cache_dir: &Path, cookies: Option<&str>) -> String {
     // Windows'unda ikili 10 HAFTA eskiydi (haftalık otomatik güncelleme
     // çalışan exe'yi değiştiremediği için sessizce başarısız oluyordu).
     // Panelde görünmediği sürece kimse fark etmiyor.
-    let age_days = std::fs::metadata(&ytp)
-        .ok()
-        .and_then(|m| m.modified().ok())
-        .and_then(|t| t.elapsed().ok())
-        .map(|d| d.as_secs() / 86_400);
+    // Yaş SÜRÜM TARİHİNDEN (YYYY.MM.DD): dosya zamanı kurulum anını gösterir,
+    // Homebrew'un aylardır güncellenmemiş ikilisi "0 gün" görünebilirdi.
+    let age_days = ver
+        .as_deref()
+        .and_then(version_age_days)
+        .or_else(|| {
+            std::fs::metadata(&ytp)
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.elapsed().ok())
+                .map(|d| d.as_secs() / 86_400)
+        });
     line(
         &mut out,
         "yt-dlp yaşı",
@@ -2015,5 +2142,22 @@ mod tests {
         assert!(diff * 5 <= 248_000, "süre çok saptı: {} ms", a.duration_ms);
         let t = a.title.to_lowercase();
         assert!(!t.contains("full album"), "yanlış içerik: {t}");
+    }
+}
+
+#[cfg(test)]
+mod version_age_tests {
+    #[test]
+    fn parses_release_dates() {
+        let today = (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            / 86_400) as u64;
+        // 2000-03-01 = 11017. gün, 2026-08-19 = 20684. gün (1970'ten).
+        assert_eq!(super::version_age_days("2000.03.01"), Some(today - 11_017));
+        assert_eq!(super::version_age_days("2026.08.19.2"), Some(today.saturating_sub(20_684)));
+        assert!(super::version_age_days("garbage").is_none());
+        assert!(super::version_age_days("2026.13.01").is_none());
     }
 }

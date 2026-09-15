@@ -592,13 +592,27 @@ pub fn probe_url(src: &AudioSource) -> bool {
         log::info!("adres kısıtlı (sağlık testi, HTTP {end_status}): {}", src.via);
         return false;
     }
-    let head_ok = c
-        .get(&src.url)
-        .header("User-Agent", &src.user_agent)
-        .header("Range", "bytes=0-1023")
-        .send()
-        .map(|r| r.status().is_success())
-        .unwrap_or(true);
+    let range_ok = |range: String| {
+        c.get(&src.url)
+            .header("User-Agent", &src.user_agent)
+            .header("Range", range)
+            .send()
+            .map(|r| r.status().is_success())
+            .unwrap_or(true)
+    };
+    // ⭐ İKİNCİ PARÇANIN SONU (v1.9.3): "baştan iniyor" demek YETMİYORDU.
+    // Kısıtlı adres de ilk ~1 MB'ı veriyor. ÖLÇÜLDÜ (Mac, gerçek adresler):
+    // `0-1048575` 206, `1048576-1049599` 206, `1060000-1061023` 206 ama
+    // `1100000-…` ve `2096128-2097151` 403 — duvar bir BAYT KONUMU (~1.05 MB).
+    // Böyle kabul edilen adresler sıralı indirmede `@ 1048576`'da 403 alıp
+    // çöküyordu: şarkı başına ~1 MB ve 5-11 sn kayıp. Sıralı indirmenin
+    // İKİNCİ parça isteğinin son KB'ını şimdiden deniyoruz; Windows'taki
+    // "atlamayı reddeden ama sıralı veren" adreste bu istek gerçek indirmede
+    // de başarılıydı, o katman korunur.
+    let second_end = 2 * CHUNK - 1;
+    let head_ok = range_ok("bytes=0-1023".to_string())
+        && (src.content_length <= 2 * CHUNK
+            || range_ok(format!("bytes={}-{second_end}", second_end - 1023)));
     if head_ok {
         log::warn!(
             "adres son parçayı vermiyor (HTTP {end_status}) ama baştan iniyor —              sıralı indirmeye devam: {}",

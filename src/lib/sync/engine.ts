@@ -204,6 +204,7 @@ const PAGE = 500; // pull sayfa boyutu
 // günde bir kez baştan çekmek ucuz ve iki cihazı kendiliğinden eşitler.
 const DEEP_PULL_EVERY_MS = 24 * 3600 * 1000;
 const DEEP_PULL_KEY = "sync.lastDeepPull";
+const PAGING_FIX_KEY = "sync.pagingFix193";
 let deepSyncPending = false;
 const CHUNK = 400; // push yığın boyutu
 const EPOCH0 = "1970-01-01T00:00:00Z";
@@ -328,16 +329,101 @@ function upsertSql(spec: TableSpec): string {
           WHERE excluded.updated_at > ${spec.name}.updated_at`;
 }
 
+// Bulutta NULL gelirse boş metne çekilecek NOT NULL metin sütunları. NULL
+// yazılsaydı satır uygulanamaz ve (v1.9.3 öncesi) pull o sayfada takılırdı.
+const STR_DEFAULT_EMPTY = new Set(["title", "artist", "queue_json", "file_path"]);
+
 function valuesFor(spec: TableSpec, row: Record<string, unknown>): unknown[] {
   return spec.cols.map((c) => {
     const v = row[c];
     if (v === undefined || v === null) {
       if (NUM_DEFAULT_0.has(c)) return 0;
       if (NUM_DEFAULT_1.has(c)) return 1;
+      if (STR_DEFAULT_EMPTY.has(c)) return "";
+      // tracks.source / source_id kimlikten türetilebilir ("youtube:ID").
+      if (spec.name === "tracks" && (c === "source" || c === "source_id")) {
+        const id = String(row.id ?? "");
+        const i = id.indexOf(":");
+        if (i > 0) return c === "source" ? id.slice(0, i) : id.slice(i + 1);
+      }
       return null;
     }
     return v;
   });
+}
+
+/**
+ * Liste üyeliklerinin işaret ettiği parçalar yerelde yoksa buluttan getirir;
+ * bulutta da yoksa YER TUTUCU açar (başlık boş, `updated_at = 0` → gerçek satır
+ * gelince ezilir). Yer tutucunun adı `onPlaceholders` dinleyicisiyle doldurulur
+ * (masaüstünde YouTube'dan). Böylece üyelik yabancı anahtar hatasıyla KAYBOLMAZ.
+ *
+ * Mobilde aynı iş bir DB tetikleyicisiyle de yapılıyor; `INSERT OR IGNORE`
+ * olduğu için ikisi çakışmaz.
+ */
+async function ensureParentTracks(rows: Record<string, unknown>[], userId: string): Promise<void> {
+  const sb = getSupabase();
+  if (!sb) return;
+  const db = await getDb();
+  const ids = [...new Set(rows.map((r) => String(r.track_id ?? "")).filter(Boolean))];
+  if (ids.length === 0) return;
+  const missing: string[] = [];
+  for (let i = 0; i < ids.length; i += 200) {
+    const part = ids.slice(i, i + 200);
+    const ph = part.map((_, j) => `$${j + 1}`).join(", ");
+    const have = await db.select<{ id: string }[]>(
+      `SELECT id FROM tracks WHERE id IN (${ph})`,
+      part
+    );
+    const set = new Set(have.map((h) => h.id));
+    for (const id of part) if (!set.has(id)) missing.push(id);
+  }
+  if (missing.length === 0) return;
+
+  const spec = TABLES.find((t) => t.name === "tracks")!;
+  const sql = upsertSql(spec);
+  const found = new Set<string>();
+  for (let i = 0; i < missing.length; i += 100) {
+    const { data, error } = await sb
+      .from("tracks")
+      .select("*")
+      .eq("user_id", userId)
+      .in("id", missing.slice(i, i + 100));
+    if (error) break;
+    for (const row of (data ?? []) as Record<string, unknown>[]) {
+      try {
+        await db.execute(sql, valuesFor(spec, row));
+        found.add(String(row.id));
+      } catch (e) {
+        console.error(`[sync] eksik parça uygulanamadı (${String(row.id)}):`, e);
+      }
+    }
+  }
+  const placeholders = missing.filter((id) => !found.has(id));
+  for (const id of placeholders) {
+    const i = id.indexOf(":");
+    if (i <= 0) continue;
+    await db
+      .execute(
+        `INSERT OR IGNORE INTO tracks
+           (id, source, source_id, title, artist, duration_ms, added_at, updated_at)
+         VALUES ($1, $2, $3, '', '', 0, $4, 0)`,
+        [id, id.slice(0, i), id.slice(i + 1), Date.now()]
+      )
+      .catch(() => {});
+  }
+  console.warn(
+    `[sync] ${missing.length} üyeliğin parçası yerelde yoktu: ${found.size} buluttan geldi, ` +
+      `${placeholders.length} yer tutucu açıldı`
+  );
+  if (placeholders.length > 0) for (const fn of placeholderListeners) fn();
+}
+
+const placeholderListeners = new Set<() => void>();
+/** Pull yer tutucu parça açınca çağrılır (adlarını doldurmak için). */
+export function onPlaceholders(fn: () => void): () => void {
+  placeholderListeners.add(fn);
+  return () => placeholderListeners.delete(fn);
 }
 
 // ── Pull ───────────────────────────────────────────────────────────────────
@@ -373,56 +459,100 @@ async function pullTable(spec: TableSpec, userId: string): Promise<number> {
   }
   let applied = 0;
 
+  // ⭐⭐ SAYFALAMA: `synced_at > imleç` YETMİYORDU (v1.9.3) — TEMİZ KURULUMDA
+  // YÜZLERCE SATIR KAYBI. Push 400'lük yığınlarla yazar ve bir yığındaki TÜM
+  // satırlar AYNI `synced_at`'i taşır (trigger `now()` = işlem başlangıcı).
+  // 500'lük sayfa "yığın 1 (400) + yığın 2'nin 100'ü" olunca imleç yığın 2'nin
+  // zamanına geçiyor, `gt` yığın 2'nin kalan 300 satırını ATLIYORDU. Kullanıcı
+  // Mac'i sıfırdan kurunca yüzlerce parça gelmedi, onlara bağlı liste
+  // üyelikleri yabancı anahtar hatasıyla düştü: Favorite Songs 241 → 163.
+  // Artık `gte` + aynı zamandaki satırlar için ofset; sıra birincil anahtarla
+  // kesinleştirilir (ofset ancak sıra belirliyse güvenli).
+  const conflictCols = spec.conflict.split(",").map((c) => c.trim());
+  let cursor = since;
+  let skipAtCursor = 0; // imleçle AYNI zamandaki satırlardan kaçı işlendi
+  let firstPage = true;
+  // Kalıcı damga YALNIZ hatasız ilerlenen noktaya kadar yazılır; hata olursa
+  // sonraki tur o noktadan yeniden dener. Sayfalama ise hatada DURMAZ —
+  // eskiden ilk hatada döngü kırılıyor ve sonraki sayfalar hiç gelmiyordu.
+  let blocked = false;
+  const failed: Record<string, unknown>[] = [];
+
   for (;;) {
-    const { data, error } = await sb
+    let q = sb
       .from(spec.name)
       .select("*")
       .eq("user_id", userId)
-      .gt("synced_at", since)
-      .order("synced_at", { ascending: true })
-      .limit(PAGE);
+      // İlk sayfada `gt`: damgadaki satırlar zaten uygulanmıştı.
+      [firstPage ? "gt" : "gte"]("synced_at", cursor)
+      .order("synced_at", { ascending: true });
+    for (const c of conflictCols) q = q.order(c, { ascending: true });
+    const offset = firstPage ? 0 : skipAtCursor;
+    const { data, error } = await q.range(offset, offset + PAGE - 1);
     if (error) throw new Error(`${spec.name} pull: ${error.message}`);
-    const rows = data ?? [];
+    const rows = (data ?? []) as Record<string, unknown>[];
     if (rows.length === 0) break;
 
-    // Satırlar synced_at SIRALI işlenir. Bir satır hata verirse (tipik olarak
-    // ebeveyni henüz gelmemiş bir FK ihlali) su terazisi O SATIRDAN ÖNCEYE
-    // sabitlenir → sonraki turda yeniden denenir ve KAYBOLMAZ. Kalan satırlar
-    // yine uygulanır (idempotent; tekrar gelmeleri zararsız).
-    let safeWatermark: string | null = null;
-    let stopAdvancing = false;
+    // Üyeliklerin parçaları eksikse önce onları getir (yoksa FK hatası).
+    if (spec.name === "playlist_tracks") await ensureParentTracks(rows, userId);
 
-    for (const row of rows as Record<string, unknown>[]) {
+    for (const row of rows) {
       try {
         // Beyaz liste dışı satırı yerele YAZMA (bulutta eski bir sürümden
-        // kalmış olabilir); yine de su terazisi ilerlesin, yoksa takılırdı.
-        if (spec.pullKeep && !spec.pullKeep(row)) {
-          if (!stopAdvancing) safeWatermark = String(row.synced_at);
-          continue;
+        // kalmış olabilir); damga yine ilerlesin, yoksa takılırdı.
+        if (!(spec.pullKeep && !spec.pullKeep(row))) {
+          await db.execute(sql, valuesFor(spec, row));
+          applied++;
         }
-        await db.execute(sql, valuesFor(spec, row));
-        applied++;
-        if (!stopAdvancing) safeWatermark = String(row.synced_at);
       } catch (e) {
         // Satırın KİMLİĞİNİ de yaz: kimliksiz hata ayıklanamıyor (mobilde
         // 54 satır bu yüzden sessizce düşerken sebebi bulunamadı).
-        const key = spec.conflict
-          .split(",")
-          .map((c) => `${c.trim()}=${String((row as Record<string, unknown>)[c.trim()] ?? "?")}`)
+        const key = conflictCols
+          .map((c) => `${c}=${String(row[c] ?? "?")}`)
           .join(" ");
         console.error(`[sync] ${spec.name} satırı uygulanamadı (${key}):`, e);
-        stopAdvancing = true;
+        failed.push(row);
+        if (!blocked) {
+          blocked = true;
+          // Bu satırın ÖNCESİ güvenli; bir sonraki tur buradan başlasın.
+          if (cursor !== since) await writeWatermark(spec.name, { lastPulled: cursor });
+        }
       }
     }
 
-    const lastRow = rows[rows.length - 1] as Record<string, unknown>;
-    const next = stopAdvancing
-      ? safeWatermark
-      : String(lastRow.synced_at ?? safeWatermark);
-    if (!next || next === since) break; // ilerleme yok → sonsuz döngüyü kes
-    since = next;
-    await writeWatermark(spec.name, { lastPulled: since });
-    if (rows.length < PAGE || stopAdvancing) break;
+    // İmleci ilerlet: son satırın zamanı + o zamandaki satır sayısı.
+    const lastTs = String(rows[rows.length - 1].synced_at);
+    const atLast = rows.filter((r) => String(r.synced_at) === lastTs).length;
+    skipAtCursor = !firstPage && lastTs === cursor ? skipAtCursor + atLast : atLast;
+    cursor = lastTs;
+    firstPage = false;
+    if (rows.length < PAGE) break;
+  }
+  // ⚠️ Damga ancak TÜM sayfalar bitince yazılır: aynı zamanlı bir grubun
+  // ortasında yazılsaydı sonraki tur `gt` ile grubun kalanını atlardı. (Yarıda
+  // kesilen tur baştan tekrarlanır — upsert'ler idempotent.)
+  if (!blocked && cursor !== since) {
+    await writeWatermark(spec.name, { lastPulled: cursor });
+  }
+
+  // İkinci şans: başarısız satırları bir kez daha dene (aynı turda ebeveyni
+  // sonradan gelmiş olabilir).
+  if (failed.length > 0) {
+    let still = 0;
+    for (const row of failed) {
+      try {
+        await db.execute(sql, valuesFor(spec, row));
+        applied++;
+      } catch {
+        still++;
+      }
+    }
+    if (still === 0) {
+      await writeWatermark(spec.name, { lastPulled: cursor });
+      console.warn(`[sync] ${spec.name}: ${failed.length} satır ikinci denemede uygulandı`);
+    } else {
+      console.error(`[sync] ${spec.name}: ${still} satır uygulanamadı, sonraki turda yeniden denenecek`);
+    }
   }
 
   return applied;
@@ -435,6 +565,12 @@ async function pushTable(spec: TableSpec, userId: string): Promise<number> {
   if (!sb) return 0;
   const db = await getDb();
   const { lastPushed } = await readWatermarks(spec.name);
+  // v1.9.3 öncesi oy yazımı `updated_at` vermiyordu (0) → hiç gönderilmemiş
+  // oylar. "Şimdi" damgasıyla işaretle ki bu turda buluta çıksınlar. Yalnız
+  // olay tablolarında güvenli: `tracks`'te 0 bilerek YER TUTUCU demek.
+  if (spec.name === "votes") {
+    await db.execute(`UPDATE votes SET updated_at = $1 WHERE updated_at = 0`, [Date.now()]);
+  }
   // ⭐⭐ PUSH TARAFINDA DA GERİYE PAY (v1.9.2) — kaybolan satırın ASIL yeri.
   //
   // Su terazisi, gönderilen satırların EN BÜYÜK `updated_at`'ine taşınıyor.
@@ -535,34 +671,57 @@ export async function syncNow(mode: "full" | "push" | "pull" = "full"): Promise<
     deepSyncPending = false;
     if (mode === "full") {
       try {
-        const last = Number((await loadSettings())[DEEP_PULL_KEY] ?? 0);
-        deepSyncPending = !Number.isFinite(last) || Date.now() - last > DEEP_PULL_EVERY_MS;
+        const settings = await loadSettings();
+        const last = Number(settings[DEEP_PULL_KEY] ?? 0);
+        deepSyncPending =
+          !Number.isFinite(last) ||
+          Date.now() - last > DEEP_PULL_EVERY_MS ||
+          // v1.9.3 sayfalama düzeltmesinden sonra BİR KEZ baştan çek: eski
+          // sürümün atladığı satırlar ancak böyle gelir (damga zaten ileride).
+          settings[PAGING_FIX_KEY] !== "1";
       } catch {
         deepSyncPending = false;
       }
       if (deepSyncPending) console.info("[resonance] senkron: derin onarım turu");
     }
 
-    if (mode !== "pull") {
+    const doPush = async () => {
       for (const spec of TABLES) {
         pushed += await guard(`${spec.name} push`, () => pushTable(spec, userId));
       }
-    }
-    if (mode !== "push") {
+    };
+    const doPull = async () => {
       for (const spec of TABLES) {
         pulled += await guard(`${spec.name} pull`, () => pullTable(spec, userId));
       }
-      if (deepSyncPending) {
-        deepSyncPending = false;
-        try {
-          await setSetting(DEEP_PULL_KEY, String(Date.now()));
-          console.info("[resonance] senkron: derin onarım turu tamamlandı");
-        } catch {
-          /* damga yazılamadıysa bir dahaki turda yine denenir */
-        }
+    };
+
+    // ⛔ DERİN TURDA ÖNCE ÇEK (v1.9.3). Bulutta son-yazan-kazanır koruması YOK
+    // (upsert satırı koşulsuz ezer). Derin push TÜM yerel satırları gönderdiği
+    // için, önce gönderilirse bu cihazın ESKİ kopyası diğer cihazdaki YENİ bir
+    // değişikliği (silme, oy geri alma) buluta geri yazabilirdi. Önce çekince
+    // yerel satırlar zaten LWW ile birleşmiş en yeni hâli taşır.
+    // Normal turda sıra push → pull kalır: push yalnız son değişenleri gönderir.
+    if (deepSyncPending && mode === "full") {
+      await doPull();
+      await doPush();
+    } else {
+      if (mode !== "pull") await doPush();
+      if (mode !== "push") await doPull();
+    }
+    // Hatalı turu "tamamlandı" sayma: onarım (özellikle bir kerelik sayfalama
+    // onarımı) ağ hatasında sessizce atlanmasın.
+    if (mode !== "push" && deepSyncPending && errors.length === 0) {
+      try {
+        await setSetting(DEEP_PULL_KEY, String(Date.now()));
+        await setSetting(PAGING_FIX_KEY, "1");
+        console.info("[resonance] senkron: derin onarım turu tamamlandı");
+      } catch {
+        /* damga yazılamadıysa bir dahaki turda yine denenir */
       }
     }
 
+    deepSyncPending = false;
     setState({
       status: errors.length > 0 ? "error" : "idle",
       lastSyncAt: Date.now(),

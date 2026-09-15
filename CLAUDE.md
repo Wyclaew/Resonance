@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.9.3** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.9.4** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,52 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.9.4 (SENKRON VERİ KAYBI + OYLAR BULUTA ÇIKMIYORDU + yt-dlp 5 SN):
+• **⭐⭐⭐ PULL SAYFALAMASI SATIR ATLIYORDU — TEMİZ KURULUMDA YÜZLERCE SATIR.**
+  Kullanıcının Mac'i sıfırdan kuruldu (uygulama klasörü boş oluşmuştu),
+  buluttan çekince Favorite Songs **241 → 163**. KÖK NEDEN: push 400'lük
+  yığınlarla yazar ve bir yığındaki TÜM satırlar AYNI `synced_at`'i taşır
+  (trigger `now()` = işlem başlangıcı). Pull `gt(synced_at, imleç)` + 500'lük
+  sayfa: "yığın 1 + yığın 2'nin 100'ü" gelince imleç yığın 2'nin zamanına
+  geçip kalan 300'ü ATLIYORDU. SİMÜLE EDİLDİ (aynı veri şekli): eski
+  algoritma 1521 parçanın **1000**'ini, yeni algoritma 1521'ini aldı.
+  Atlanan parçalara bağlı üyelikler FK hatasıyla düşüyordu. Çözüm: `gte` +
+  aynı zamandaki satırlar için ofset (sıra birincil anahtarla kesinleşir);
+  damga yalnız TÜM sayfalar bitince yazılır; hata sayfalamayı DURDURMAZ
+  (eskiden ilk hatada döngü kırılıp sonraki sayfalar hiç gelmiyordu);
+  başarısızlar aynı turda ikinci kez denenir; üyeliğin parçası yoksa
+  buluttan istenir, orada da yoksa YER TUTUCU açılır ve adı YouTube
+  oEmbed'den doldurulur (`placeholderRepair.ts`). v1.9.4'e geçen her cihaz
+  BİR KEZ baştan çeker (`sync.pagingFix193`).
+  ⚠️ BULUTA KARŞI CANLI DENENMEDİ (oturum jetonu kullanılmadı) — ilk
+  açılıştan sonra log'da `[js] [sync]` satırlarına bak.
+• **⭐⭐ MASAÜSTÜNDE (VE MOBİLDE) VERİLEN OYLAR BULUTA HİÇ ÇIKMIYORDU**:
+  `voteTrack` `updated_at` vermiyordu (varsayılan 0), push `updated_at >
+  damga` ile seçiyor. Bu Mac'teki 39 oyun HEPSİ buluttan gelmişti.
+  "Mac'te verdiğim oy Windows'ta yok" şikâyetinin ASIL kökü. Düzeltildi +
+  push öncesi `updated_at = 0` kalmış oylar "şimdi" damgasıyla gönderilir.
+• **⭐⭐ BULUTTA SON-YAZAN-KAZANIR KORUMASI YOKTU**: upsert satırı koşulsuz
+  eziyor. Günlük derin push önce çalıştığı için bir cihazın eski kopyası
+  diğerindeki silmeyi/oy geri almayı geri yazabiliyordu. İstemci: derin
+  turda önce PULL sonra PUSH. Sunucu: `docs/supabase-schema.sql` →
+  `keep_newer_row` tetikleyicisi (`updated_at <= eski` ise güncelleme
+  atlanır) — **kullanıcı SQL editöründe çalıştırmalı**.
+• **⭐⭐ yt-dlp HER ÇAĞRIDA ~5 SN**: uygulamanın indirdiği tek dosyalık
+  (PyInstaller onefile) yt-dlp her çalışmada kendini açıyor. ÖLÇÜLDÜ (Mac):
+  `--version` 5.9 sn / arama 7.4 sn; klasör sürümü (`yt-dlp_macos.zip`)
+  0.33 sn / 1.5-2.2 sn. Artık `bin/yt-dlp-dist/` (macOS + Windows x64) +
+  `VERSION` damgası; "zaten güncel" ise indirmez (yönlendirme hedefinden
+  etiket okunur). Ayrıca sistemdeki ESKİ yt-dlp (Homebrew 07.04) uygulamanın
+  güncel kopyasını (08.19) GÖLGELİYORDU → ikisi varsa sürümü yeni olan.
+  ⚠️ Windows'ta klasör sürümünün hızı ÖLÇÜLMEDİ (çalıştırılamadı).
+• **Kısıtlı adres sağlık testinden geçiyordu**: "son parçayı vermiyor ama
+  baştan iniyor" diye kabul edilen adresler `@ 1048576`'da 403 alıp çöküyordu
+  (log: şarkı başına 5-11 sn kayıp). ÖLÇÜLDÜ: duvar bir BAYT KONUMU
+  (`1060000-…` 206, `1100000-…` 403) → artık 2. parçanın son KB'ı da denenir.
+• JS `[sync]`/`[resonance]` uyarı/hataları artık log dosyasına gidiyor
+  (`log_from_js`) — Windows'taki senkron sorunları teşhis edilebilsin.
+⚠️ Mobil için: `sync/engine.ts` ve `playlists.ts` değişti → `sync-core.py`.
+
 v1.9.3 (AYNI MAC 4 CİHAZ + KEŞFET TEKRARI + TARAYICIDA GİRİŞ + TASARIM):
 • **⭐⭐ CİHAZ KİMLİĞİ VE OTURUM KAYBOLUYORDU.** Kullanıcı Keşfet'in "Başka
   cihaz" listesinde (3 cihazı varken) üç ayrı "Mac" gördü. ÖLÇÜLDÜ:
@@ -464,7 +510,8 @@ toast'ı + iki i18n düzeltmesi.
 - Türkçe konuş; kod/yorumlar da Türkçe (mevcut stile uy).
 - Gerçekçi ol: kullanıcı abartı değil dürüst değerlendirme istiyor. Çalışmayan şeye "çalışıyor" deme,
   test etmediğin şeye "test ettim" deme.
-- yt-dlp ile YouTube sesi çekmek YouTube ToS'una aykırı olabilir → kişisel kullanım, repo **private**.
+- yt-dlp ile YouTube sesi çekmek YouTube ToS'una aykırı olabilir → kişisel kullanım. Masaüstü deposu (`Wyclaew/Resonance`) **public**
+  (otomatik güncelleme `latest.json`'ı anahtarsız okuyabilsin); mobil ayrı ve **private** depoda.
 
 ## Teknoloji
 - **Kabuk:** Tauri 2 (Rust). Electron DEĞİL (hafiflik şartı).
@@ -717,9 +764,8 @@ Tüm sinyaller tek skorda birleşir:
     **Bu bir client/format sorunu DEĞİL** — `player_client=ios/android` denendi, DAHA KÖTÜ ("Requested
     format is not available", ios m4a vermez; android 96k). `--simulate` ile test YANILTIR (403 orada
     görünmez); gerçek indirme + app logu (`~/Library/Logs/com.resonance.app/`) ile teşhis et.
-    **Not:** `resolve_bin` sistemi (`/opt/homebrew/bin`) app_data/bin'den (runtime güncellenen) ÖNCE
-    seçer → dev makinesinde eski Homebrew yt-dlp, taze auto-update'i gölgeliyor olabilir (`brew upgrade
-    yt-dlp` veya sistemden kaldır). Son kullanıcıda sistemde yt-dlp yok → auto-update düzgün kullanılır.
+    **Not (v1.9.4):** sistemde (Homebrew) ve uygulamada yt-dlp varsa artık SÜRÜMÜ YENİ olan seçilir
+    (`newer_ytdlp`). Eskiden sistem hep önceydi ve kullanıcının Mac'inde 6 hafta eski ikili kullanılıyordu.
 12. **`tracks`'e ASLA `INSERT OR REPLACE` YAPMA** → satırı silip ekler, `ON DELETE CASCADE` şarkıyı TÜM
     listelerden uçurur. `ensureTrack` (`src/lib/playlists.ts`) `ON CONFLICT(id) DO UPDATE` kullanır; onu çağır.
 13b. **⭐ OY PARÇAYA AİTTİR (v1.9.2)**: `votes.playlist_id` yalnız BAĞLAM

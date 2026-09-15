@@ -389,8 +389,11 @@ export async function voteTrack(
 
   const d = new Date();
   await db.execute(
-    `INSERT INTO votes (track_id, playlist_id, value, created_at, hour, dow, uid, device_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    // ⛔ BUG'DI (v1.9.3): `updated_at` verilmiyordu → varsayılan 0 → push
+    // `updated_at > damga` ile seçtiği için oy BULUTA HİÇ ÇIKMIYORDU.
+    // Kullanıcının "Mac'te verdiğim oy Windows'ta yok" şikâyetinin asıl kökü.
+    `INSERT INTO votes (track_id, playlist_id, value, created_at, hour, dow, uid, device_id, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
     [
       trackId,
       playlistId,
@@ -400,6 +403,7 @@ export async function voteTrack(
       d.getDay(),
       newUid(),
       getDeviceId(),
+      now,
     ]
   );
   // Son oy yönünü ipucu olarak sakla.

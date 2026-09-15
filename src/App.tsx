@@ -12,7 +12,8 @@ import WindowControls from "./components/WindowControls";
 import Toasts from "./components/Toasts";
 import MiniPlayer from "./components/MiniPlayer";
 import { getDb, isTauri } from "./lib/db";
-import { onRemoteApplied, startSync } from "./lib/sync/engine";
+import { onPlaceholders, onRemoteApplied, startSync } from "./lib/sync/engine";
+import { LIBRARY_CHANGED_EVENT, repairPlaceholderTracks } from "./lib/placeholderRepair";
 import { getSupabase, wasSignOutIntentional } from "./lib/sync/client";
 import { latestRemoteQueue, localQueueUpdatedAt } from "./lib/deviceQueue";
 import { t } from "./lib/i18n";
@@ -487,6 +488,25 @@ function MainApp() {
 
   // Uzaktan (diğer cihazdan) veri geldiğinde listeleri tazele — kullanıcı
   // Ayarlar'a girip elle yenilemek zorunda kalmasın.
+  // Senkron yer tutucu parça açtıysa (bulutta parçası olmayan üyelik) adlarını
+  // doldur; açılışta da bir kez bak (önceki turdan kalmış olabilir).
+  useEffect(() => {
+    const run = () =>
+      void repairPlaceholderTracks().then((n) => {
+        if (n > 0) {
+          void useLibraryStore.getState().refresh();
+          void usePlaylistStore.getState().refresh();
+          window.dispatchEvent(new Event(LIBRARY_CHANGED_EVENT));
+        }
+      });
+    const t = setTimeout(run, 25_000);
+    const off = onPlaceholders(() => setTimeout(run, 1500));
+    return () => {
+      clearTimeout(t);
+      off();
+    };
+  }, []);
+
   useEffect(
     () =>
       onRemoteApplied(() => {

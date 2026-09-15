@@ -395,6 +395,8 @@ pub fn run() {
             commands::import_playlist,
             commands::import_spotify,
             commands::get_lyrics,
+            commands::youtube_oembed,
+            commands::log_from_js,
             commands::play_track,
             commands::download_audio,
             commands::prefetch_audio,
@@ -449,7 +451,9 @@ pub fn run() {
             // burayı kullanır). İlk açılışta güncel yt-dlp yoksa arka planda indir.
             if let Ok(bin) = commands::ytdlp_bin_dir(&app.handle().clone()) {
                 std::env::set_var("RESONANCE_YTDLP_DIR", &bin);
-                let exe = bin.join(if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" });
+                // Klasör sürümü (v1.9.3) yoksa "hiç yok" sayılır → hemen indirilir;
+                // eski tek dosyalık kopyası olan makineler de böylece geçer.
+                let (exe, stamp) = commands::managed_ytdlp_exe(&bin);
 
                 // ⭐ OTOMATİK GÜNCELLEME (v1.8.1). Eskiden yt-dlp YALNIZ ilk
                 // açılışta indiriliyordu ve bir daha hiç güncellenmiyordu.
@@ -477,7 +481,7 @@ pub fn run() {
                 }
 
                 const MAX_AGE_DAYS: u64 = 7;
-                let needs_update = match std::fs::metadata(&exe) {
+                let needs_update = !exe.exists() || match std::fs::metadata(&stamp) {
                     Err(_) => true, // hiç yok → ilk indirme
                     Ok(m) => m
                         .modified()

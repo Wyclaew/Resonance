@@ -4,7 +4,10 @@ Bu dosya, mobil uygulamayı **sıfırdan başka bir sohbette** yapacak olan içi
 Masaüstünün mimarisi ve tuzakları için önce **`CLAUDE.md`**'yi oku; senkron protokolü
 `docs/SYNC.md`'de. Bu doküman "mobil nasıl yapılır"ı anlatır.
 
-> **Masaüstü şu an v1.9.3.** v1.9.3'te paylaşılan dosyalar değişti (öneri motorunda
+> **Masaüstü şu an v1.9.4.** ⚠️ v1.9.4: senkron pull sayfalaması satır atlıyordu ve
+> `voteTrack` `updated_at` vermediği için oylar buluta HİÇ çıkmıyordu — ikisi de paylaşılan
+> dosyada (`sync/engine.ts`, `playlists.ts`) düzeltildi; mobilde de `sync-core.py` şart.
+> v1.9.3'te paylaşılan dosyalar değişti (öneri motorunda
 > favori bekleme süresi, cihaz listesinde eski kimliklerin gizlenmesi, senkronun
 > yeniden bağlanma/uyanma/yeniden deneme tetikleri) → mobil depoda
 > `python3 scripts/sync-core.py`. Mobilin `versionMatch.ts`'i masaüstüne de
