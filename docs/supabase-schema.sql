@@ -261,6 +261,34 @@ create index if not exists idx_prefs_sync    on public.artist_prefs(user_id, syn
 create index if not exists idx_settings_sync on public.settings(user_id, synced_at);
 create index if not exists idx_dq_sync       on public.device_queue(user_id, synced_at);
 
+-- ── Buluta yedek (v1.9.5) ─────────────────────────────────────────────────
+-- ⛔ NEDEN: yedekler yalnız uygulamanın kendi klasöründeydi; o klasör silinince
+-- (2026-09-15, kullanıcının Mac'i) 12 yedeğin hepsi birden gitti. Yedek BAŞKA
+-- BİR YERDE durmalı. Depolama kovası kurmak gerekmesin diye JSON metin olarak.
+-- ⚠️ Bu tablo SENKRON TABLOSU DEĞİL: `synced_at`/LWW tetikleyicileri yok,
+-- uygulama listesine (TABLES) eklenmez; yedekler birleştirilmez.
+create table if not exists public.cloud_backups (
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  id          text not null,
+  created_at  bigint not null default 0,
+  device_id   text,
+  device_name text,
+  bytes       bigint not null default 0,
+  tracks      integer not null default 0,
+  playlists   integer not null default 0,
+  payload     text not null,
+  primary key (user_id, id)
+);
+create index if not exists idx_backups_at on public.cloud_backups(user_id, created_at desc);
+
+alter table public.cloud_backups enable row level security;
+drop policy if exists b_select on public.cloud_backups;
+drop policy if exists b_insert on public.cloud_backups;
+drop policy if exists b_delete on public.cloud_backups;
+create policy b_select on public.cloud_backups for select using (user_id = auth.uid());
+create policy b_insert on public.cloud_backups for insert with check (user_id = auth.uid());
+create policy b_delete on public.cloud_backups for delete using (user_id = auth.uid());
+
 -- ── RLS: herkes yalnız KENDİ satırını görür/yazar ─────────────────────────
 
 do $$

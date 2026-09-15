@@ -14,6 +14,34 @@ import { notifyLocalChange } from "./sync/engine";
 //  • Bu yüzden HER OKUMA `deleted = 0` filtrelemek ZORUNDA.
 //  • Yazımdan sonra `notifyLocalChange()` → senkron debounce'lu tetiklenir.
 
+/**
+ * Liste başına en fazla 4 kapak (mozaik için). Tek sorguda: listedeki ilk
+ * sıradaki kapaklı parçalar.
+ *
+ * NEDEN AYRI: `listPlaylists` her açılışta çağrılıyor ve kapak gerekmiyor;
+ * mozaik yalnız Kütüphane kartlarında lazım.
+ */
+export async function playlistCovers(): Promise<Record<string, string[]>> {
+  const db = await getDb();
+  const rows = await db.select<{ playlist_id: string; thumbnail: string }[]>(
+    `SELECT pt.playlist_id, t.thumbnail
+       FROM playlist_tracks pt
+       JOIN tracks t ON t.id = pt.track_id
+      WHERE pt.deleted = 0 AND t.thumbnail IS NOT NULL AND t.thumbnail <> ''
+      ORDER BY pt.playlist_id, pt.position`
+  );
+  const out: Record<string, string[]> = {};
+  const seen: Record<string, Set<string>> = {};
+  for (const r of rows) {
+    const list = (out[r.playlist_id] ??= []);
+    const set = (seen[r.playlist_id] ??= new Set());
+    if (list.length >= 4 || set.has(r.thumbnail)) continue;
+    set.add(r.thumbnail);
+    list.push(r.thumbnail);
+  }
+  return out;
+}
+
 export async function listPlaylists(): Promise<Playlist[]> {
   const db = await getDb();
   const rows = await db.select<

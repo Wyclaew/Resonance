@@ -14,6 +14,8 @@ import MiniPlayer from "./components/MiniPlayer";
 import { getDb, isTauri } from "./lib/db";
 import { onPlaceholders, onRemoteApplied, startSync } from "./lib/sync/engine";
 import { LIBRARY_CHANGED_EVENT, repairPlaceholderTracks } from "./lib/placeholderRepair";
+import { maybeWeeklyCloudBackup } from "./lib/cloudBackup";
+import { auditRelinks } from "./lib/relinkAudit";
 import { getSupabase, wasSignOutIntentional } from "./lib/sync/client";
 import { latestRemoteQueue, localQueueUpdatedAt } from "./lib/deviceQueue";
 import { t } from "./lib/i18n";
@@ -501,8 +503,17 @@ function MainApp() {
       });
     const t = setTimeout(run, 25_000);
     const off = onPlaceholders(() => setTimeout(run, 1500));
+    // Haftalık bakım: buluta yedek (yerel yedekler uygulama klasörüyle birlikte
+    // silinebiliyor) ve yanlış yeniden bağlanmış parçaların denetimi.
+    const maint = setTimeout(() => {
+      void maybeWeeklyCloudBackup();
+      void auditRelinks().then((n) => {
+        if (n > 0) void useLibraryStore.getState().refresh();
+      });
+    }, 60_000);
     return () => {
       clearTimeout(t);
+      clearTimeout(maint);
       off();
     };
   }, []);

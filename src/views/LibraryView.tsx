@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
-import { Library, ListMusic, HardDriveDownload, Plus, Sparkles } from "lucide-react";
+import { Library, HardDriveDownload, Plus, Sparkles } from "lucide-react";
 import ViewHeader from "../components/ViewHeader";
 import { usePlaylistStore } from "../store/usePlaylistStore";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { useAppStore } from "../store/useAppStore";
+import Mosaic from "../components/Mosaic";
+import { playlistCovers } from "../lib/playlists";
+import { isTauri } from "../lib/db";
 import { useT } from "../lib/i18n";
 import { usePlayerStore } from "../store/usePlayerStore";
 import { useToastStore } from "../store/useToastStore";
@@ -65,9 +68,9 @@ function SmartLists() {
             key={l.id}
             onClick={() => void open(l.id, true)}
             disabled={busy === l.id}
-            className="group flex flex-col gap-3 rounded-lg border border-border bg-surface/50 p-4 text-left transition-colors hover:border-accent/40 hover:bg-surface disabled:opacity-50"
+            className="group flex flex-col gap-3 rounded-xl border border-border bg-surface/50 p-4 text-left transition-all hover:-translate-y-0.5 hover:border-accent/40 hover:bg-surface hover:shadow-lg hover:shadow-black/20 disabled:opacity-50"
           >
-            <div className="grid h-12 w-12 place-items-center rounded-md bg-accent/15 text-accent">
+            <div className="grid h-12 w-12 place-items-center rounded-lg bg-accent/15 text-accent">
               <Sparkles size={20} />
             </div>
             <div className="min-w-0">
@@ -92,11 +95,18 @@ export default function LibraryView() {
   const downloads = useLibraryStore((s) => s.downloads);
   const refreshLibrary = useLibraryStore((s) => s.refresh);
   const navigate = useAppStore((s) => s.navigate);
+  // Liste kartlarındaki kapak mozaiği (tek sorgu; liste değişince tazelenir).
+  const [covers, setCovers] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
     refreshPlaylists();
     refreshLibrary();
   }, [refreshPlaylists, refreshLibrary]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    void playlistCovers().then(setCovers).catch(() => {});
+  }, [playlists.length]);
 
   async function handleCreate() {
     const p = await createPlaylist(t("library.newList"));
@@ -127,9 +137,9 @@ export default function LibraryView() {
           {/* İndirilenler kartı */}
           <button
             onClick={() => navigate("downloads")}
-            className="group flex flex-col gap-3 rounded-lg border border-border bg-surface/50 p-4 text-left transition-colors hover:border-accent/40 hover:bg-surface"
+            className="group flex flex-col gap-3 rounded-xl border border-border bg-surface/50 p-4 text-left transition-all hover:-translate-y-0.5 hover:border-accent/40 hover:bg-surface hover:shadow-lg hover:shadow-black/20"
           >
-            <div className="grid h-12 w-12 place-items-center rounded-md bg-up/15 text-up">
+            <div className="grid h-12 w-12 place-items-center rounded-lg bg-up/15 text-up">
               <HardDriveDownload size={22} />
             </div>
             <div className="min-w-0">
@@ -143,11 +153,9 @@ export default function LibraryView() {
             <button
               key={pl.id}
               onClick={() => navigate("playlist", pl.id)}
-              className="group flex flex-col gap-3 rounded-lg border border-border bg-surface/50 p-4 text-left transition-colors hover:border-accent/40 hover:bg-surface"
+              className="group flex flex-col gap-3 rounded-xl border border-border bg-surface/50 p-4 text-left transition-all hover:-translate-y-0.5 hover:border-accent/40 hover:bg-surface hover:shadow-lg hover:shadow-black/20"
             >
-              <div className="grid h-12 w-12 place-items-center rounded-md bg-accent/15 text-accent">
-                <ListMusic size={22} />
-              </div>
+              <Mosaic covers={covers[pl.id]} size={48} />
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium">{pl.name}</div>
                 <div className="text-xs text-muted">
@@ -162,11 +170,27 @@ export default function LibraryView() {
         </div>
 
         {playlists.length === 0 && (
-          <div className="mt-10 flex flex-col items-center justify-center gap-3 py-10 text-faint">
-            <Library size={36} strokeWidth={1.5} />
-            <p className="max-w-sm text-center text-sm leading-relaxed">
+          <div className="mt-8 flex flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border px-6 py-12">
+            <div className="grid h-14 w-14 place-items-center rounded-full bg-accent/10 text-accent">
+              <Library size={26} strokeWidth={1.5} />
+            </div>
+            <p className="max-w-sm text-center text-sm leading-relaxed text-muted">
               {t("library.emptyState")}
             </p>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <button
+                onClick={handleCreate}
+                className="rounded-full bg-accent px-4 py-2 text-sm font-medium text-bg"
+              >
+                {t("library.newList")}
+              </button>
+              <button
+                onClick={() => navigate("import")}
+                className="rounded-full bg-surface-2 px-4 py-2 text-sm text-text hover:bg-surface-3"
+              >
+                {t("nav.import")}
+              </button>
+            </div>
           </div>
         )}
       </div>

@@ -206,6 +206,8 @@ const DEEP_PULL_EVERY_MS = 24 * 3600 * 1000;
 const DEEP_PULL_KEY = "sync.lastDeepPull";
 const PAGING_FIX_KEY = "sync.pagingFix193";
 let deepSyncPending = false;
+/** `repairSync` bir turu zorla derin yapar (damga okunmadan). */
+let forceDeep = false;
 const CHUNK = 400; // push yığın boyutu
 const EPOCH0 = "1970-01-01T00:00:00Z";
 
@@ -674,6 +676,7 @@ export async function syncNow(mode: "full" | "push" | "pull" = "full"): Promise<
         const settings = await loadSettings();
         const last = Number(settings[DEEP_PULL_KEY] ?? 0);
         deepSyncPending =
+          forceDeep ||
           !Number.isFinite(last) ||
           Date.now() - last > DEEP_PULL_EVERY_MS ||
           // v1.9.3 sayfalama düzeltmesinden sonra BİR KEZ baştan çek: eski
@@ -935,6 +938,71 @@ export function stopSync(): void {
   window.removeEventListener("focus", onFocus);
   window.removeEventListener("online", onOnline);
   setState({ status: "off", pushed: 0, pulled: 0 });
+}
+
+// ── Senkron sağlığı (yerel ↔ bulut satır sayısı) ───────────────────────────
+//
+// ⭐ NEDEN (v1.9.5): kullanıcının Mac'i sıfırdan kurulunca buluttan eksik veri
+// çekti (Favorite Songs 241 → 163) ve bunu FARK EDEN OLMADI; ancak biri
+// veritabanına bakınca ortaya çıktı. Sayıları yan yana göstermek, bir daha
+// sessiz kalmasını engeller.
+
+export interface TableHealth {
+  table: string;
+  local: number;
+  cloud: number | null; // null = sayılamadı (ağ/şema)
+}
+
+export async function syncHealth(): Promise<TableHealth[]> {
+  const sb = getSupabase();
+  const db = await getDb();
+  const userId = await getUserId();
+  const out: TableHealth[] = [];
+  for (const spec of TABLES) {
+    let local = 0;
+    try {
+      const rows = await db.select<{ n: number }[]>(
+        `SELECT COUNT(*) AS n FROM ${spec.name}${spec.pushWhere ? ` WHERE ${spec.pushWhere}` : ""}`
+      );
+      local = Number(rows[0]?.n ?? 0);
+    } catch {
+      /* tablo yoksa 0 */
+    }
+    let cloud: number | null = null;
+    if (sb && userId) {
+      try {
+        // `head: true` → satırları indirmeden yalnız sayıyı getirir.
+        const { count, error } = await sb
+          .from(spec.name)
+          .select("*", { count: "exact", head: true })
+          .eq("user_id", userId);
+        cloud = error ? null : count ?? null;
+      } catch {
+        cloud = null;
+      }
+    }
+    out.push({ table: spec.name, local, cloud });
+  }
+  return out;
+}
+
+/**
+ * "Onar": su terazilerine bakmadan İKİ YÖNDE sıfırdan tam tur.
+ * Pull önce çalışır (bkz. derin tur notu) → eski kopya yeniyi ezmez.
+ */
+export async function repairSync(): Promise<void> {
+  try {
+    await setSetting(DEEP_PULL_KEY, "0");
+    await setSetting(PAGING_FIX_KEY, "0");
+  } catch {
+    /* damga yazılamasa da tur zorlanır */
+  }
+  forceDeep = true;
+  try {
+    await syncNow("full");
+  } finally {
+    forceDeep = false;
+  }
 }
 
 // ── İlk senkron modları ────────────────────────────────────────────────────

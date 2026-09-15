@@ -19,6 +19,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import ViewHeader from "../components/ViewHeader";
+import Mosaic from "../components/Mosaic";
 import TrackRow from "../components/TrackRow";
 import KarmaControl from "../components/KarmaControl";
 import type { Playlist, PlaylistTrack } from "../types";
@@ -65,6 +66,13 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
   const [batch, setBatch] = useState<{ done: number; total: number } | null>(null);
 
   const downloadedCount = tracks.filter((t) => downloadedIds.has(t.id)).length;
+  const totalMinutes = Math.round(
+    tracks.reduce((sum, tr) => sum + (tr.durationMs ?? 0), 0) / 60000
+  );
+  const covers = tracks
+    .map((tr) => tr.thumbnail)
+    .filter((x): x is string => !!x)
+    .slice(0, 4);
   const allDownloaded = tracks.length > 0 && downloadedCount === tracks.length;
   const missingCount = tracks.length - downloadedCount;
 
@@ -214,6 +222,9 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
   return (
     <div className="relative flex h-full flex-col">
       <header className="flex items-end justify-between gap-4 px-8 pb-5 pt-7">
+        {/* Kapak mozaiği + başlık: liste sayfası artık kimliği olan bir sayfa. */}
+        <div className="flex min-w-0 items-end gap-4">
+          <Mosaic covers={covers} size={88} rounded="rounded-xl" />
         <div className="min-w-0">
           {editing ? (
             <input
@@ -234,10 +245,15 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
           )}
           <p className="mt-1 text-sm text-muted">
             {t("playlist.trackCount", { count: tracks.length })}
+            {totalMinutes > 0 ? ` · ${t("playlist.totalMinutes", { n: totalMinutes })}` : ""}
+            {downloadedCount > 0
+              ? ` · ${t("playlist.downloadedCount", { n: downloadedCount })}`
+              : ""}
             {meta?.source && meta.source !== "local"
               ? ` · ${meta.source === "spotify" ? "Spotify" : "YouTube Music"}'ten`
               : ""}
           </p>
+        </div>
         </div>
 
         <div className="flex items-center gap-1">

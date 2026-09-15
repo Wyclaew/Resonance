@@ -30,7 +30,8 @@ import { useSettingsStore } from "../store/useSettingsStore";
 import { useT, type TrKey } from "../lib/i18n";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { usePlaylistStore } from "../store/usePlaylistStore";
-import { getDb, isTauri } from "../lib/db";
+import { isTauri } from "../lib/db";
+import { buildBackupJson } from "../lib/backupExport";
 import { formatBytes } from "../lib/format";
 import { importBackup, type ImportResult } from "../lib/backup";
 import { loadBlockedArtists, unblockArtist } from "../lib/blocked";
@@ -891,31 +892,7 @@ function DataSettings() {
     setErr(null);
     setSavedPath(null);
     try {
-      const db = await getDb();
-      const [playlists, playlistTracks, tracks, votes, settings] =
-        await Promise.all([
-          // deleted=0 ŞART: silinmiş satırlar (tombstone) da dışa aktarılırsa,
-          // içe aktarma onları deleted=0 ile geri yazıp SİLDİĞİN LİSTELERİ
-          // DİRİLTİR.
-          db.select("SELECT * FROM playlists WHERE deleted = 0"),
-          db.select("SELECT * FROM playlist_tracks WHERE deleted = 0"),
-          db.select("SELECT * FROM tracks"),
-          db.select("SELECT * FROM votes WHERE deleted = 0"),
-          db.select("SELECT * FROM settings"),
-        ]);
-      const json = JSON.stringify(
-        {
-          version: 1,
-          exportedAt: Date.now(),
-          playlists,
-          playlistTracks,
-          tracks,
-          votes,
-          settings,
-        },
-        null,
-        2
-      );
+      const json = await buildBackupJson();
       setSavedPath(await invoke<string>("export_data", { json }));
     } catch (e) {
       setErr(String(e));

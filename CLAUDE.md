@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.9.4** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.9.5** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,34 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.9.5 (SENKRON SAĞLIK PANELİ + BULUTA YEDEK + BAĞLANTI DENETİMİ + TASARIM 2):
+• **⭐ SENKRON SAĞLIĞI** (Hesap sayfası, `syncHealth`/`repairSync`, engine.ts):
+  tablo başına YERELDE ve BULUTTA kaç satır var, fark varsa kırmızı. NEDEN:
+  v1.9.4'teki kayıp (241 → 163) hiçbir yerde görünmüyordu; ancak veritabanına
+  bakınca ortaya çıktı. "Onar" düğmesi su terazilerini yok sayıp iki yönde
+  sıfırdan tur attırır (`forceDeep`).
+  ⭐ ÖLÇÜLDÜ (v1.9.4 sonrası gerçek veri): Mac'te canlı üyelik 163 → **245**,
+  parça 1521 → **1730**; yer tutucu gerekmedi, log'da uygulanamayan satır yok.
+• **⭐ BULUTA YEDEK** (`cloudBackup.ts` + `cloud_backups` tablosu): yedekler
+  yalnız uygulama klasöründeydi ve o klasör silinince (2026-09-15) 12 yedeğin
+  HEPSİ gitti. Artık haftada bir tam veri (listeler/oylar/parçalar) JSON olarak
+  Supabase'e yazılır, son 5 saklanır, Hesap sayfasından geri yüklenir
+  (birleştirir, silmez). ⚠️ Şema değişti → `docs/supabase-schema.sql` yeniden
+  çalıştırılmalı. ⚠️ Bu tablo SENKRON TABLOSU DEĞİL (`TABLES`'a ekleme).
+• **⭐ YANLIŞ BAĞLANTI DENETİMİ** (`relinkAudit.ts`): `find_alternative` eski
+  sürümlerde yalnız süreye bakıyordu ve mobilde bir şarkıyı BAŞKA şarkıya
+  bağlamıştı. Haftada bir, yeniden bağlanmış parçaların (id ≠ source_id) gerçek
+  başlığı oEmbed'den alınır; `songCore` kelimeleri HİÇ kesişmiyorsa bağlantı
+  geri alınır. TEMKİNLİ: zayıf eşleşmeye dokunmaz (çalışan bağlantıyı kırmak,
+  yanlışı kaçırmaktan kötü).
+• **TASARIM TURU 2**: liste kapakları MOZAİK (`Mosaic.tsx`, mobildeki ile aynı
+  fikir; `playlistCovers()` tek sorgu), liste sayfası başlığında 88px kapak +
+  "245 şarkı · 839 dk · N indirilmiş", Kütüphane kartlarında yumuşak yükselme,
+  boş durumlar artık kesikli çerçeveli ve EYLEM DÜĞMELİ (Kütüphane → yeni
+  liste/içe aktar, İndirilenler → ara).
+• Yedek JSON'u tek yerden üretilir (`backupExport.ts`) — Ayarlar'daki dışa
+  aktarma ve bulut yedeği aynı biçimi paylaşır.
+
 v1.9.4 (SENKRON VERİ KAYBI + OYLAR BULUTA ÇIKMIYORDU + yt-dlp 5 SN):
 • **⭐⭐⭐ PULL SAYFALAMASI SATIR ATLIYORDU — TEMİZ KURULUMDA YÜZLERCE SATIR.**
   Kullanıcının Mac'i sıfırdan kuruldu (uygulama klasörü boş oluşmuştu),

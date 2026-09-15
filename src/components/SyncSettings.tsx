@@ -11,6 +11,9 @@ import {
   AlertTriangle,
   Check,
   KeyRound,
+  Stethoscope,
+  Archive,
+  ChevronDown,
 } from "lucide-react";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { useT } from "../lib/i18n";
@@ -33,9 +36,18 @@ import {
   stopSync,
   subscribeSync,
   syncNow,
+  syncHealth,
+  repairSync,
   type SyncState,
+  type TableHealth,
 } from "../lib/sync/engine";
 import { useToastStore } from "../store/useToastStore";
+import {
+  createCloudBackup,
+  listCloudBackups,
+  restoreCloudBackup,
+  type CloudBackup,
+} from "../lib/cloudBackup";
 
 // Ayarlar → Hesap: bulut senkronu (giriş, durum, ilk-senkron sihirbazı).
 
@@ -570,10 +582,287 @@ export default function SyncSettings() {
         </button>
       </div>
 
+      <SyncHealthCard />
+      <CloudBackupCard />
+
       <p className="mt-4 text-xs leading-relaxed text-faint">
         {t("sync.whatSyncs")}
       </p>
       <DeviceRow deviceId={deviceId} />
+    </div>
+  );
+}
+
+/**
+ * ⭐ SENKRON SAĞLIĞI (v1.9.5): tablo başına yerel ve buluttaki satır sayısı.
+ *
+ * NEDEN: kullanıcının Mac'i sıfırdan kurulunca buluttan EKSİK veri çekti
+ * (Favorite Songs 241 → 163) ve bunu kimse fark etmedi; ancak veritabanına
+ * bakınca ortaya çıktı. Sayılar yan yana durunca fark bir bakışta görünür.
+ */
+function SyncHealthCard() {
+  const t = useT();
+  const [rows, setRows] = useState<TableHealth[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+
+  const load = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      setRows(await syncHealth());
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const repair = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await repairSync();
+      setRows(await syncHealth());
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const mismatched = (rows ?? []).filter((r) => r.cloud !== null && r.cloud !== r.local);
+
+  return (
+    <div className="mt-4 rounded-lg border border-border bg-surface p-5">
+      <button
+        onClick={() => {
+          setOpen((v) => !v);
+          if (!rows) void load();
+        }}
+        className="flex w-full items-center justify-between gap-3 text-left"
+      >
+        <span className="flex items-center gap-2 text-sm font-medium">
+          <Stethoscope size={16} className="text-accent" />
+          {t("sync.healthTitle")}
+        </span>
+        <span className="flex items-center gap-2 text-xs">
+          {rows && mismatched.length > 0 && (
+            <span className="rounded-full bg-down/15 px-2 py-0.5 text-down">
+              {t("sync.healthDiff", { n: mismatched.length })}
+            </span>
+          )}
+          {rows && mismatched.length === 0 && (
+            <span className="text-up">{t("sync.healthOk")}</span>
+          )}
+          <ChevronDown
+            size={16}
+            className={`text-muted transition-transform ${open ? "rotate-180" : ""}`}
+          />
+        </span>
+      </button>
+
+      {open && (
+        <>
+          <p className="mt-3 text-xs leading-relaxed text-muted">
+            {t("sync.healthBody")}
+          </p>
+          <div className="mt-3 overflow-hidden rounded-md border border-border">
+            <div className="flex items-center gap-3 border-b border-border bg-surface-2 px-3 py-1.5 text-[11px] uppercase tracking-wide text-faint">
+              <span className="flex-1">{t("sync.healthTable")}</span>
+              <span className="w-20 text-right">{t("sync.healthLocal")}</span>
+              <span className="w-20 text-right">{t("sync.healthCloud")}</span>
+            </div>
+            {(rows ?? []).map((r) => {
+              const diff = r.cloud !== null && r.cloud !== r.local;
+              return (
+                <div
+                  key={r.table}
+                  className={`flex items-center gap-3 px-3 py-1.5 text-sm ${
+                    diff ? "bg-down/5" : ""
+                  }`}
+                >
+                  <span className="flex-1 truncate font-mono text-xs text-muted">
+                    {r.table}
+                  </span>
+                  <span className="tnum w-20 text-right">{r.local}</span>
+                  <span className={`tnum w-20 text-right ${diff ? "text-down" : "text-muted"}`}>
+                    {r.cloud ?? "—"}
+                  </span>
+                </div>
+              );
+            })}
+            {rows === null && (
+              <div className="px-3 py-3 text-sm text-muted">{t("common.loading")}</div>
+            )}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              disabled={busy}
+              onClick={() => void load()}
+              className="rounded-md bg-surface-2 px-3 py-1.5 text-sm text-text disabled:opacity-40"
+            >
+              {t("sync.healthRefresh")}
+            </button>
+            <button
+              disabled={busy}
+              onClick={() => void repair()}
+              className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-bg disabled:opacity-40"
+            >
+              {busy && <RefreshCw size={13} className="animate-spin" />}
+              {t("sync.healthRepair")}
+            </button>
+            <span className="text-xs text-faint">{t("sync.healthRepairHint")}</span>
+          </div>
+          {err && <p className="mt-2 text-xs text-down">{err}</p>}
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * ⭐ BULUTA YEDEK (v1.9.5): yerel yedekler uygulama klasöründe duruyordu ve o
+ * klasör silinince (2026-09-15) 12 yedeğin hepsi birden gitti.
+ */
+function CloudBackupCard() {
+  const t = useT();
+  const toast = useToastStore((s) => s.show);
+  const [list, setList] = useState<CloudBackup[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+
+  const load = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      setList(await listCloudBackups());
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const backupNow = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await createCloudBackup();
+      setList(await listCloudBackups());
+      toast(t("sync.backupDone"), "success");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const restore = async (id: string) => {
+    setBusy(true);
+    setErr(null);
+    setConfirmId(null);
+    try {
+      const r = await restoreCloudBackup(id);
+      toast(
+        t("sync.backupRestored", { tracks: r.tracks, playlists: r.playlists }),
+        "success"
+      );
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 rounded-lg border border-border bg-surface p-5">
+      <button
+        onClick={() => {
+          setOpen((v) => !v);
+          if (!list) void load();
+        }}
+        className="flex w-full items-center justify-between gap-3 text-left"
+      >
+        <span className="flex items-center gap-2 text-sm font-medium">
+          <Archive size={16} className="text-accent" />
+          {t("sync.backupTitle")}
+        </span>
+        <ChevronDown
+          size={16}
+          className={`text-muted transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      {open && (
+        <>
+          <p className="mt-3 text-xs leading-relaxed text-muted">
+            {t("sync.backupBody")}
+          </p>
+          <div className="mt-3 space-y-1.5">
+            {(list ?? []).map((b) => (
+              <div
+                key={b.id}
+                className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border px-3 py-2 text-sm"
+              >
+                <span className="tnum text-muted">{fmtTime(b.createdAt)}</span>
+                <span className="text-xs text-faint">{b.device}</span>
+                <span className="text-xs text-faint">
+                  {t("sync.backupSummary", {
+                    tracks: b.tracks,
+                    playlists: b.playlists,
+                    mb: (b.bytes / (1024 * 1024)).toFixed(1),
+                  })}
+                </span>
+                {confirmId === b.id ? (
+                  <span className="ml-auto flex items-center gap-2">
+                    <button
+                      disabled={busy}
+                      onClick={() => void restore(b.id)}
+                      className="rounded-md bg-down px-2.5 py-1 text-xs font-medium text-bg disabled:opacity-40"
+                    >
+                      {t("sync.backupRestoreConfirm")}
+                    </button>
+                    <button
+                      onClick={() => setConfirmId(null)}
+                      className="text-xs text-muted hover:text-text"
+                    >
+                      {t("common.cancel")}
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    disabled={busy}
+                    onClick={() => setConfirmId(b.id)}
+                    className="ml-auto rounded-md bg-surface-2 px-2.5 py-1 text-xs text-text disabled:opacity-40"
+                  >
+                    {t("sync.backupRestore")}
+                  </button>
+                )}
+              </div>
+            ))}
+            {list !== null && list.length === 0 && (
+              <p className="text-sm text-muted">{t("sync.backupEmpty")}</p>
+            )}
+            {list === null && <p className="text-sm text-muted">{t("common.loading")}</p>}
+          </div>
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              disabled={busy}
+              onClick={() => void backupNow()}
+              className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-bg disabled:opacity-40"
+            >
+              {busy && <RefreshCw size={13} className="animate-spin" />}
+              {t("sync.backupNow")}
+            </button>
+            <span className="text-xs text-faint">{t("sync.backupAuto")}</span>
+          </div>
+          {err && <p className="mt-2 text-xs text-down">{err}</p>}
+        </>
+      )}
     </div>
   );
 }
