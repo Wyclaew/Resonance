@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import AvatarEditor from "./AvatarEditor";
 import {
   User,
   LogOut,
@@ -70,16 +71,18 @@ export default function ProfileMenu({ collapsed }: { collapsed: boolean }) {
   }, [open]);
 
   const pickAvatar = (file: File) => {
-    // Data URI settings tablosunda saklanıyor → büyük dosya koyma.
-    if (file.size > 512 * 1024) {
+    // ⚠️ Sınır artık daha geniş: seçilen dosya SAKLANMIYOR, düzenleyicide
+    // 256×256 JPEG'e küçültülüp öyle kaydediliyor (v1.9.6).
+    if (file.size > 8 * 1024 * 1024) {
       alert(t("profile.avatarTooBig"));
       return;
     }
     const r = new FileReader();
-    r.onload = () => update("avatarDataUrl", String(r.result ?? ""));
+    r.onload = () => setEditing(String(r.result ?? ""));
     r.readAsDataURL(file);
   };
 
+  const [editing, setEditing] = useState<string | null>(null);
   const signedIn = isSyncConfigured() && !!email;
   const syncLabel = !isSyncConfigured()
     ? t("profile.syncOff")
@@ -106,6 +109,16 @@ export default function ProfileMenu({ collapsed }: { collapsed: boolean }) {
 
   return (
     <div ref={boxRef} className="relative">
+      {editing && (
+        <AvatarEditor
+          src={editing}
+          onCancel={() => setEditing(null)}
+          onSave={(url) => {
+            update("avatarDataUrl", url);
+            setEditing(null);
+          }}
+        />
+      )}
       <button
         data-tour="profile"
         onClick={() => setOpen((v) => !v)}

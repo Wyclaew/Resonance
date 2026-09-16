@@ -69,6 +69,9 @@ export const SYNCED_SETTING_KEYS = new Set([
   "playback.crossfadeSeconds",
   "playback.queueEndBehavior",
   "playback.sleepFadeSeconds",
+  // Haftalık Keşif listesi (JSON, ~6 KB): tüm cihazlarda AYNI hafta listesi
+  // görünsün diye senkronlanır.
+  "discover.week",
 ]);
 // ⛔ BİLEREK DIŞARIDA: playback.resumeState (cihazın kendi kuyruğu —
 // device_queue tablosu taşır), playback.savedVolume / rememberVolume,
@@ -99,7 +102,7 @@ const TABLES: TableSpec[] = [
     cloudConflict: "user_id,id",
     cols: [
       "id", "name", "description", "source", "source_url",
-      "created_at", "updated_at", "deleted",
+      "created_at", "folder", "updated_at", "deleted",
     ],
   },
   {

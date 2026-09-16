@@ -42,6 +42,16 @@ export async function playlistCovers(): Promise<Record<string, string[]>> {
   return out;
 }
 
+/** Listeyi bir klasöre taşır (boş ad → kök). Klasör ayrı tablo DEĞİL, etiket. */
+export async function setPlaylistFolder(id: string, folder: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `UPDATE playlists SET folder = $1, updated_at = $2 WHERE id = $3`,
+    [folder.trim() || null, Date.now(), id]
+  );
+  notifyLocalChange();
+}
+
 export async function listPlaylists(): Promise<Playlist[]> {
   const db = await getDb();
   const rows = await db.select<
@@ -52,11 +62,13 @@ export async function listPlaylists(): Promise<Playlist[]> {
       source: string;
       sourceUrl: string | null;
       createdAt: number;
+      folder: string | null;
       trackCount: number;
     }[]
   >(
     `SELECT p.id, p.name, p.description, p.source, p.source_url AS sourceUrl,
-            p.created_at AS createdAt, COUNT(pt.track_id) AS trackCount
+            p.created_at AS createdAt, p.folder AS folder,
+            COUNT(pt.track_id) AS trackCount
      FROM playlists p
      LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id AND pt.deleted = 0
      WHERE p.deleted = 0
@@ -68,6 +80,7 @@ export async function listPlaylists(): Promise<Playlist[]> {
     name: r.name,
     description: r.description ?? undefined,
     source: (r.source as Playlist["source"]) ?? "local",
+    folder: r.folder ?? undefined,
     sourceUrl: r.sourceUrl ?? undefined,
     createdAt: r.createdAt,
     trackCount: r.trackCount,

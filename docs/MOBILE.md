@@ -4,7 +4,7 @@ Bu dosya, mobil uygulamayı **sıfırdan başka bir sohbette** yapacak olan içi
 Masaüstünün mimarisi ve tuzakları için önce **`CLAUDE.md`**'yi oku; senkron protokolü
 `docs/SYNC.md`'de. Bu doküman "mobil nasıl yapılır"ı anlatır.
 
-> **Masaüstü şu an v1.9.5.** v1.9.5'te MOBİLE DE TAŞINABİLECEK üç şey var:
+> **Masaüstü şu an v1.9.6.** v1.9.5'te MOBİLE DE TAŞINABİLECEK üç şey var:
 > **(1) senkron sağlığı** — `syncHealth()` / `repairSync()` PAYLAŞILAN `sync/engine.ts`
 > içinde, mobilde yalnız ekran yazmak kalır (tablo başına yerel/bulut satır sayısı;
 > masaüstünde 241 → 163 kaybı bu panel olmadığı için fark edilmemişti).
@@ -29,6 +29,55 @@ Masaüstünün mimarisi ve tuzakları için önce **`CLAUDE.md`**'yi oku; senkro
 **Amaç:** Eren'in kendi kullanımı için mobil Resonance. Masaüstüyle **senkron**
 (playlist, oy/karma, dinleme geçmişi, ayarlar). Ses yine YouTube'dan.
 **Kişisel kullanım, mağazaya çıkmayacak, repo private.**
+
+
+## ⭐ Masaüstünde VAR, mobilde YOK (v1.9.6 — taşınacaklar listesi)
+
+Bu bölüm masaüstü her sürümde güncellenir; mobil oturumu ÖNCE burayı okumalı.
+Sıra kabaca değer/emek oranına göre.
+
+1. **Uzaktan kumanda — MOBİL TARAF GÖNDERİCİ** (`remote_commands` tablosu).
+   Masaüstü DİNLEYİCİ hazır (`src/lib/remote.ts`): kendi `target_device`
+   satırlarını Realtime ile alır, uygular, siler. Telefonun yapacağı:
+   `now_playing` satırından bilgisayarın ne çaldığını göster + şu satırı yaz:
+   `{ user_id, id: uuid, target_device: <hedef cihazın device_id'si>,
+      action: "play"|"pause"|"toggle"|"next"|"prev"|"seek"|"volume"|"vote",
+      value: seek → ms, volume → 0..1, vote → 1 | -1, created_at: Date.now() }`
+   ⚠️ 60 sn'den eski komut uygulanmaz (kapalı uygulamaya gönderilen komut
+   anlamsız). Hedef cihaz listesi `device_queue`/`now_playing`'den gelir.
+   ⛔ Sesi TV/araba/konsola AKTARMAK bu değil — o AirPlay/Cast protokolü ister,
+   ses yolumuz (rodio/ExoPlayer) buna uygun değil, kapsam dışı.
+2. **Senkron sağlığı ekranı**: `syncHealth()` ve `repairSync()` PAYLAŞILAN
+   `sync/engine.ts` içinde hazır; mobilde yalnız ekran yazmak kaldı.
+3. **Buluta yedek**: `cloud_backups` tablosu + `src/lib/cloudBackup.ts`
+   (masaüstüne özgü değil, `backupExport.ts` ile birlikte kopyalanabilir).
+   Telefon sıfırlanınca yerel `VACUUM INTO` yedeği de gittiği için değerli.
+4. **Haftalık Keşif**: `discover.week` ayarı SENKRONLANIYOR → mobil yalnız
+   okuyup listelemeli (`discoverWeek.ts`, üretimi masaüstü de yapar).
+5. **Çalma listesi klasörleri**: `playlists.folder` sütunu (migration v9,
+   bulutta `alter table ... add column folder`). Mobilde gruplama UI'si.
+6. **Çoklu seçim + sıralama**: liste sayfasında toplu indir/çıkar/ekle ve
+   ad/sanatçı/eklenme/süre/karma sıralaması (`applySort`).
+7. **Yıl sonu HİKÂYESİ**: `lib/wrapped.ts` (veri) + `WrappedStory` (sunum).
+   Aralık ayında bir kez sorulur (`wrapped.seen.<yıl>` ayarı).
+8. **Söz dizesinden arama**: lrclib SÖZ İÇİNDE ARAMIYOR (ölçüldü) — asıl yol
+   YouTube'da `"<dize> lyrics"` araması. Mobilde arama kipi buna göre.
+9. **Profil fotoğrafı kırpma** (`AvatarEditor`): sürükle + yakınlaştır,
+   256×256 JPEG olarak saklanır.
+10. **Kendi Supabase projen**: `sync/config.ts` artık localStorage'daki
+    `resonance.supabaseUrl` / `resonance.supabaseAnonKey` değerlerini
+    varsayılanın üstüne koyuyor (mobilde de çalışır, ekran gerekir).
+11. **Gerçek rastgele karışık**: kuyruk bir kez karıştırılır ve SIRAYLA çalınır
+    (eskiden her "sonraki" rastgele indekse atlıyordu → tekrar).
+12. **Uzun listede pencereleme** (`useWindowedList`) — RN'de FlatList zaten
+    yapıyor, yalnız web/masaüstü sorunu.
+
+⛔ **Mobil planına GİRMEYENLER (yapılamaz/kapsam dışı):**
+- Lossless / 24-bit-192 kHz ve Dolby Atmos: kaynak YouTube (en iyi ~130 kbps
+  AAC / ~160 kbps Opus); "hi-res" diye sunulacak bir veri YOK. Atmos + kafa
+  takibi Apple'ın kendi API'leri ve lisanslı kodlayıcı ister.
+- Receiptify/Iceberg gibi araçlar: onlar Spotify Web API'sine bağlanır;
+  Resonance'ın verisi kişisel ve yerel, o araçlar bizim API'mizi bilmez.
 
 ## ⭐ KARAR: ANDROID — iOS KAPSAM DIŞI
 Kullanıcı netleştirdi: telefon **Android**. iOS'a hiç girme ("çok uğraştırır" —

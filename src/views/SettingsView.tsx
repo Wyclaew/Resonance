@@ -22,6 +22,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
 import ViewHeader from "../components/ViewHeader";
+import InfoHint from "../components/InfoHint";
 import Toggle from "../components/Toggle";
 import Confetti from "../components/Confetti";
 import { CatDrawing, HeartDrawing } from "../components/SecretCat";
@@ -51,6 +52,9 @@ const categories = [
 
 type CatId = (typeof categories)[number]["id"];
 
+/** Bundan uzun açıklamalar (?) düğmesine taşınır. */
+const LONG_DESC = 72;
+
 function SettingRow({
   label,
   description,
@@ -69,8 +73,17 @@ function SettingRow({
       }`}
     >
       <div className="min-w-0">
-        <div className="text-sm font-medium">{label}</div>
-        {description && (
+        {/* ⭐ UZUN AÇIKLAMA (?) DÜĞMESİNDE (v1.9.6): eskiden her açıklama
+            satırın altında dururdu; Ayarlar bir metin duvarına dönüyordu.
+            Kısa olanlar yerinde kalır, uzunlar üstüne gelince balonla açılır
+            (balon portal ile çizilir → hiçbir kabın içinde kesilmez). */}
+        <div className="flex items-center gap-1.5">
+          <div className="text-sm font-medium">{label}</div>
+          {description && description.length > LONG_DESC && (
+            <InfoHint text={description} />
+          )}
+        </div>
+        {description && description.length <= LONG_DESC && (
           <div className="mt-0.5 text-xs leading-relaxed text-muted">
             {description}
           </div>
@@ -92,10 +105,12 @@ function BlockedArtists() {
   if (list.length === 0) return null;
   return (
     <>
-      <div className="mt-6 mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">
+      <div className="mt-6 mb-2 flex items-center gap-1.5">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">
         {t("settings.blockedHeader")}
       </div>
-      <p className="mb-2 text-xs text-muted">{t("settings.blockedDesc")}</p>
+        <InfoHint text={t("settings.blockedDesc")} />
+      </div>
       <div className="flex flex-wrap gap-1.5">
         {list.map((a) => (
           <button
@@ -229,8 +244,11 @@ function ProblemLog() {
   return (
     <>
       <div className="mt-6 mb-2 flex items-center justify-between">
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">
-          {t("settings.problems")}
+        <div className="flex items-center gap-1.5">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">
+            {t("settings.problems")}
+          </div>
+          <InfoHint text={t("settings.problemsDesc")} />
         </div>
         {problems.length > 0 && (
           <button
@@ -241,7 +259,6 @@ function ProblemLog() {
           </button>
         )}
       </div>
-      <p className="mb-2 text-xs text-muted">{t("settings.problemsDesc")}</p>
       {problems.length === 0 ? (
         <p className="text-xs text-faint">{t("settings.problemsNone")}</p>
       ) : (
@@ -941,8 +958,11 @@ function DataSettings() {
       {err && <p className="mt-3 text-xs text-down">{err}</p>}
 
       <div className="mt-8 mb-2 flex items-center justify-between">
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">
-          {t("data.autoBackups")}
+        <div className="flex items-center gap-1.5">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-faint">
+            {t("data.autoBackups")}
+          </div>
+          <InfoHint text={t("data.autoBackupsDesc")} />
         </div>
         <button
           onClick={backupNow}
@@ -951,9 +971,6 @@ function DataSettings() {
           {t("data.backupNow")}
         </button>
       </div>
-      <p className="mb-3 text-xs leading-relaxed text-muted">
-        {t("data.autoBackupsDesc")}
-      </p>
       {backups.length === 0 ? (
         <p className="text-xs text-faint">{t("data.noBackups")}</p>
       ) : (

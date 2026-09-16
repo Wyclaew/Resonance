@@ -1,15 +1,25 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { SUPABASE_ANON_KEY, SUPABASE_URL, isSyncConfigured } from "./config";
+import { isSyncConfigured, syncAnonKey, syncUrl } from "./config";
 
 // Supabase istemcisi (tekil). Yapılandırılmamışsa null döner ve senkronla
 // ilgili her şey sessizce devre dışı kalır — uygulama tamamen yerel çalışır.
 
 let client: SupabaseClient | null = null;
+let clientUrl = "";
+
+/** Proje değiştirildiğinde istemciyi düşür (bir sonraki çağrı yenisini kurar). */
+export function resetSupabase(): void {
+  client = null;
+  clientUrl = "";
+}
 
 export function getSupabase(): SupabaseClient | null {
   if (!isSyncConfigured()) return null;
+  // Proje adresi değiştiyse eski istemci yanlış projeye bağlıdır.
+  if (client && clientUrl !== syncUrl()) resetSupabase();
   if (!client) {
-    client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    clientUrl = syncUrl();
+    client = createClient(syncUrl(), syncAnonKey(), {
       auth: {
         // Oturum localStorage'da kalır → uygulama her açılışta yeniden
         // giriş istemez. Tauri webview'inde localStorage kalıcıdır.

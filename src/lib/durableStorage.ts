@@ -18,6 +18,10 @@ import { invoke } from "@tauri-apps/api/core";
 function isDurableKey(key: string): boolean {
   return (
     key === "resonance.deviceId" ||
+    // Kendi Supabase projesi (v1.9.6): kaybolursa senkron sessizce başka
+    // projeye (gömülü varsayılana) döner.
+    key === "resonance.supabaseUrl" ||
+    key === "resonance.supabaseAnonKey" ||
     // supabase-js oturum anahtarı: sb-<proje>-auth-token
     (key.startsWith("sb-") && key.endsWith("-auth-token"))
   );

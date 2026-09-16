@@ -785,6 +785,21 @@ async function refillRadio(playAfter = false) {
   }
 }
 
+/**
+ * Kuyruğu karıştırır; `keepIndex >= 0` ise o öğe YERİNDE kalır ve yalnız
+ * SONRASI karıştırılır (çalan şarkı kesilmesin diye). Fisher-Yates —
+ * `sort(() => Math.random() - 0.5)` düzgün dağıtmaz.
+ */
+function reshuffleQueue<T>(queue: T[], keepIndex: number): T[] {
+  const head = keepIndex >= 0 ? queue.slice(0, keepIndex + 1) : [];
+  const tail = keepIndex >= 0 ? queue.slice(keepIndex + 1) : [...queue];
+  for (let i = tail.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [tail[i], tail[j]] = [tail[j], tail[i]];
+  }
+  return [...head, ...tail];
+}
+
 export const usePlayerStore = create<PlayerState>((set, get) => ({
   status: "idle",
   current: null,
@@ -1333,20 +1348,21 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
 
     let nextIdx: number;
-    // "shuffle" modunda rastgele sonraki; "smart" modunda (radyo aktif) öneriler
-    // zaten serpiştirilmiş olduğundan SIRALI ilerle + refill devam etsin.
-    if (shuffleMode === "shuffle" && !radioActive) {
-      nextIdx =
-        queue.length === 1
-          ? queueIndex
-          : (() => {
-              let r = queueIndex;
-              while (r === queueIndex)
-                r = Math.floor(Math.random() * queue.length);
-              return r;
-            })();
-    } else {
-      nextIdx = queueIndex + 1;
+    // ⛔ BUG'DI (v1.9.6): karışık modda "sonraki" HER SEFERİNDE RASTGELE BİR
+    // İNDEKSE atlıyordu. Kuyruk zaten karıştırılmış olduğu hâlde bu, aynı
+    // şarkının kısa sürede tekrar gelmesine ve bazı şarkıların hiç
+    // çalmamasına yol açıyor (kullanıcının şikâyeti: "karışık gerçekten
+    // rastgele değil"). Doğrusu Spotify'ınki gibi RASTGELE SIRA: kuyruk bir
+    // kez karıştırılır, sonra SIRAYLA çalınır; liste bitince (tekrar açıksa)
+    // YENİDEN karıştırılır → her şarkı bir kez, sıra her turda başka.
+    nextIdx = queueIndex + 1;
+    if (shuffleMode === "shuffle" && !radioActive && nextIdx >= queue.length && repeat === "all") {
+      const reshuffled = reshuffleQueue(queue, -1);
+      set({ queue: reshuffled, queueIndex: 0, status: "loading", positionMs: 0 });
+      scheduleLoad(reshuffled[0]);
+      return;
+    }
+    {
       if (nextIdx >= queue.length) {
         if (repeat === "all") nextIdx = 0;
         else if (radioActive) {
@@ -1490,7 +1506,14 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       return;
     }
     if (shuffleMode === "off") {
-      set({ shuffleMode: "shuffle" });
+      // Karışığa geçerken kuyruğun KALANINI karıştır: çalan şarkı yerinde
+      // kalır, sonrası yeni bir rastgele sıraya girer. (Eskiden sıra aynı
+      // kalıyor, yalnız "sonraki" rastgele zıplıyordu.)
+      const { queue, queueIndex } = get();
+      set({
+        shuffleMode: "shuffle",
+        queue: reshuffleQueue(queue, queueIndex),
+      });
     } else if (shuffleMode === "shuffle") {
       // shuffle → smart: o anki kuyruk bağlamında öneri serpiştirmeyi başlat.
       const playlistId = get().current?.playlistId;

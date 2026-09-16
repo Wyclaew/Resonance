@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, emit } from "@tauri-apps/api/event";
 import Sidebar from "./components/Sidebar";
@@ -15,6 +15,10 @@ import { getDb, isTauri } from "./lib/db";
 import { onPlaceholders, onRemoteApplied, startSync } from "./lib/sync/engine";
 import { LIBRARY_CHANGED_EVENT, repairPlaceholderTracks } from "./lib/placeholderRepair";
 import { maybeWeeklyCloudBackup } from "./lib/cloudBackup";
+import { startRemoteControl } from "./lib/remote";
+import { ensureDiscoverWeek } from "./lib/discoverWeek";
+import WrappedStory from "./components/WrappedStory";
+import { loadSettings, setSetting } from "./lib/settings";
 import { auditRelinks } from "./lib/relinkAudit";
 import { getSupabase, wasSignOutIntentional } from "./lib/sync/client";
 import { latestRemoteQueue, localQueueUpdatedAt } from "./lib/deviceQueue";
@@ -343,6 +347,8 @@ function MainApp() {
         // Bulut senkronu: yalnız yapılandırılmış VE oturum açıksa başlar
         // (aksi halde sessizce hiçbir şey yapmaz — uygulama %100 yerel).
         void startSync();
+        // Telefon uzaktan kumanda olabilsin (tablo yoksa sessizce kapalı).
+        void startRemoteControl();
         // ⚠️ SENKRON OTURUMU SESSİZCE DÜŞEBİLİYOR (jeton süresi dolar ya da
         // uygulama çevrimdışı açılır). Eskiden hiçbir şey söylenmiyordu:
         // kullanıcı senkronun çalıştığını sanıp diğer cihazdaki değişikliklerin
@@ -490,6 +496,52 @@ function MainApp() {
 
   // Uzaktan (diğer cihazdan) veri geldiğinde listeleri tazele — kullanıcı
   // Ayarlar'a girip elle yenilemek zorunda kalmasın.
+  // ⭐ YILLIK ÖZET YIL SONUNDA (v1.9.6): kullanıcının isteği "sürekli
+  // görünmesin, Spotify gibi yıl sonunda çıksın". Aralık ayında (ve ocağın
+  // ilk haftasında) BİR KEZ sorulur; istersen Zevk/İstatistik sayfasından
+  // yıl boyu açabilirsin.
+  const [storyYear, setStoryYear] = useState<number | null>(null);
+  useEffect(() => {
+    if (!isTauri()) return;
+    const now = new Date();
+    const month = now.getMonth();
+    const inSeason = month === 11 || (month === 0 && now.getDate() <= 7);
+    if (!inSeason) return;
+    const year = month === 0 ? now.getFullYear() - 1 : now.getFullYear();
+    const key = `wrapped.seen.${year}`;
+    let cancelled = false;
+    const id = setTimeout(() => {
+      void (async () => {
+        const seen = (await loadSettings())[key];
+        if (seen || cancelled) return;
+        const db = await getDb();
+        const rows = await db.select<{ n: number }[]>(
+          `SELECT COUNT(*) AS n FROM play_history
+            WHERE played_at >= $1 AND played_at < $2`,
+          [new Date(year, 0, 1).getTime(), new Date(year + 1, 0, 1).getTime()]
+        );
+        // Birkaç şarkılık yıl için özet göstermek anlamsız.
+        if ((rows[0]?.n ?? 0) < 50) return;
+        useToastStore.getState().show(
+          t("wrapped.storyReady", { year }),
+          "info",
+          {
+            label: t("wrapped.storyOpen", { year }),
+            fn: () => {
+              void setSetting(key, String(Date.now()));
+              setStoryYear(year);
+            },
+          },
+          20_000
+        );
+      })();
+    }, 35_000);
+    return () => {
+      cancelled = true;
+      clearTimeout(id);
+    };
+  }, []);
+
   // Senkron yer tutucu parça açtıysa (bulutta parçası olmayan üyelik) adlarını
   // doldur; açılışta da bir kez bak (önceki turdan kalmış olabilir).
   useEffect(() => {
@@ -506,6 +558,12 @@ function MainApp() {
     // Haftalık bakım: buluta yedek (yerel yedekler uygulama klasörüyle birlikte
     // silinebiliyor) ve yanlış yeniden bağlanmış parçaların denetimi.
     const maint = setTimeout(() => {
+      // Haftalık Keşif: hafta değiştiyse yeni liste (ağ ister, sessiz).
+      void ensureDiscoverWeek()
+        .then((list) => {
+          if (list.length > 0) window.dispatchEvent(new Event(LIBRARY_CHANGED_EVENT));
+        })
+        .catch(() => {});
       void maybeWeeklyCloudBackup();
       void auditRelinks().then((n) => {
         if (n > 0) void useLibraryStore.getState().refresh();
@@ -675,6 +733,9 @@ function MainApp() {
           </div>
           <NowPlayingBar />
         </>
+      )}
+      {storyYear !== null && (
+        <WrappedStory year={storyYear} onClose={() => setStoryYear(null)} />
       )}
       {commandOpen && <CommandPalette />}
       {idle && <Screensaver />}

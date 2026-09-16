@@ -33,6 +33,8 @@ export interface Playlist {
   sourceUrl?: string;
   createdAt: number;
   trackCount?: number;
+  /** Klasör adı (boş = kök) — v1.9.6. */
+  folder?: string;
 }
 
 export interface PlaylistTrack extends Track {

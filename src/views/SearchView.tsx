@@ -6,6 +6,7 @@ import TrackRow from "../components/TrackRow";
 import type { Track } from "../types";
 import { usePlayerStore } from "../store/usePlayerStore";
 import { useSettingsStore } from "../store/useSettingsStore";
+import { isLikelySong } from "../lib/recommender";
 import { isTauri } from "../lib/db";
 import { useT } from "../lib/i18n";
 
@@ -73,13 +74,29 @@ export default function SearchView() {
     setError(null);
     try {
       if (mode === "lyrics") {
-        const hits = await invoke<
-          { title: string; artist: string; snippet: string }[]
-        >("search_lyrics", { query: q });
+        // ⚠️ ÖLÇÜLDÜ (v1.9.6): lrclib'in arama ucu SÖZ İÇİNDE ARAMIYOR, yalnız
+        // şarkı adı/sanatçı eşliyor ("i got my drivers license last week" → 0
+        // sonuç). Aklındaki DİZEDEN şarkıyı bulan asıl yol YouTube araması:
+        // söz videolarının başlık/altyazı metni indekslenmiş durumda (aynı
+        // dize → "Olivia Rodrigo - drivers license", "Rihanna - We Found Love").
+        // İkisini birlikte çalıştırıyoruz: lrclib ad eşleşmesini, YouTube
+        // dizeyi bulur.
+        const [hits, tracks] = await Promise.all([
+          invoke<{ title: string; artist: string; snippet: string }[]>(
+            "search_lyrics",
+            { query: q }
+          ).catch(() => []),
+          invoke<Track[]>("search_youtube", {
+            query: `${q} lyrics`,
+            limit: 12,
+            cookiesBrowser: useSettingsStore.getState().cookiesBrowser,
+          }).catch(() => [] as Track[]),
+        ]);
         if (id === reqId.current) {
           setLyricHits(hits);
-          setResults([]);
+          setResults(tracks.filter((tr) => isLikelySong(tr)));
           setSearched(true);
+          if (addToHistory) remember(q);
         }
       } else {
         const res = await invoke<Track[]>("search_youtube", {

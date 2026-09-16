@@ -173,6 +173,16 @@ const STOP_WORDS = new Set([
   "the", "a", "an", "feat", "ft", "featuring", "and", "ve", "x", "with",
   "music", "song", "prod", "by", "de", "la", "el",
 ]);
+/** Fisher-Yates — tarafsız karıştırma (kopya döndürür). */
+export function shuffleArray<T>(input: T[]): T[] {
+  const a = [...input];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 export function songCore(title: string, artist: string): string {
   const clean = title
     .toLowerCase()
@@ -1052,9 +1062,9 @@ async function addSearchFallback(
      GROUP BY t.artist ORDER BY c DESC LIMIT 8`,
     [opts.playlistId]
   );
-  const seedPool = plArtists
-    .map((r) => r.artist)
-    .sort(() => Math.random() - 0.5);
+  // ⚠️ `sort(() => Math.random() - 0.5)` DÜZGÜN KARIŞTIRMAZ (karşılaştırma
+  // tutarsız olduğu için ilk öğeler öne yığılır) → Fisher-Yates.
+  const seedPool = shuffleArray(plArtists.map((r) => r.artist));
   if (seedPool.length === 0) return;
 
   const needed = opts.limit - recs.length;

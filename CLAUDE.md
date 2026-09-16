@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.9.5** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.9.6** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,65 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.9.6 (KARIŞIK GERÇEKTEN RASTGELE + HAFTALIK KEŞİF + LİSTE TEMELLERİ + KUMANDA):
+• **⛔ KARIŞIK GERÇEKTEN RASTGELE DEĞİLDİ.** `playShuffled` kuyruğu düzgün
+  karıştırıyordu (Fisher-Yates) AMA `next()` karışık modda HER SEFERİNDE
+  RASTGELE BİR İNDEKSE atlıyordu → aynı şarkı kısa sürede tekrar geliyor,
+  bazıları hiç çalmıyordu (kullanıcının şikâyeti). Artık Spotify'daki gibi
+  RASTGELE SIRA: kuyruk bir kez karıştırılır, SIRAYLA çalınır, liste bitince
+  (tekrar açıksa) yeniden karıştırılır. Karışığa geçerken kuyruğun KALANI
+  karıştırılır (çalan şarkı yerinde kalır). `sort(() => Math.random() - 0.5)`
+  kullanan iki yer de (recommender/filters) Fisher-Yates'e çevrildi — o
+  karşılaştırma tarafsız değil, ilk öğeleri öne yığar.
+• **⭐ HAFTALIK KEŞİF** (`discoverWeek.ts`): pazartesileri yenilenen, hafta
+  boyu SABİT 30 şarkılık liste. ⚠️ GERÇEK PLAYLIST DEĞİL, bilerek: playlist
+  üyeliği öğrenme motorunda "bu sanatçıyı seviyorum" sinyali; algoritmanın
+  kendi önerisi kalıcı listeye yazılsaydı zevk profilini kendi kendine
+  şişirirdi. Ayarda JSON olarak durur (senkronlanır → tüm cihazlarda aynı) ve
+  akıllı liste olarak görünür.
+• **⭐ KENDİ SUPABASE PROJEN** (`sync/config.ts` + Hesap sayfası): depo public;
+  uygulamayı kuran herkes aynı projeye düşmesin diye kendi adres/anahtarını
+  girebiliyor (localStorage + durableStorage; oturum kapatılıp istemci düşer).
+• **LİSTE TEMELLERİ**: çoklu seçim (Shift ile aralık) + toplu indir/çıkar/
+  başka listeye ekle; sıralama menüsü (sıra, karma, ad, sanatçı, eklenme,
+  süre) — ⚠️ "çıkış tarihi" YOK, YouTube parçalarında o veri tutulmuyor;
+  KLASÖRLER (migration v9 `playlists.folder`, tek sütun — ayrı tablo olsaydı
+  senkronda bir tablo + FK + "klasör silinince ne olur" sorusu çıkardı),
+  sidebar'da gruplanır (açık/kapalı durumu yalnız o cihazda).
+• **⭐ ÇIKARMA GERİ ALINABİLİR**: tek tek ve toplu çıkarmada "Geri al" (silme
+  zaten tombstone; pozisyonuyla geri konur). Kullanıcının en büyük korkusu
+  "şarkılar habersiz kayboluyor" idi.
+• **⭐ UZAKTAN KUMANDA** (`remote.ts` + `remote_commands` tablosu): telefon
+  komut yazar, bilgisayar kendi satırlarını Realtime ile alır, uygular, siler
+  (60 sn'den eski komut yok sayılır). Ses hedef cihazda çalar.
+  ⛔ Sesi TV/araba/konsola AKTARMAK bu DEĞİL (AirPlay/Cast protokolü gerekir).
+• **⭐ YIL SONU HİKÂYESİ** (`WrappedStory` + `lib/wrapped.ts`): tam ekran,
+  kendi ilerleyen kartlar. Aralıkta (ve ocağın ilk haftasında) BİR KEZ sorulur
+  (`wrapped.seen.<yıl>`), yılın kalanında yalnız İstatistik → Yıllık özet →
+  "Hikâye olarak izle" ile açılır. Veri katmanı sayfayla ORTAK.
+• **SÖZ DİZESİNDEN ARAMA DÜZELDİ**: ÖLÇÜLDÜ — lrclib'in arama ucu SÖZ İÇİNDE
+  ARAMIYOR, yalnız ad/sanatçı eşliyor ("i got my drivers license last week" →
+  0 sonuç). Söz kipi artık YouTube'da `"<dize> lyrics"` de arıyor (aynı dize →
+  "Olivia Rodrigo - drivers license", "Rihanna - We Found Love").
+• **PROFİL FOTOĞRAFI KIRPMA** (`AvatarEditor`): sürükle + yakınlaştır, 256×256
+  JPEG (eskiden dosya olduğu gibi saklanıp ortadan kırpılıyordu).
+• **AYARLARDA (?) İPUÇLARI** (`InfoHint`): uzun açıklamalar satırın altında
+  metin duvarı oluşturuyordu; artık etiketin yanındaki düğmede. ⚠️ Balon
+  PORTAL ile `document.body`'ye çizilir — Ayarlar `overflow-y-auto` bir kabın
+  içinde, normal akışta çizilseydi kenarda KESİLİR ya da komşu kartın altında
+  kalırdı.
+• **UZUN LİSTEDE PENCERELEME** (`useWindowedList`): liste ve İndirilenler
+  sayfalarında yalnız görünen satırlar çizilir (kütüphane eklenmedi; satır
+  yüksekliği sabit). 1700 satırlık İndirilenler'de ilk çizim ve kaydırma
+  belirgin şekilde hafifler; her `playback-tick` o ağacı dolaşmaz.
+⚠️ ŞEMA DEĞİŞTİ: `docs/supabase-schema.sql` yeniden çalıştırılmalı
+(`remote_commands` tablosu + `playlists.folder` sütunu).
+⛔ YAPILAMAYANLAR (kullanıcı istedi, gerekçesiyle hayır): lossless/24-bit-192k
+ve Dolby Atmos + kafa takibi (kaynak YouTube ~130 kbps AAC / ~160 kbps Opus;
+Atmos Apple'ın kendi API'leri ve lisanslı kodlayıcı ister), sesi TV/araba/
+konsola aktarma (AirPlay/Cast), Receiptify/Iceberg gibi araçlarla uyum
+(onlar Spotify Web API'sine bağlanır).
+
 v1.9.5 (SENKRON SAĞLIK PANELİ + BULUTA YEDEK + BAĞLANTI DENETİMİ + TASARIM 2):
 • **⭐ SENKRON SAĞLIĞI** (Hesap sayfası, `syncHealth`/`repairSync`, engine.ts):
   tablo başına YERELDE ve BULUTTA kaç satır var, fark varsa kırmızı. NEDEN:

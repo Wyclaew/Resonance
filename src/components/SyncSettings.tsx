@@ -14,14 +14,16 @@ import {
   Stethoscope,
   Archive,
   ChevronDown,
+  Server,
 } from "lucide-react";
 import { useSettingsStore } from "../store/useSettingsStore";
 import { useT } from "../lib/i18n";
 import { getDeviceId } from "../lib/device";
-import { isSyncConfigured } from "../lib/sync/config";
+import { isSyncConfigured, setOwnProject, usingOwnProject } from "../lib/sync/config";
 import {
   completePasswordReset,
   getSupabase,
+  resetSupabase,
   resetPassword,
   signIn,
   signOut,
@@ -178,7 +180,9 @@ export default function SyncSettings() {
             src/lib/sync/config.ts
           </code>
         </div>
-        <DeviceRow deviceId={deviceId} />
+        <OwnProjectCard />
+        <OwnProjectCard />
+      <DeviceRow deviceId={deviceId} />
       </div>
     );
   }
@@ -431,7 +435,9 @@ export default function SyncSettings() {
           {notice && <p className="mt-3 text-sm text-up">{notice}</p>}
           {err && <p className="mt-3 text-sm text-down">{err}</p>}
         </div>
-        <DeviceRow deviceId={deviceId} />
+        <OwnProjectCard />
+        <OwnProjectCard />
+      <DeviceRow deviceId={deviceId} />
       </div>
     );
   }
@@ -510,7 +516,9 @@ export default function SyncSettings() {
           )}
           {err && <p className="mt-3 text-sm text-down">{err}</p>}
         </div>
-        <DeviceRow deviceId={deviceId} />
+        <OwnProjectCard />
+        <OwnProjectCard />
+      <DeviceRow deviceId={deviceId} />
       </div>
     );
   }
@@ -588,6 +596,7 @@ export default function SyncSettings() {
       <p className="mt-4 text-xs leading-relaxed text-faint">
         {t("sync.whatSyncs")}
       </p>
+      <OwnProjectCard />
       <DeviceRow deviceId={deviceId} />
     </div>
   );
@@ -861,6 +870,102 @@ function CloudBackupCard() {
             <span className="text-xs text-faint">{t("sync.backupAuto")}</span>
           </div>
           {err && <p className="mt-2 text-xs text-down">{err}</p>}
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * ⭐ KENDİ SUPABASE PROJEN (v1.9.6): depo herkese açık; uygulamayı kuran
+ * herkesin aynı projeye düşmemesi için kendi projesini verebilsin.
+ */
+function OwnProjectCard() {
+  const t = useT();
+  const toast = useToastStore((s) => s.show);
+  const [open, setOpen] = useState(false);
+  const [url, setUrl] = useState("");
+  const [key, setKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const own = usingOwnProject();
+
+  const apply = async (clear: boolean) => {
+    setBusy(true);
+    try {
+      // Oturum ESKİ projeye ait → önce çık, sonra istemciyi düşür.
+      stopSync();
+      await signOut().catch(() => {});
+      setOwnProject(clear ? "" : url, clear ? "" : key);
+      resetSupabase();
+      toast(t(clear ? "sync.ownCleared" : "sync.ownSaved"), "success");
+      setUrl("");
+      setKey("");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 rounded-lg border border-border bg-surface p-5">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-3 text-left"
+      >
+        <span className="flex items-center gap-2 text-sm font-medium">
+          <Server size={16} className="text-accent" />
+          {t("sync.ownTitle")}
+        </span>
+        <span className="flex items-center gap-2 text-xs">
+          <span className={own ? "text-accent" : "text-faint"}>
+            {own ? t("sync.ownYours") : t("sync.ownDefault")}
+          </span>
+          <ChevronDown
+            size={16}
+            className={`text-muted transition-transform ${open ? "rotate-180" : ""}`}
+          />
+        </span>
+      </button>
+
+      {open && (
+        <>
+          <p className="mt-3 text-xs leading-relaxed text-muted">
+            {t("sync.ownBody")}
+          </p>
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://xxxx.supabase.co"
+            spellCheck={false}
+            className="mt-3 w-full rounded-md border border-border bg-bg px-3 py-2 font-mono text-xs outline-none focus:border-accent"
+          />
+          <input
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            placeholder={t("sync.ownKeyPlaceholder")}
+            spellCheck={false}
+            className="mt-2 w-full rounded-md border border-border bg-bg px-3 py-2 font-mono text-xs outline-none focus:border-accent"
+          />
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              disabled={busy || !url.trim() || !key.trim()}
+              onClick={() => void apply(false)}
+              className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-bg disabled:opacity-40"
+            >
+              {t("sync.ownSave")}
+            </button>
+            {own && (
+              <button
+                disabled={busy}
+                onClick={() => void apply(true)}
+                className="rounded-md bg-surface-2 px-3 py-1.5 text-sm text-text disabled:opacity-40"
+              >
+                {t("sync.ownReset")}
+              </button>
+            )}
+          </div>
+          <p className="mt-2 text-xs leading-relaxed text-faint">
+            {t("sync.ownSteps")}
+          </p>
         </>
       )}
     </div>

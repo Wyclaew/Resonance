@@ -1,7 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { HardDriveDownload } from "lucide-react";
 import ViewHeader from "../components/ViewHeader";
 import { useAppStore } from "../store/useAppStore";
+import { useWindowedList } from "../lib/useWindowedList";
 import TrackRow from "../components/TrackRow";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { useT } from "../lib/i18n";
@@ -16,6 +17,8 @@ export default function DownloadsView() {
   const status = usePlayerStore((s) => s.status);
   const playNow = usePlayerStore((s) => s.playNow);
   const navigate = useAppStore((s) => s.navigate);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const win = useWindowedList(scrollRef, downloads.length);
 
   useEffect(() => {
     refresh();
@@ -32,7 +35,7 @@ export default function DownloadsView() {
         }
       />
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
         {downloads.length === 0 ? (
           <div className="mt-6 flex flex-col items-center justify-center gap-4 rounded-xl border border-dashed border-border px-6 py-16">
             <div className="grid h-14 w-14 place-items-center rounded-full bg-accent/10 text-accent">
@@ -49,7 +52,11 @@ export default function DownloadsView() {
             </button>
           </div>
         ) : (
-          downloads.map((t, i) => (
+          <>
+            {win.padTop > 0 && <div style={{ height: win.padTop }} />}
+            {downloads.slice(win.start, win.end).map((t, idx) => {
+              const i = win.start + idx;
+              return (
             <TrackRow
               key={t.id}
               track={t}
@@ -59,7 +66,10 @@ export default function DownloadsView() {
               isLoading={status === "loading"}
               onPlay={() => playNow(t, downloads)}
             />
-          ))
+              );
+            })}
+            {win.padBottom > 0 && <div style={{ height: win.padBottom }} />}
+          </>
         )}
       </div>
     </div>

@@ -32,3 +32,6 @@ npm-debug.log*
 
 # Eklenti günlüğü (alt dizinde de oluşabiliyor)
 src-tauri/.claude/
+
+# Oturum dosyaları (depoda görünmesin)
+.claude/

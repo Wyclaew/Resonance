@@ -261,6 +261,34 @@ create index if not exists idx_prefs_sync    on public.artist_prefs(user_id, syn
 create index if not exists idx_settings_sync on public.settings(user_id, synced_at);
 create index if not exists idx_dq_sync       on public.device_queue(user_id, synced_at);
 
+-- v1.9.6: çalma listesi klasörü (tek etiket sütunu; boş = kök).
+alter table public.playlists add column if not exists folder text;
+
+-- ── Uzaktan kumanda (v1.9.6) ──────────────────────────────────────────────
+-- Telefon → bilgisayar komutları ("çal", "sonraki", "ses 0.4"). Ses hedef
+-- cihazda çalmaya devam eder; burada YALNIZ komut taşınır. Hedef cihaz kendi
+-- satırlarını Realtime ile dinler, uygular ve SİLER (kalıcı kuyruk değil:
+-- kapalı uygulamaya gönderilen komut anlamsızdır, 60 sn'den eskisi atılır).
+create table if not exists public.remote_commands (
+  user_id       uuid not null references auth.users(id) on delete cascade,
+  id            text not null,
+  target_device text not null,
+  action        text not null,
+  value         double precision,
+  created_at    bigint not null default 0,
+  primary key (user_id, id)
+);
+create index if not exists idx_remote_target
+  on public.remote_commands(user_id, target_device, created_at);
+
+alter table public.remote_commands enable row level security;
+drop policy if exists r_select on public.remote_commands;
+drop policy if exists r_insert on public.remote_commands;
+drop policy if exists r_delete on public.remote_commands;
+create policy r_select on public.remote_commands for select using (user_id = auth.uid());
+create policy r_insert on public.remote_commands for insert with check (user_id = auth.uid());
+create policy r_delete on public.remote_commands for delete using (user_id = auth.uid());
+
 -- ── Buluta yedek (v1.9.5) ─────────────────────────────────────────────────
 -- ⛔ NEDEN: yedekler yalnız uygulamanın kendi klasöründeydi; o klasör silinince
 -- (2026-09-15, kullanıcının Mac'i) 12 yedeğin hepsi birden gitti. Yedek BAŞKA
@@ -331,7 +359,8 @@ begin
   foreach tbl in array array[
     'tracks','playlists','playlist_tracks',
     'votes','play_history','recommendation_history','now_playing',
-    'blocked_artists','artist_prefs','settings','device_queue'
+    'blocked_artists','artist_prefs','settings','device_queue',
+    'remote_commands'
   ] loop
     -- Zaten ekliyse hata verir; yoksay.
     begin

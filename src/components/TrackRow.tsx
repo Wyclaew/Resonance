@@ -1,4 +1,14 @@
-import { Play, Pause, Music2, Loader2, Download, CircleCheck, X } from "lucide-react";
+import {
+  Play,
+  Pause,
+  Music2,
+  Loader2,
+  Download,
+  CircleCheck,
+  X,
+  CheckSquare,
+  Square,
+} from "lucide-react";
 import type { Track } from "../types";
 import { formatMs } from "../lib/format";
 import { useLibraryStore } from "../store/useLibraryStore";
@@ -25,6 +35,11 @@ interface TrackRowProps {
   onDragEnd?: (e: React.DragEvent) => void;
   // sağ tarafa ek içerik (ör. karma oyları — M3)
   trailing?: React.ReactNode;
+  // ⭐ ÇOKLU SEÇİM (v1.9.6): seçim kipi açıkken indeks yerine kutu çıkar,
+  // satıra tıklamak seçer (çalmaz). Shift ile aralık seçimi çağıran tarafta.
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (e: React.MouseEvent) => void;
 }
 
 export default function TrackRow({
@@ -42,6 +57,9 @@ export default function TrackRow({
   onDrop,
   onDragEnd,
   trailing,
+  selectable,
+  selected,
+  onToggleSelect,
 }: TrackRowProps) {
   const t = useT();
   const downloaded = useLibraryStore((s) => s.downloadedIds.has(track.id));
@@ -63,7 +81,8 @@ export default function TrackRow({
       <TrackDetail track={track} onClose={() => setDetail(false)} />
     )}
     <div
-      onDoubleClick={onPlay}
+      onClick={selectable ? onToggleSelect : undefined}
+      onDoubleClick={selectable ? undefined : onPlay}
       // ⭐ Sağ tık → şarkı detayı (kaç kez çaldın, hangi saatlerde, kaç kez
       // atladın). Ayrı bir menü açmak yerine doğrudan detay: tek eylem var.
       onContextMenu={(e) => {
@@ -77,14 +96,23 @@ export default function TrackRow({
       onDrop={onDrop}
       onDragEnd={onDragEnd}
       className={`group relative grid grid-cols-[2rem_2.5rem_1fr_auto] items-center gap-3 rounded-md px-2 py-1.5 ${
-        isCurrent ? "bg-accent/10" : "hover:bg-surface"
-      } ${isDragging ? "opacity-40" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
+        selected ? "bg-accent/15" : isCurrent ? "bg-accent/10" : "hover:bg-surface"
+      } ${selectable ? "cursor-pointer select-none" : ""} ${isDragging ? "opacity-40" : ""} ${draggable ? "cursor-grab active:cursor-grabbing" : ""}`}
     >
       {/* Çalan satırın sol kenarında vurgu şeridi (sidebar aktif öğe diliyle aynı). */}
       {isCurrent && (
         <span className="absolute left-0 top-1/2 h-6 w-[3px] -translate-y-1/2 rounded-r-full bg-accent" />
       )}
-      {/* İndeks / oynat düğmesi */}
+      {/* Seçim kipinde kutu, normalde indeks/oynat */}
+      {selectable ? (
+        <span
+          className={`grid h-8 w-8 place-items-center rounded-md ${
+            selected ? "text-accent" : "text-faint"
+          }`}
+        >
+          {selected ? <CheckSquare size={17} /> : <Square size={17} />}
+        </span>
+      ) : (
       <button
         onClick={onPlay}
         className="grid h-8 w-8 place-items-center text-muted"
@@ -107,6 +135,7 @@ export default function TrackRow({
           </>
         )}
       </button>
+      )}
 
       {/* Kapak */}
       <div className="grid h-10 w-10 place-items-center overflow-hidden rounded bg-surface-3 text-faint">

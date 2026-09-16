@@ -1,4 +1,5 @@
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
+import type { Playlist } from "../types";
 import {
   Sparkles,
   Clock,
@@ -11,6 +12,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Loader2,
+  ChevronRight,
+  Folder as FolderIcon,
 } from "lucide-react";
 import { useAppStore } from "../store/useAppStore";
 import { usePlaylistStore } from "../store/usePlaylistStore";
@@ -59,6 +62,52 @@ function NavItem({ icon, label, active, collapsed, onClick, tour }: NavItemProps
   );
 }
 
+const CLOSED_KEY = "resonance.closedFolders";
+
+/** Klasörsüzler + (klasör adı, listeler) çiftleri — ikisi de ada göre sıralı. */
+function groupByFolder(playlists: Playlist[]) {
+  const loose: Playlist[] = [];
+  const map = new Map<string, Playlist[]>();
+  for (const pl of playlists) {
+    const f = (pl.folder ?? "").trim();
+    if (!f) loose.push(pl);
+    else map.set(f, [...(map.get(f) ?? []), pl]);
+  }
+  const folders = [...map.entries()].sort((a, b) =>
+    a[0].localeCompare(b[0], undefined, { sensitivity: "base" })
+  );
+  return { loose, folders };
+}
+
+function PlaylistItem({
+  pl,
+  collapsed,
+  active,
+  indented,
+  onClick,
+}: {
+  pl: Playlist;
+  collapsed: boolean;
+  active: boolean;
+  indented?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={collapsed ? pl.name : undefined}
+      className={`flex w-full items-center rounded-md text-sm transition-colors ${
+        collapsed ? "justify-center px-0 py-2" : "gap-2.5 px-3 py-1.5"
+      } ${indented ? "pl-7" : ""} ${
+        active ? "bg-surface-2 text-text" : "text-muted hover:bg-surface hover:text-text"
+      }`}
+    >
+      <ListMusic size={15} className="shrink-0 text-faint" />
+      {!collapsed && <span className="truncate">{pl.name}</span>}
+    </button>
+  );
+}
+
 export default function Sidebar() {
   const t = useT();
   const view = useAppStore((s) => s.view);
@@ -69,6 +118,28 @@ export default function Sidebar() {
   const playlists = usePlaylistStore((s) => s.playlists);
   const createPlaylist = usePlaylistStore((s) => s.create);
   const discovering = usePlayerStore((s) => s.discovering);
+  // Kapalı klasörler yalnız BU cihazda (görünüm tercihi, senkronlanmaz).
+  const [closedFolders, setClosedFolders] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(CLOSED_KEY) || "[]") as string[]);
+    } catch {
+      return new Set();
+    }
+  });
+  const toggleFolder = (name: string) => {
+    setClosedFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      try {
+        localStorage.setItem(CLOSED_KEY, JSON.stringify([...next]));
+      } catch {
+        /* depo yoksa yalnız bu oturum */
+      }
+      return next;
+    });
+  };
+  const grouped = groupByFolder(playlists);
 
   // Keşfet artık KENDİ SAYFASI (v1.3.0). Sayfaya git; keşif zaten çalışıyorsa
   // startDiscovery mevcut kuyruğu KORUR (force yok) — sayfaya her girişte
@@ -199,29 +270,59 @@ export default function Sidebar() {
       )}
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden px-2">
-        {playlists.length === 0
-          ? !collapsed && (
-              <p className="px-3 py-2 text-xs leading-relaxed text-faint">
-                {t("nav.noPlaylists")}
-              </p>
-            )
-          : playlists.map((pl) => (
-              <button
+        {playlists.length === 0 ? (
+          !collapsed && (
+            <p className="px-3 py-2 text-xs leading-relaxed text-faint">
+              {t("nav.noPlaylists")}
+            </p>
+          )
+        ) : (
+          <>
+            {/* Klasörsüz listeler önce, sonra klasörler (v1.9.6). Klasör bir
+                etikettir; açık/kapalı durumu yalnız bu cihazda tutulur. */}
+            {grouped.loose.map((pl) => (
+              <PlaylistItem
                 key={pl.id}
+                pl={pl}
+                collapsed={collapsed}
+                active={view === "playlist" && activePlaylistId === pl.id}
                 onClick={() => navigate("playlist", pl.id)}
-                title={collapsed ? pl.name : undefined}
-                className={`flex w-full items-center rounded-md text-sm transition-colors ${
-                  collapsed ? "justify-center px-0 py-2" : "gap-2.5 px-3 py-1.5"
-                } ${
-                  view === "playlist" && activePlaylistId === pl.id
-                    ? "bg-surface-2 text-text"
-                    : "text-muted hover:bg-surface hover:text-text"
-                }`}
-              >
-                <ListMusic size={15} className="shrink-0 text-faint" />
-                {!collapsed && <span className="truncate">{pl.name}</span>}
-              </button>
+              />
             ))}
+            {grouped.folders.map(([folder, items]) => {
+              const open = !closedFolders.has(folder);
+              return (
+                <Fragment key={folder}>
+                  {!collapsed && (
+                    <button
+                      onClick={() => toggleFolder(folder)}
+                      className="mt-1 flex w-full items-center gap-1.5 rounded-md px-3 py-1.5 text-left text-xs font-medium text-muted hover:bg-surface hover:text-text"
+                    >
+                      <ChevronRight
+                        size={13}
+                        className={`shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
+                      />
+                      <FolderIcon size={13} className="shrink-0 text-faint" />
+                      <span className="truncate">{folder}</span>
+                      <span className="ml-auto text-[11px] text-faint">{items.length}</span>
+                    </button>
+                  )}
+                  {(open || collapsed) &&
+                    items.map((pl) => (
+                      <PlaylistItem
+                        key={pl.id}
+                        pl={pl}
+                        collapsed={collapsed}
+                        indented={!collapsed}
+                        active={view === "playlist" && activePlaylistId === pl.id}
+                        onClick={() => navigate("playlist", pl.id)}
+                      />
+                    ))}
+                </Fragment>
+              );
+            })}
+          </>
+        )}
       </div>
 
       <div className="border-t border-border px-2 py-2">

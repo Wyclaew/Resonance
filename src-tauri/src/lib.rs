@@ -350,6 +350,16 @@ fn migrations() -> Vec<Migration> {
                     measured_at INTEGER NOT NULL DEFAULT 0
                   );"#,
         },
+        Migration {
+            version: 9,
+            description: "playlist_folders",
+            kind: MigrationKind::Up,
+            // v1.9.6 — çalma listesi KLASÖRLERİ. Ayrı tablo YERİNE tek sütun:
+            // klasör yalnız bir etiket (ad); ayrı tablo olsaydı senkronda bir
+            // tablo daha, bir FK daha ve "klasör silinince listeler ne olacak"
+            // sorusu çıkardı. Boş/NULL = kök.
+            sql: r#"ALTER TABLE playlists ADD COLUMN folder TEXT;"#,
+        },
     ]
 }
 
