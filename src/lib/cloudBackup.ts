@@ -141,6 +141,14 @@ export async function maybeWeeklyCloudBackup(): Promise<void> {
   try {
     const last = Number((await loadSettings())[LAST_KEY] ?? 0);
     if (Number.isFinite(last) && Date.now() - last < EVERY_MS) return;
+    // ⚠️ Damga CİHAZ başına (ayar senkronlanmıyor): üç cihaz haftada ÜÇ yedek
+    // yazıyor, "son 5" saklama da ~2 haftaya iniyordu. Bulutta son bir hafta
+    // içinde HERHANGİ bir cihazdan yedek varsa yenisi yazılmaz.
+    const latest = (await listCloudBackups())[0];
+    if (latest && Date.now() - latest.createdAt < EVERY_MS) {
+      await setSetting(LAST_KEY, String(latest.createdAt)).catch(() => {});
+      return;
+    }
     await createCloudBackup();
   } catch (e) {
     console.warn("[resonance] buluta yedek yazılamadı:", e);

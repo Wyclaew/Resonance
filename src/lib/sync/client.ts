@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { isSyncConfigured, syncAnonKey, syncUrl } from "./config";
+import { resilientFetch } from "./resilientFetch";
 
 // Supabase istemcisi (tekil). Yapılandırılmamışsa null döner ve senkronla
 // ilgili her şey sessizce devre dışı kalır — uygulama tamamen yerel çalışır.
@@ -32,6 +33,8 @@ export function getSupabase(): SupabaseClient | null {
         // Masaüstünde bu değer zaten localStorage → davranış değişmez.
         storage: typeof localStorage !== "undefined" ? localStorage : undefined,
       },
+      // Webview ağı düşerse uygulamanın kendi HTTP yolu (bkz. resilientFetch.ts).
+      global: { fetch: resilientFetch },
     });
   }
   return client;

@@ -4,7 +4,9 @@ Bu dosya, mobil uygulamayı **sıfırdan başka bir sohbette** yapacak olan içi
 Masaüstünün mimarisi ve tuzakları için önce **`CLAUDE.md`**'yi oku; senkron protokolü
 `docs/SYNC.md`'de. Bu doküman "mobil nasıl yapılır"ı anlatır.
 
-> **Masaüstü şu an v1.9.6.** v1.9.5'te MOBİLE DE TAŞINABİLECEK üç şey var:
+> **Masaüstü şu an v1.9.7.** Mobil oturumu için ayrıntılı notlar mobil deposunda:
+> `docs/MASAUSTU-NOTLARI.md` (migration v10, filtreli Keşfet, sync-core yolu).
+> v1.9.5'te MOBİLE DE TAŞINABİLECEK üç şey var:
 > **(1) senkron sağlığı** — `syncHealth()` / `repairSync()` PAYLAŞILAN `sync/engine.ts`
 > içinde, mobilde yalnız ekran yazmak kalır (tablo başına yerel/bulut satır sayısı;
 > masaüstünde 241 → 163 kaybı bu panel olmadığı için fark edilmemişti).

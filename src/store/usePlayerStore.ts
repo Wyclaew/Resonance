@@ -595,7 +595,13 @@ function recordOutgoing(s: PlayerState, reason: ExitReason) {
 
   if (navigating && short) return; // sinyal yazma — yanlış tuş sayılır
 
-  recordPlay(s.current, s.positionMs);
+  // Filtreli Keşfet dinlemesi işaretlenir: genel zevk profiline tam
+  // ağırlıkla girmesin (v1.9.7, bkz. recommender.ts FILTERED_PLAY_WEIGHT).
+  const filtered =
+    s.radioActive &&
+    s.radioPlaylistId === DISCOVERY_ID &&
+    s.discoveryFilters.length > 0;
+  recordPlay(s.current, s.positionMs, filtered ? "filter" : null);
 
   // ⭐ OTURUM MODU: bu tarzı ne kadar dinledin? (lib/mood.ts)
   // Gezinme gürültüsü yukarıda elendiği için buraya yalnız gerçek dinlemeler
@@ -790,6 +796,9 @@ async function refillRadio(playAfter = false) {
  * SONRASI karıştırılır (çalan şarkı kesilmesin diye). Fisher-Yates —
  * `sort(() => Math.random() - 0.5)` düzgün dağıtmaz.
  */
+/** Karışığa girmeden önceki kuyruk sırası (öğe uid'leri) — kapanınca dönülür. */
+let preShuffleOrder: string[] | null = null;
+
 function reshuffleQueue<T>(queue: T[], keepIndex: number): T[] {
   const head = keepIndex >= 0 ? queue.slice(0, keepIndex + 1) : [];
   const tail = keepIndex >= 0 ? queue.slice(keepIndex + 1) : [...queue];
@@ -908,12 +917,11 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   // ("Önerili rastgele" ayrı bir seçenek — startSmartShuffle.)
   playShuffled: (tracks, playlistId) => {
     if (tracks.length === 0) return;
-    const shuffled = [...tracks];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    const items = shuffled.map((t) => toQueueItem(t, playlistId));
+    // Önce ORİJİNAL sırada kuyruk öğeleri → sıra saklanır (karışık kapanınca
+    // geri dönülsün), sonra öğeler karıştırılır.
+    const ordered = tracks.map((t) => toQueueItem(t, playlistId));
+    preShuffleOrder = ordered.map((q) => q.uid);
+    const items = reshuffleQueue(ordered, -1);
     set({
       queue: items,
       queueIndex: 0,
@@ -1510,6 +1518,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       // kalır, sonrası yeni bir rastgele sıraya girer. (Eskiden sıra aynı
       // kalıyor, yalnız "sonraki" rastgele zıplıyordu.)
       const { queue, queueIndex } = get();
+      preShuffleOrder = queue.map((q) => q.uid);
       set({
         shuffleMode: "shuffle",
         queue: reshuffleQueue(queue, queueIndex),
@@ -1531,9 +1540,19 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       // smart → off: radyoyu kapat; kuyrukta queueIndex SONRASI, henüz ÇALINMAMIŞ
       // önerileri kuyruktan çıkar (kalan asıl parçalar korunur).
       const { queue, queueIndex, current } = get();
-      const filtered = queue.filter(
+      let filtered = queue.filter(
         (item, idx) => !(idx > queueIndex && item.isRecommendation)
       );
+      // ⭐ KARIŞIK KAPANINCA ESKİ SIRA (v1.9.7, Spotify davranışı): karışığa
+      // girmeden önceki sıra saklanıyordu; çalan şarkı yerinde kalır, gerisi
+      // orijinal sırasına döner. Sıra bilinmiyorsa (başka kuyruk) dokunulmaz.
+      if (preShuffleOrder && current && preShuffleOrder.includes(current.uid)) {
+        const rank = new Map(preShuffleOrder.map((u, i) => [u, i]));
+        filtered = [...filtered].sort(
+          (a, b) => (rank.get(a.uid) ?? 1e9) - (rank.get(b.uid) ?? 1e9)
+        );
+      }
+      preShuffleOrder = null;
       const newIndex = current
         ? filtered.findIndex((i) => i.uid === current.uid)
         : queueIndex;

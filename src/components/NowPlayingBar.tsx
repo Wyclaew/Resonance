@@ -125,16 +125,19 @@ export default function NowPlayingBar() {
   const pct = durationMs > 0 ? (positionMs / durationMs) * 100 : 0;
 
   return (
-    <footer className="relative isolate flex h-20 shrink-0 items-center gap-4 overflow-hidden border-t border-border bg-surface px-4">
-      {/* Çalan kapağın çok hafif, bulanık yansıması — mini oynatıcıyla aynı dil. */}
+    <footer className="relative isolate flex h-20 shrink-0 items-center gap-4 border-t border-border bg-surface px-4">
+      {/* Çalan kapağın çok hafif, bulanık yansıması — mini oynatıcıyla aynı dil.
+          ⚠️ `overflow-hidden` YALNIZ bu katmanda: footer'ın kendisine konunca
+          yukarı açılan menüler (listeye ekle, uyku) KESİLİYORDU (v1.9.3–1.9.6). */}
       {current?.thumbnail && (
-        <img
-          aria-hidden
-          src={current.thumbnail}
-          alt=""
-          draggable={false}
-          className="pointer-events-none absolute -left-10 top-1/2 -z-10 h-64 w-[36rem] -translate-y-1/2 object-cover opacity-[0.16] blur-3xl saturate-150"
-        />
+        <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
+          <img
+            src={current.thumbnail}
+            alt=""
+            draggable={false}
+            className="absolute -left-10 top-1/2 h-64 w-[36rem] -translate-y-1/2 object-cover opacity-[0.16] blur-3xl saturate-150"
+          />
+        </div>
       )}
       {/* Sol: şu an çalan */}
       <div className="flex min-w-0 flex-1 items-center gap-3">

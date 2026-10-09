@@ -117,7 +117,10 @@ export async function buildTasteProfile(force = false): Promise<void> {
     >(
       `SELECT t.artist, h.ms_played, t.duration_ms, h.played_at, h.hour, h.dow
        FROM play_history h JOIN tracks t ON t.id = h.track_id
-       WHERE t.artist <> '' AND t.duration_ms > 0`
+       WHERE t.artist <> '' AND t.duration_ms > 0
+         -- Filtreli Keşfet dinlemesi "bu saatte ne dinlersin"i temsil etmez
+         -- (şarkıyı filtre seçti) — v1.9.7.
+         AND COALESCE(h.context, '') <> 'filter'`
     );
 
     const next = new Map<Bucket, BucketProfile>();

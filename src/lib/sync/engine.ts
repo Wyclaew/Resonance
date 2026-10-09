@@ -129,7 +129,7 @@ const TABLES: TableSpec[] = [
     cloudConflict: "user_id,uid",
     cols: [
       "uid", "track_id", "played_at", "ms_played", "hour", "dow",
-      "device_id", "updated_at",
+      "device_id", "context", "updated_at",
     ],
   },
   {
@@ -964,8 +964,11 @@ export async function syncHealth(): Promise<TableHealth[]> {
   for (const spec of TABLES) {
     let local = 0;
     try {
+      // `updated_at > 0`: yer tutucu parçalar (0) BİLEREK gönderilmez; sayılsalar
+      // panel sahte "fark" gösterirdi.
       const rows = await db.select<{ n: number }[]>(
-        `SELECT COUNT(*) AS n FROM ${spec.name}${spec.pushWhere ? ` WHERE ${spec.pushWhere}` : ""}`
+        `SELECT COUNT(*) AS n FROM ${spec.name}
+          WHERE updated_at > 0${spec.pushWhere ? ` AND ${spec.pushWhere}` : ""}`
       );
       local = Number(rows[0]?.n ?? 0);
     } catch {

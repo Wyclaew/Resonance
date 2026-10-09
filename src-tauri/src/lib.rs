@@ -6,6 +6,7 @@ mod durable;
 mod media_controls;
 mod spotify;
 mod native_dl;
+mod net_fetch;
 mod tray;
 mod version_match;
 mod ytdlp;
@@ -360,6 +361,17 @@ fn migrations() -> Vec<Migration> {
             // sorusu çıkardı. Boş/NULL = kök.
             sql: r#"ALTER TABLE playlists ADD COLUMN folder TEXT;"#,
         },
+        Migration {
+            version: 10,
+            description: "play_history_context",
+            kind: MigrationKind::Up,
+            // v1.9.7 — dinlemenin BAĞLAMI. 'filter' = Keşfet'te tür/ruh hali
+            // filtresiyle dinlendi. Kullanıcı: "bir gün Türkçe filtresiyle
+            // dinledim diye sonradan keşfetim hep Türkçe önermesin." Filtreli
+            // dinleme YÖNLENDİRİLMİŞ bir dinlemedir; genel zevk profiline tam
+            // ağırlıkla girmemeli (bkz. recommender.ts / taste.ts).
+            sql: r#"ALTER TABLE play_history ADD COLUMN context TEXT;"#,
+        },
     ]
 }
 
@@ -407,6 +419,7 @@ pub fn run() {
             commands::get_lyrics,
             commands::youtube_oembed,
             commands::log_from_js,
+            net_fetch::net_fetch,
             commands::play_track,
             commands::download_audio,
             commands::prefetch_audio,

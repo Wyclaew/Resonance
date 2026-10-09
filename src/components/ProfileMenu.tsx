@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import AvatarEditor from "./AvatarEditor";
+import Popover from "./Popover";
 import {
   User,
   LogOut,
@@ -59,16 +60,6 @@ export default function ProfileMenu({ collapsed }: { collapsed: boolean }) {
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
 
   const pickAvatar = (file: File) => {
     // ⚠️ Sınır artık daha geniş: seçilen dosya SAKLANMIYOR, düzenleyicide
@@ -109,6 +100,18 @@ export default function ProfileMenu({ collapsed }: { collapsed: boolean }) {
 
   return (
     <div ref={boxRef} className="relative">
+      {/* Dosya girdisi menünün DIŞINDA: menü kapansa da seçim sonucu kaybolmasın. */}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) pickAvatar(f);
+          e.target.value = "";
+        }}
+      />
       {editing && (
         <AvatarEditor
           src={editing}
@@ -161,8 +164,7 @@ export default function ProfileMenu({ collapsed }: { collapsed: boolean }) {
         )}
       </button>
 
-      {open && (
-        <div className="absolute bottom-full left-0 z-50 mb-1 w-60 overflow-hidden rounded-lg border border-border bg-surface shadow-xl">
+      <Popover anchor={boxRef} open={open} onClose={() => setOpen(false)} placement="up" align="start" width={248} className="!p-0">
           {/* Avatar değiştir */}
           <button
             onClick={() => fileRef.current?.click()}
@@ -178,17 +180,6 @@ export default function ProfileMenu({ collapsed }: { collapsed: boolean }) {
               </span>
             </span>
           </button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) pickAvatar(f);
-              e.target.value = "";
-            }}
-          />
 
           <MenuItem
             icon={<Cloud size={15} />}
@@ -280,8 +271,7 @@ export default function ProfileMenu({ collapsed }: { collapsed: boolean }) {
               />
             </>
           )}
-        </div>
-      )}
+      </Popover>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import Popover from "./Popover";
 import { Moon } from "lucide-react";
 import { usePlayerStore } from "../store/usePlayerStore";
 import { useT } from "../lib/i18n";
@@ -22,15 +23,6 @@ export default function SleepTimerButton() {
     return () => clearInterval(id);
   }, [active]);
 
-  useEffect(() => {
-    if (!open) return;
-    function onDoc(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
-
   const remainingMin = active
     ? Math.max(0, Math.ceil(((sleepEndsAt as number) - now) / 60000))
     : 0;
@@ -48,8 +40,7 @@ export default function SleepTimerButton() {
         {active && <span className="tnum text-[10px] font-medium">{remainingMin}</span>}
       </button>
 
-      {open && (
-        <div className="absolute bottom-full right-0 z-50 mb-2 w-40 rounded-md border border-border bg-surface-2 p-1 shadow-2xl">
+      <Popover anchor={ref} open={open} onClose={() => setOpen(false)} placement="up" width={170}>
           {active && (
             <button
               onClick={() => {
@@ -100,8 +91,7 @@ export default function SleepTimerButton() {
               {t("sleep.minutes", { n: m })}
             </button>
           ))}
-        </div>
-      )}
+      </Popover>
     </div>
   );
 }

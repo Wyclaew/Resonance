@@ -322,6 +322,9 @@ export async function getRecommendations(
 }
 
 /** Kalıcı öğrenme sinyalleri — tek geçişte kurulur. */
+/** Filtreli Keşfet dinlemesinin sanatçı yakınlığına katkısı (tam = 1). */
+const FILTERED_PLAY_WEIGHT = 0.2;
+
 export interface Signals {
   /** "KİMİ seviyorum" → hangi radyoları açacağımızı seçer. */
   artistAffinity: Map<string, number>;
@@ -429,10 +432,11 @@ export async function buildSignals(
         dow: number;
         artist: string;
         duration_ms: number;
+        context: string | null;
       }[]
     >(
       `SELECT h.track_id, h.ms_played, h.played_at, h.hour, h.dow,
-              t.artist, t.duration_ms
+              t.artist, t.duration_ms, h.context
        FROM play_history h JOIN tracks t ON t.id = h.track_id`
     );
     // ⭐ TEKRAR DİNLEME (v1.8.0) — model bunu HİÇ GÖRMÜYORDU.
@@ -450,6 +454,26 @@ export async function buildSignals(
     for (const p of plays) {
       const ratio =
         p.duration_ms > 0 ? Math.min(1, p.ms_played / p.duration_ms) : 0;
+      // ⭐ FİLTRELİ DİNLEME (v1.9.7): Keşfet'te "Türkçe" filtresiyle bir gün
+      // boyunca dinlemek, "Türkçe seviyorum" demek DEĞİL — o şarkıları sen
+      // değil FİLTRE seçti. Eskiden tam ağırlıkla sayılıyordu ve kullanıcının
+      // dediği oldu: sonraki filtresiz Keşfet'ler hep Türkçe öneriyordu
+      // (yakınlık + favori dönüşü + tekrar bonusu, üçü birden). Artık
+      // sanatçı yakınlığına %20 ile girer; PARÇA karmasına, tekrar bonusuna
+      // ve favori dönüşüne HİÇ girmez. Açık oy (beğen/beğenme) yine tam sayılır.
+      if (p.context === "filter") {
+        const s =
+          p.ms_played < 5000 ? -0.35 : ratio < 0.15 ? -0.25 : ratio > 0.7 ? 0.4 : ratio > 0.4 ? 0.15 : 0;
+        if (s !== 0) {
+          const w =
+            FILTERED_PLAY_WEIGHT *
+            s *
+            decayWeight(now - p.played_at, opts.halfLifeDays) *
+            contextWeight(p.hour, p.dow, curHour, curDow);
+          artistAffinity.set(p.artist, (artistAffinity.get(p.artist) ?? 0) + w);
+        }
+        continue;
+      }
       if (ratio > 0.7) {
         const day = Math.floor(p.played_at / DAY_MS);
         const perDay = repeats.get(p.track_id) ?? new Map();
@@ -554,8 +578,12 @@ async function computeRecommendations(
   const recentlyRecommended = new Set<string>();
   // Parça başına EN SON öneri zamanı — favori dönüşünün kendi bekleme süresi için.
   const lastRecommendedAt = new Map<string, number>();
+  // ⭐ FİLTRELİ KEŞFET ZEVK PROFİLİNDEN AYRIDIR (v1.9.7) — aşağıdaki notlara bak.
+  const filtered = (opts.filters?.length ?? 0) > 0;
   try {
-    const RECENT_MS = 45 * 24 * 60 * 60 * 1000;
+    // Filtreli modda 14 gün: dar bir türde 45 günlük "bir daha önerme"
+    // engeli havuzu birkaç saatte tüketiyordu → kuyruk filtre DIŞINA taşıyordu.
+    const RECENT_MS = (filtered ? 14 : 45) * 24 * 60 * 60 * 1000;
     const histRows = await db.select<{ track_id: string; last_at: number }[]>(
       `SELECT track_id, MAX(recommended_at) AS last_at FROM recommendation_history
         WHERE recommended_at >= $1 GROUP BY track_id`,
@@ -608,7 +636,9 @@ async function computeRecommendations(
   // `recommendation_history`'e göre FAVORİ DE birkaç gün bekler, (2) seçim
   // puanla AĞIRLIKLI RASTGELE (Gumbel) — sevdiğin şarkılar sırayla döner.
   const FAVORITE_COOLDOWN_MS = 4 * 24 * 60 * 60 * 1000;
-  if (opts.useLibrary) {
+  // ⛔ Filtreli modda favori YOK: "Türkçe" seçtin, kütüphanedeki rock
+  // favorini geri getirmek filtreyi bozar (kullanıcının şikâyeti).
+  if (opts.useLibrary && !filtered) {
     const favLimit = Math.max(1, Math.round(opts.limit * FAVORITE_SHARE));
     const cands = await db.select<CandidateRow[]>(
       `SELECT DISTINCT t.id, t.source, t.source_id, t.title, t.artist, t.album,
@@ -783,23 +813,23 @@ async function computeRecommendations(
       //  (b) tanıdık sanatçının bilmediği şarkısı → havuzla KESİŞEN kendi
       //      sanatçılarının radyosundan.
       genrePool = await genrePoolFor(filterIds);
-      const poolArtists = new Set(
-        genrePool.map((t) => effectiveArtist(t).toLowerCase())
-      );
-      // Kullanıcının BU TÜRDEKİ sanatçıları (tür alanı olmadığı için kesişimle).
-      const mineInGenre = pool.filter((x) =>
-        poolArtists.has(x.t.artist.toLowerCase())
-      );
-      // ⚠️ SADECE 1 kişisel radyo. 2 iken (ölçüldü) rock filtresinde kuyruğun
-      // yarısı tek sanatçının (Journey) radyosundan geliyordu — kullanıcı
-      // "daha az journey, daha çok filtreden gelen" dedi. Havuz aşağıda 3
-      // parçaya bölünüyor → oran ~%75 filtre / %25 kişisel.
-      for (const t of sampleWeighted(
-        mineInGenre,
-        1,
-        (x) => x.score * seedWeight(x.t.artist)
-      )) {
-        pushSeed({ sourceId: t.source_id, artist: t.artist });
+      // ⛔ ESKİ HÂLİ (v1.4–1.9.6): 1 tohum kullanıcının KENDİ sanatçısından
+      // seçiliyordu ve tüm radyo sonuçları kişisel yakınlığa göre öne
+      // çekiliyordu. Havuz (45 gün engeliyle) tükenince round-robin boşalan
+      // kaynakları atlıyor ve kuyruğu TAMAMEN o kişisel radyo dolduruyordu →
+      // kullanıcının gördüğü "bir süre sonra filtrenin çok dışında öneriyor".
+      // Kullanıcının kararı: "filtre kullandığımda zevk profilimden AYRI
+      // önersin". Artık tohumlar TÜR HAVUZUNDAKİ şarkılardır; YouTube
+      // Music'in o şarkılar için kurduğu radyo türde kalır, havuz biterse
+      // kuyruğu yine türdeki radyolar besler.
+      const seedPool = shuffleArray(genrePool).filter((t) => t.sourceId);
+      const usedArtists = new Set<string>();
+      for (const t of seedPool) {
+        if (seeds.length >= 3) break;
+        const a = effectiveArtist(t).toLowerCase();
+        if (usedArtists.has(a) || isBlocked(a)) continue;
+        usedArtists.add(a);
+        pushSeed({ sourceId: t.sourceId, artist: effectiveArtist(t) });
       }
     } else {
       // FİLTRESİZ: saf öğrenme + mod.
@@ -846,7 +876,9 @@ async function computeRecommendations(
       }
     }
 
-    const radioCount = Math.min(seeds.length, needed <= 6 ? 3 : 6);
+    const radioCount = filtered
+      ? seeds.length
+      : Math.min(seeds.length, needed <= 6 ? 3 : 6);
     const chosen = seeds.slice(0, radioCount);
 
     // Radyoları 3'erli DALGALAR hâlinde çek (aynı anda en fazla 3 yt-dlp →
@@ -864,15 +896,18 @@ async function computeRecommendations(
             // sanatçılar hafifçe öne çekilir (Gumbel: key = -ln(rnd)/ağırlık).
             // Tür bozulmaz (parçalar zaten o radyodan), yalnız tanıdık olanlar
             // biraz öne gelir → istenen "karışık" tat.
-            const weighted = results
-              .map((r) => ({
-                r,
-                key:
-                  -Math.log(Math.random() || 1e-9) /
-                  (1 + Math.max(0, artistAffinity.get(r.artist) ?? 0)),
-              }))
-              .sort((a, b) => a.key - b.key)
-              .map((x) => x.r);
+            // Filtreli modda SAF rastgele: zevk profili sıralamaya karışmaz.
+            const weighted = filtered
+              ? shuffleArray(results)
+              : results
+                  .map((r) => ({
+                    r,
+                    key:
+                      -Math.log(Math.random() || 1e-9) /
+                      (1 + Math.max(0, artistAffinity.get(r.artist) ?? 0)),
+                  }))
+                  .sort((a, b) => a.key - b.key)
+                  .map((x) => x.r);
             return { seed, results: weighted };
           } catch (e) {
             console.error("[resonance] radyo alınamadı:", e);

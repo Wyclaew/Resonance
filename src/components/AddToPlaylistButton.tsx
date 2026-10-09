@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
+import Popover from "./Popover";
 import { ListPlus, Plus, ListMusic } from "lucide-react";
 import type { Track } from "../types";
 import { usePlaylistStore } from "../store/usePlaylistStore";
@@ -22,15 +23,6 @@ export default function AddToPlaylistButton({
   const addTrack = usePlaylistStore((s) => s.addTrack);
   const create = usePlaylistStore((s) => s.create);
   const toast = useToastStore((s) => s.show);
-
-  useEffect(() => {
-    if (!open) return;
-    function onDoc(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
 
   async function addTo(playlistId: string) {
     await addTrack(playlistId, track);
@@ -67,13 +59,13 @@ export default function AddToPlaylistButton({
         <ListPlus size={16} />
       </button>
 
-      {open && (
-        <div
-          className={`absolute right-0 z-50 w-56 rounded-md border border-border bg-surface-2 p-1 shadow-2xl ${
-            openUp ? "bottom-full mb-1" : "top-full mt-1"
-          }`}
-          onClick={(e) => e.stopPropagation()}
-        >
+      <Popover
+        anchor={ref}
+        open={open}
+        onClose={() => setOpen(false)}
+        placement={openUp ? "up" : "down"}
+        width={232}
+      >
           <button
             onClick={createAndAdd}
             className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm text-text hover:bg-surface-3"
@@ -84,7 +76,7 @@ export default function AddToPlaylistButton({
 
           {playlists.length > 0 && <div className="my-1 h-px bg-border" />}
 
-          <div className="max-h-56 overflow-y-auto">
+          <div className="max-h-64 overflow-y-auto">
             {playlists.map((p) => (
               <button
                 key={p.id}
@@ -96,8 +88,7 @@ export default function AddToPlaylistButton({
               </button>
             ))}
           </div>
-        </div>
-      )}
+      </Popover>
     </div>
   );
 }

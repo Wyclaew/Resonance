@@ -568,7 +568,7 @@ pub fn music_genre_pool(query: &str, limit: u32) -> anyhow::Result<Vec<SearchRes
         };
         if let Some(id) = v.get("id").and_then(|x| x.as_str()) {
             if let Some(rest) = id.strip_prefix("VL") {
-                if !rest.is_empty() && playlist_ids.len() < 3 {
+                if !rest.is_empty() && playlist_ids.len() < 8 {
                     playlist_ids.push(rest.to_string());
                 }
             }
@@ -578,11 +578,23 @@ pub fn music_genre_pool(query: &str, limit: u32) -> anyhow::Result<Vec<SearchRes
         return Ok(Vec::new());
     }
 
-    // İlk 2 listeyi çek (tek liste tek editörün seçkisi; iki liste daha geniş
-    // sanatçı yelpazesi verir — kullanıcının "hep aynı sanatçılar" şikâyeti).
+    // ⛔ ESKİDEN HEP İLK 2 LİSTE çekiliyordu → aynı filtre her seferinde AYNI
+    // ~120 şarkıyı veriyordu; 45 günlük "tekrar önerme" engeli bunları
+    // birkaç saatte tüketince Keşfet filtrenin DIŞINA taşıyordu (v1.9.7).
+    // Artık aramanın getirdiği en fazla 8 küratörlü listeden her çağrıda
+    // FARKLI 2'si seçilir (ilk liste en alakalısı olduğu için hep dahil,
+    // ikincisi döner).
     let end = limit.clamp(10, 100).to_string();
     let mut results = Vec::new();
-    for pid in playlist_ids.iter().take(2) {
+    let rot = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() as usize)
+        .unwrap_or(0);
+    let mut picked: Vec<&String> = playlist_ids.iter().take(1).collect();
+    if playlist_ids.len() > 1 {
+        picked.push(&playlist_ids[1 + rot % (playlist_ids.len() - 1)]);
+    }
+    for pid in picked {
         let url = format!("https://music.youtube.com/playlist?list={pid}");
         let out = match run_yt_dlp(
             &[

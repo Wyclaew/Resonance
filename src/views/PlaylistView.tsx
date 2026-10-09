@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import ViewHeader from "../components/ViewHeader";
 import Mosaic from "../components/Mosaic";
+import Popover from "../components/Popover";
 import TrackRow from "../components/TrackRow";
 import KarmaControl from "../components/KarmaControl";
 import type { Playlist, PlaylistTrack } from "../types";
@@ -107,6 +108,7 @@ function MultiAddToPlaylist({
   const playlists = usePlaylistStore((s) => s.playlists);
   const addTrack = usePlaylistStore((s) => s.addTrack);
   const toast = useToastStore((s) => s.show);
+  const anchorRef = useRef<HTMLDivElement>(null);
 
   const add = async (id: string, name: string) => {
     setOpen(false);
@@ -120,7 +122,7 @@ function MultiAddToPlaylist({
   };
 
   return (
-    <div className="relative">
+    <div className="relative" ref={anchorRef}>
       <button
         disabled={tracks.length === 0}
         onClick={() => setOpen((v) => !v)}
@@ -128,10 +130,7 @@ function MultiAddToPlaylist({
       >
         <Plus size={13} /> {t("playlist.selectedAdd")}
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="animate-pop-in absolute left-0 z-50 mt-1 max-h-64 w-56 overflow-y-auto rounded-xl border border-border bg-surface/95 p-1.5 shadow-2xl shadow-black/40 backdrop-blur-xl">
+      <Popover anchor={anchorRef} open={open} onClose={() => setOpen(false)} width={224} placement="down">
             {playlists.map((p) => (
               <button
                 key={p.id}
@@ -141,9 +140,7 @@ function MultiAddToPlaylist({
                 {p.name}
               </button>
             ))}
-          </div>
-        </>
-      )}
+      </Popover>
     </div>
   );
 }
@@ -161,9 +158,10 @@ function FolderMenu({
   const t = useT();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
+  const anchorRef = useRef<HTMLDivElement>(null);
 
   return (
-    <div className="relative">
+    <div className="relative" ref={anchorRef}>
       <button
         onClick={() => setOpen((v) => !v)}
         title={t("playlist.folder")}
@@ -174,10 +172,7 @@ function FolderMenu({
         <FolderIcon size={15} />
         <span className="max-w-[8rem] truncate">{current || t("playlist.folder")}</span>
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="animate-pop-in absolute right-0 z-50 mt-1 w-60 origin-top-right rounded-xl border border-border bg-surface/95 p-1.5 shadow-2xl shadow-black/40 backdrop-blur-xl">
+      <Popover anchor={anchorRef} open={open} onClose={() => setOpen(false)} width={240} placement="down">
             <button
               onClick={() => {
                 setOpen(false);
@@ -227,9 +222,7 @@ function FolderMenu({
                 {t("common.add")}
               </button>
             </div>
-          </div>
-        </>
-      )}
+      </Popover>
     </div>
   );
 }
@@ -249,6 +242,7 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
   // tutulmuyor (ayrı bir istek gerektirirdi) — en yakın karşılığı "eklenme".
   const [sortMode, setSortMode] = useState<SortMode>("manual");
   const [sortOpen, setSortOpen] = useState(false);
+  const sortRef = useRef<HTMLDivElement>(null);
   // Çoklu seçim: kip açıkken satıra tıklamak seçer, Shift aralık seçer.
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -512,9 +506,13 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
 
   return (
     <div className="relative flex h-full flex-col">
-      <header className="flex items-end justify-between gap-4 px-8 pb-5 pt-7">
+      {/* ⚠️ v1.9.6'da başlığa Sıra/Seç/Klasör eklenince düğmeler başlığı
+          "Favorite So…"ya kadar ezdi, "Tümünü indir" iki satıra bölündü. Artık
+          başlık bloğu esner (flex-1, en az 16rem), düğmeler sığmazsa ALT SATIRA
+          sarar ve hiçbir düğme etiketi satır atlamaz. */}
+      <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3 px-8 pb-5 pt-7">
         {/* Kapak mozaiği + başlık: liste sayfası artık kimliği olan bir sayfa. */}
-        <div className="flex min-w-0 items-end gap-4">
+        <div className="flex min-w-[16rem] flex-1 items-end gap-4">
           <Mosaic covers={covers} size={88} rounded="rounded-xl" />
         <div className="min-w-0">
           {editing ? (
@@ -534,7 +532,7 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
               {meta?.name ?? t("playlist.title")}
             </h1>
           )}
-          <p className="mt-1 text-sm text-muted">
+          <p className="mt-1 truncate text-sm text-muted">
             {t("playlist.trackCount", { count: tracks.length })}
             {totalMinutes > 0 ? ` · ${t("playlist.totalMinutes", { n: totalMinutes })}` : ""}
             {downloadedCount > 0
@@ -547,7 +545,7 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
         </div>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center justify-end gap-1 [&_button]:whitespace-nowrap">
           <PlayMenu
             disabled={tracks.length === 0}
             onOrdered={() => playNow(tracks[0], tracks, playlistId)}
@@ -583,7 +581,7 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
               </>
             )}
           </button>
-          <div className="relative">
+          <div className="relative" ref={sortRef}>
             <button
               onClick={() => setSortOpen((v) => !v)}
               title={t("playlist.sortTitle")}
@@ -596,10 +594,7 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
               <ArrowDownUp size={15} />
               {t(SORT_LABELS[sortMode])}
             </button>
-            {sortOpen && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setSortOpen(false)} />
-                <div className="animate-pop-in absolute right-0 z-50 mt-1 w-56 origin-top-right overflow-hidden rounded-xl border border-border bg-surface/95 p-1.5 shadow-2xl shadow-black/40 backdrop-blur-xl">
+            <Popover anchor={sortRef} open={sortOpen} onClose={() => setSortOpen(false)} width={224} placement="down">
                   {SORT_MODES.map((m) => (
                     <button
                       key={m}
@@ -618,9 +613,7 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
                   <p className="px-2.5 pb-1 pt-2 text-[11px] leading-relaxed text-faint">
                     {t("playlist.sortNote")}
                   </p>
-                </div>
-              </>
-            )}
+            </Popover>
           </div>
           <button
             onClick={() => {
@@ -905,17 +898,6 @@ function PlayMenu({
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
-
   const pick = (fn: () => void) => {
     setOpen(false);
     fn();
@@ -942,8 +924,7 @@ function PlayMenu({
         </button>
       </div>
 
-      {open && (
-        <div className="absolute right-0 z-50 mt-1 w-60 overflow-hidden rounded-lg border border-border bg-surface shadow-xl">
+      <Popover anchor={boxRef} open={open} onClose={() => setOpen(false)} width={240}>
           <PlayOption
             icon={<ListOrdered size={15} />}
             label={t("playlist.playOrdered")}
@@ -962,8 +943,7 @@ function PlayMenu({
             hint={t("playlist.playSmartHint")}
             onClick={() => pick(onSmart)}
           />
-        </div>
-      )}
+      </Popover>
     </div>
   );
 }

@@ -58,7 +58,8 @@ export async function buildAcceptance(force = false): Promise<void> {
               t.duration_ms,
               (SELECT MAX(h.ms_played) FROM play_history h
                 WHERE h.track_id = r.track_id
-                  AND h.played_at >= r.recommended_at) AS ms
+                  AND h.played_at >= r.recommended_at
+                  AND COALESCE(h.context, '') <> 'filter') AS ms
          FROM recommendation_history r
          JOIN tracks t ON t.id = r.track_id
         WHERE r.recommended_at >= $1 AND t.artist <> '' AND t.duration_ms > 0`,

@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.9.6** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.9.7** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,60 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.9.7 (MENÜLER KESİLMİYOR + WINDOWS GİRİŞİ + KEŞFET FİLTRESİ ZEVKTEN AYRI):
+• **⭐ AÇILIR MENÜLER PORTAL İLE** (`Popover.tsx`): kullanıcı yakaladı — alt barda
+  "listeye ekle" açılıyor ama listeler GÖRÜNMÜYORDU. Kök neden v1.9.3: alt bara
+  bulanık kapak için `overflow-hidden` eklenmişti, yukarı açılan menü kesiliyordu.
+  Bu sınıf hata her yeni kapsayıcıyla geri gelir → menüler artık
+  `document.body`'ye çizilir, `fixed` konum, sığmazsa ters yöne açılır. Taşınanlar:
+  listeye ekle, uyku, cihaz seçici, profil, liste sayfasındaki oynat/sıra/klasör/
+  toplu ekle. ⚠️ React olayları PORTAL'dan da React atasına kabarır → Popover
+  tık/çift tık/sağ tık/mousedown'ı durdurur (yoksa satırın içinden açılan menüde
+  sağ tık o satırın "şarkı detayı"nı açardı). Alt barın `overflow-hidden`'ı
+  yalnız arka plan katmanına taşındı. ÖLÇÜLDÜ (test paketi): dört liste görünüyor.
+• **⭐ WINDOWS'TA GİRİŞTE "Failed to fetch"** (`resilientFetch.ts` + `net_fetch.rs`):
+  hata tarayıcı motorunun AĞ katmanında patladığını söyler; sebep JS'ten
+  görünmez ve Windows log'una erişimimiz yoktu. Supabase istemcisinin TÜM
+  istekleri artık önce normal `fetch`, ağ hatasında aynı isteği Rust'ın kendi
+  HTTP istemcisinden (reqwest+rustls, WebView2'den bağımsız) gönderir; bir kez
+  çalışırsa oturum boyunca o yol. İkisi de düşerse hata SINIFLANDIRILIR (DNS /
+  sertifika-saat-antivirüs / zaman aşımı / bağlantı) ve giriş ekranında görünür.
+  ÖLÇÜLDÜ: gerçek projeye 200, sahte alan adına "DNS çözülemedi". Mac'te de bir
+  kez geçici "Load failed" görülmüştü (log). ⚠️ Windows'ta GERÇEKTEN çözüp
+  çözmediği ÖLÇÜLMEDİ — kullanıcıdan log satırı istenecek.
+• **⭐⭐ KEŞFET FİLTRESİ ZEVK PROFİLİNDEN AYRI** (kullanıcının iki şikâyeti):
+  "bir süre sonra filtrenin çok dışında öneriyor" — filtreli modda 1 tohum
+  kullanıcının KENDİ sanatçısından seçiliyor, radyo sonuçları kişisel yakınlıkla
+  öne çekiliyordu; tür havuzu 45 günlük tekrar engeliyle tükenince round-robin
+  kuyruğu TAMAMEN o kişisel radyoyla dolduruyordu. Üstüne tür havuzu her seferinde
+  AYNI ilk iki küratörlü listeyi çekiyordu (hızlı tükenme) ve favori dönüşü
+  filtreye bakmıyordu. Artık filtreli modda: tohumlar tür havuzundaki şarkılar
+  (ÖLÇÜLDÜ: "türkçe pop" havuzundan tohumlanan 3 radyoda Türkçe harfli şarkı
+  oranı %70-76), sıralama saf rastgele, favori dönüşü kapalı, tekrar engeli
+  14 gün, Rust havuzu 8 listeden ilki + dönen bir tanesini çeker.
+  "Bir gün Türkçe dinledim diye sonradan hep Türkçe öneriyor" — filtreli
+  dinlemeler genel zevke tam ağırlıkla giriyordu. Migration v10
+  `play_history.context` ('filter'), SENKRONLANIR; motor bunları sanatçı
+  yakınlığına %20 ile katar, parça karması/tekrar bonusu/favori/zaman profili/
+  kabul oranına HİÇ katmaz. Açık oylar yine tam sayılır.
+• **Liste başlığı ezilmiyor**: v1.9.6'da Sıra/Seç/Klasör eklenince başlık
+  "Favorite So…"ya kadar kısalıyor, "Tümünü indir" iki satıra bölünüyordu →
+  başlık esner, düğmeler alt satıra sarar.
+• **Karışık kapanınca eski sıra** (`preShuffleOrder`, Spotify davranışı).
+• **Bulut yedeği cihaz başına değil**: damga senkronlanmadığı için 3 cihaz haftada
+  3 yedek yazıyor, "son 5" ~2 haftaya iniyordu → buluttaki son yedeğe bakılır.
+• **Sağlık paneli sahte fark**: yer tutucu parçalar (updated_at=0) bilerek
+  gönderilmiyor ama yerelde sayılıyordu → sayım `updated_at > 0`.
+• Profil fotoğrafı dosya girdisi menünün dışına alındı (menü kapanınca seçim
+  kaybolmasın).
+⚠️ ŞEMA: `docs/supabase-schema.sql` yeniden çalıştırılmalı (`play_history.context`).
+⚠️ MOBİL: `Resonance Mobil/docs/MASAUSTU-NOTLARI.md` — sync-core.py masaüstü
+taşındıktan sonra kaynak bulamadığı hâlde "aynı ✅" diyordu; `resilientFetch.ts`
+FILES listesine eklenmeli; migration v10 ÖNCE gelmeli.
+⚠️ Masaüstü deposu `~/Desktop/ben/Resonance`'a taşındı: ilk Rust derlemesinde
+`target/` eski yolu gösterdiği için "failed to read plugin permissions" hatası
+alınır → `rm -rf src-tauri/target/debug/build/tauri-* …/resonance-*`.
+
 v1.9.6 (KARIŞIK GERÇEKTEN RASTGELE + HAFTALIK KEŞİF + LİSTE TEMELLERİ + KUMANDA):
 • **⛔ KARIŞIK GERÇEKTEN RASTGELE DEĞİLDİ.** `playShuffled` kuyruğu düzgün
   karıştırıyordu (Fisher-Yates) AMA `next()` karışık modda HER SEFERİNDE

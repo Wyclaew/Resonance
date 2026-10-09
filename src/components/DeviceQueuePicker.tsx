@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Laptop, Smartphone, Monitor } from "lucide-react";
 import { useT } from "../lib/i18n";
+import Popover from "./Popover";
 import { listRemoteQueues, type RemoteQueue } from "../lib/deviceQueue";
 import { usePlayerStore } from "../store/usePlayerStore";
 import { useToastStore } from "../store/useToastStore";
@@ -46,13 +47,6 @@ export default function DeviceQueuePicker() {
   useEffect(() => {
     if (!open) return;
     void listRemoteQueues().then(setRows);
-    const onDown = (e: MouseEvent) => {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
   if (rows.length === 0) return null;
@@ -84,8 +78,7 @@ export default function DeviceQueuePicker() {
         {t("device.pick")}
       </button>
 
-      {open && (
-        <div className="animate-pop-in absolute right-0 z-50 mt-2 w-80 origin-top-right overflow-hidden rounded-xl border border-border bg-surface/95 p-1.5 shadow-2xl shadow-black/40 backdrop-blur-xl">
+      <Popover anchor={boxRef} open={open} onClose={() => setOpen(false)} width={320}>
           <p className="px-2.5 pb-2 pt-1.5 text-xs text-muted">
             {t("device.pickHint")}
           </p>
@@ -136,8 +129,7 @@ export default function DeviceQueuePicker() {
               </button>
             );
           })}
-        </div>
-      )}
+      </Popover>
     </div>
   );
 }

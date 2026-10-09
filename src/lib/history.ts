@@ -61,7 +61,15 @@ export async function getRecentTracks(limit = 12): Promise<Track[]> {
 //
 // Bu bir listeye EKLEME değildir: İndirilenler `cache.downloaded=1` ister,
 // Kütüphane playlist'leri gösterir → parça yalnız öğrenme sinyali olarak sayılır.
-export async function recordPlay(track: Track, msPlayed: number): Promise<void> {
+/**
+ * @param context 'filter' → Keşfet'te tür/ruh hali filtresiyle dinlendi
+ *   (yönlendirilmiş dinleme; genel zevk profiline tam ağırlıkla girmez).
+ */
+export async function recordPlay(
+  track: Track,
+  msPlayed: number,
+  context: string | null = null
+): Promise<void> {
   if (!isTauri() || msPlayed < 1000) return;
   try {
     await ensureTrack(track);
@@ -69,8 +77,8 @@ export async function recordPlay(track: Track, msPlayed: number): Promise<void> 
     const d = new Date();
     await db.execute(
       `INSERT INTO play_history
-         (track_id, played_at, ms_played, hour, dow, uid, device_id, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $2)`,
+         (track_id, played_at, ms_played, hour, dow, uid, device_id, context, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $2)`,
       [
         track.id,
         d.getTime(),
@@ -79,6 +87,7 @@ export async function recordPlay(track: Track, msPlayed: number): Promise<void> 
         d.getDay(),
         newUid(),
         getDeviceId(),
+        context,
       ]
     );
     notifyLocalChange();

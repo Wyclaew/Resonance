@@ -264,6 +264,10 @@ create index if not exists idx_dq_sync       on public.device_queue(user_id, syn
 -- v1.9.6: çalma listesi klasörü (tek etiket sütunu; boş = kök).
 alter table public.playlists add column if not exists folder text;
 
+-- v1.9.7: dinlemenin bağlamı ('filter' = Keşfet filtresiyle dinlendi).
+-- Filtreli dinlemeler genel zevk profiline tam ağırlıkla girmez.
+alter table public.play_history add column if not exists context text;
+
 -- ── Uzaktan kumanda (v1.9.6) ──────────────────────────────────────────────
 -- Telefon → bilgisayar komutları ("çal", "sonraki", "ses 0.4"). Ses hedef
 -- cihazda çalmaya devam eder; burada YALNIZ komut taşınır. Hedef cihaz kendi
