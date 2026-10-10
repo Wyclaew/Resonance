@@ -1744,7 +1744,10 @@ export async function initPlayer() {
         if (e.state === "Pressed") fn();
       });
     } catch (err) {
-      console.error(`[resonance] '${key}' kaydedilemedi:`, err);
+      // Yedek kısayol (asıl yol OS medya oturumu, bkz. CLAUDE.md #17): başka
+      // bir uygulama tuşu tutuyorsa kaydedilemez — beklenen durum, HATA değil.
+      // Eskiden her açılışta log'a üç ERROR satırı düşüyordu.
+      console.info(`[resonance] '${key}' yedek kısayolu kaydedilemedi:`, err);
     }
   }
 

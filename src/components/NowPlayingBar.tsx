@@ -32,6 +32,7 @@ import { onRemoteApplied } from "../lib/sync/engine";
 import { voteCurrent, KARMA_EVENT, type KarmaEventDetail } from "../lib/vote";
 import { toggleMiniPlayer } from "../lib/miniPlayer";
 import AddToPlaylistButton from "./AddToPlaylistButton";
+import HandoffButton from "./HandoffButton";
 import KarmaControl from "./KarmaControl";
 import SleepTimerButton from "./SleepTimerButton";
 
@@ -354,6 +355,7 @@ export default function NowPlayingBar() {
         >
           <ScrollText size={16} />
         </button>
+        <HandoffButton />
         <SleepTimerButton />
         <button
           onClick={toggleMute}

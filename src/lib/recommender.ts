@@ -580,6 +580,9 @@ async function computeRecommendations(
   const lastRecommendedAt = new Map<string, number>();
   // ⭐ FİLTRELİ KEŞFET ZEVK PROFİLİNDEN AYRIDIR (v1.9.7) — aşağıdaki notlara bak.
   const filtered = (opts.filters?.length ?? 0) > 0;
+  const filterMix = filtered
+    ? Math.min(1, Math.max(0, useSettingsStore.getState().discoverFilterMix ?? 0))
+    : 0;
   try {
     // Filtreli modda 14 gün: dar bir türde 45 günlük "bir daha önerme"
     // engeli havuzu birkaç saatte tüketiyordu → kuyruk filtre DIŞINA taşıyordu.
@@ -822,10 +825,22 @@ async function computeRecommendations(
       // önersin". Artık tohumlar TÜR HAVUZUNDAKİ şarkılardır; YouTube
       // Music'in o şarkılar için kurduğu radyo türde kalır, havuz biterse
       // kuyruğu yine türdeki radyolar besler.
+      // ⭐ KARIŞIM ORANI (v1.9.8, Keşfet'teki kaydırıcı): 0 → yalnız filtre
+      // (varsayılan, yukarıdaki karar); arttıkça 1-2 tohum kullanıcının KENDİ
+      // sanatçılarından gelir — ama yalnız tür havuzunda GÖRÜLEN sanatçılar
+      // (kesişim), yani "bu türde benim sevdiklerim". Türün dışına taşmaz.
+      const personalSeeds = Math.round(filterMix * 2);
+      if (personalSeeds > 0) {
+        const poolArtists = new Set(genrePool.map((t) => effectiveArtist(t).toLowerCase()));
+        const mineInGenre = pool.filter((x) => poolArtists.has(x.t.artist.toLowerCase()));
+        for (const t of sampleWeighted(mineInGenre, personalSeeds, (x) => x.score * seedWeight(x.t.artist))) {
+          pushSeed({ sourceId: t.source_id, artist: t.artist });
+        }
+      }
       const seedPool = shuffleArray(genrePool).filter((t) => t.sourceId);
       const usedArtists = new Set<string>();
       for (const t of seedPool) {
-        if (seeds.length >= 3) break;
+        if (seeds.length >= 3 + personalSeeds) break;
         const a = effectiveArtist(t).toLowerCase();
         if (usedArtists.has(a) || isBlocked(a)) continue;
         usedArtists.add(a);
@@ -896,15 +911,18 @@ async function computeRecommendations(
             // sanatçılar hafifçe öne çekilir (Gumbel: key = -ln(rnd)/ağırlık).
             // Tür bozulmaz (parçalar zaten o radyodan), yalnız tanıdık olanlar
             // biraz öne gelir → istenen "karışık" tat.
-            // Filtreli modda SAF rastgele: zevk profili sıralamaya karışmaz.
-            const weighted = filtered
+            // Filtreli modda zevk sıralamaya yalnız KARIŞIM ORANI kadar karışır
+            // (0 → saf rastgele).
+            const affinityScale = filtered ? filterMix : 1;
+            const weighted =
+              affinityScale === 0
               ? shuffleArray(results)
               : results
                   .map((r) => ({
                     r,
                     key:
                       -Math.log(Math.random() || 1e-9) /
-                      (1 + Math.max(0, artistAffinity.get(r.artist) ?? 0)),
+                      (1 + affinityScale * Math.max(0, artistAffinity.get(r.artist) ?? 0)),
                   }))
                   .sort((a, b) => a.key - b.key)
                   .map((x) => x.r);

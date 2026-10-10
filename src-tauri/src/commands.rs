@@ -1278,6 +1278,36 @@ pub async fn check_app_update(app: AppHandle) -> Result<Option<String>, String> 
     }
 }
 
+#[derive(serde::Serialize)]
+pub struct AppUpdateInfo {
+    version: String,
+    current: String,
+    notes: Option<String>,
+}
+
+/// ⭐ Güncelleme penceresi için ayrıntı (v1.9.8): yeni sürüm, kurulu sürüm ve
+/// sürüm notu. Yoksa / denetlenemezse `None` (ağ yokken açılışı bozmasın).
+#[tauri::command]
+pub async fn app_update_info(app: AppHandle) -> Result<Option<AppUpdateInfo>, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    match updater.check().await {
+        Ok(Some(u)) => {
+            log::info!("yeni sürüm bulundu: {} (kurulu {})", u.version, u.current_version);
+            Ok(Some(AppUpdateInfo {
+                version: u.version.clone(),
+                current: u.current_version.clone(),
+                notes: u.body.clone(),
+            }))
+        }
+        Ok(None) => Ok(None),
+        Err(e) => {
+            log::info!("güncelleme kontrolü yapılamadı: {e}");
+            Ok(None)
+        }
+    }
+}
+
 /// Güncellemeyi indirir, kurar ve uygulamayı yeniden başlatır.
 #[tauri::command]
 pub async fn install_app_update(app: AppHandle) -> Result<(), String> {
@@ -1287,10 +1317,16 @@ pub async fn install_app_update(app: AppHandle) -> Result<(), String> {
         return Err("güncelleme bulunamadı".into());
     };
     let mut downloaded = 0usize;
+    let app_progress = app.clone();
     update
         .download_and_install(
             |chunk, total| {
                 downloaded += chunk;
+                // Güncelleme penceresindeki ilerleme çubuğu için.
+                let _ = app_progress.emit(
+                    "update-progress",
+                    serde_json::json!({ "downloaded": downloaded, "total": total }),
+                );
                 if let Some(t) = total {
                     log::debug!("güncelleme indiriliyor: {downloaded}/{t}");
                 }

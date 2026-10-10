@@ -279,9 +279,12 @@ create table if not exists public.remote_commands (
   target_device text not null,
   action        text not null,
   value         double precision,
+  payload       text,
   created_at    bigint not null default 0,
   primary key (user_id, id)
 );
+-- v1.9.8: devretme (handoff) komutu kuyruğu JSON olarak taşır.
+alter table public.remote_commands add column if not exists payload text;
 create index if not exists idx_remote_target
   on public.remote_commands(user_id, target_device, created_at);
 

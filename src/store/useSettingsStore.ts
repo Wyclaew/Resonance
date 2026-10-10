@@ -40,6 +40,8 @@ export interface Settings {
   resumeState: string; // son çalan şarkı + pozisyon (JSON) — kaldığın yerden devam
   /** Mini oynatıcının son konumu + boyu (JSON). YERELDE kalır (senkron dışı). */
   miniGeometry: string;
+  /** Filtreli Keşfet'te zevk karışımı: 0 = yalnız filtre, 1 = zevkimle karıştır (v1.9.8). */
+  discoverFilterMix: number;
   language: Lang; // arayüz dili ("tr" | "en")
   theme: Theme; // "dark" | "light" | "system"
   onboardingDone: boolean; // ilk açılış rehberi gösterildi mi
@@ -71,6 +73,7 @@ const DEFAULTS: Settings = {
   autoDownloadTop: 0,
   resumeState: "",
   miniGeometry: "",
+  discoverFilterMix: 0,
   language: detectLang(),
   theme: "system", // sistem tercihini izle (kullanıcının isteği)
   onboardingDone: false,
@@ -101,6 +104,7 @@ const KEYS: Record<keyof Settings, string> = {
   autoDownloadTop: "storage.autoDownloadTop",
   resumeState: "playback.resumeState",
   miniGeometry: "mini.geometry",
+  discoverFilterMix: "discover.filterMix",
   language: "appearance.language",
   theme: "appearance.theme",
   onboardingDone: "app.onboardingDone",

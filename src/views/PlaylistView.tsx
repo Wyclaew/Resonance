@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Play,
   ListMusic,
@@ -24,6 +24,8 @@ import {
 import ViewHeader from "../components/ViewHeader";
 import Mosaic from "../components/Mosaic";
 import Popover from "../components/Popover";
+import DuplicatesDialog from "../components/DuplicatesDialog";
+import { findDuplicates } from "../lib/duplicates";
 import TrackRow from "../components/TrackRow";
 import KarmaControl from "../components/KarmaControl";
 import type { Playlist, PlaylistTrack } from "../types";
@@ -272,6 +274,13 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
   const [batch, setBatch] = useState<{ done: number; total: number } | null>(null);
 
   const downloadedCount = tracks.filter((t) => downloadedIds.has(t.id)).length;
+  // ⭐ TEKRARLAR (v1.9.8): aynı şarkının birden fazla yüklemesi (lib/duplicates.ts).
+  const [plays, setPlays] = useState<Map<string, number>>(new Map());
+  const [dupsOpen, setDupsOpen] = useState(false);
+  const dupGroups = useMemo(
+    () => findDuplicates(tracks, downloadedIds, plays),
+    [tracks, downloadedIds, plays]
+  );
   const totalMinutes = Math.round(
     tracks.reduce((sum, tr) => sum + (tr.durationMs ?? 0), 0) / 60000
   );
@@ -538,6 +547,20 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
             {downloadedCount > 0
               ? ` · ${t("playlist.downloadedCount", { n: downloadedCount })}`
               : ""}
+            {dupGroups.length > 0 && (
+              <>
+                {" · "}
+                <button
+                  onClick={async () => {
+                    setPlays(await pl.playCounts(tracks.map((x) => x.id)).catch(() => new Map()));
+                    setDupsOpen(true);
+                  }}
+                  className="text-accent underline-offset-2 hover:underline"
+                >
+                  {t("dups.badge", { n: dupGroups.length })}
+                </button>
+              </>
+            )}
             {meta?.source && meta.source !== "local"
               ? ` · ${meta.source === "spotify" ? "Spotify" : "YouTube Music"}'ten`
               : ""}
@@ -794,6 +817,36 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
           </>
         )}
       </div>
+
+      {dupsOpen && (
+        <DuplicatesDialog
+          groups={dupGroups}
+          downloaded={downloadedIds}
+          plays={plays}
+          onClose={() => setDupsOpen(false)}
+          onApply={async (ids) => {
+            setDupsOpen(false);
+            if (!playlistId) return;
+            const before = [...tracks];
+            const removed = tracks.filter((x) => ids.includes(x.id));
+            for (const id of ids) await removeTrack(playlistId, id);
+            await load(true);
+            useToastStore.getState().show(
+              t("dups.removed", { n: removed.length }),
+              "success",
+              {
+                label: t("player.undo"),
+                fn: async () => {
+                  for (const tr of removed) await pl.addTrackToPlaylist(playlistId, tr);
+                  await pl.reorderPlaylist(playlistId, before.map((x) => x.id));
+                  await load(true);
+                },
+              },
+              10_000
+            );
+          }}
+        />
+      )}
 
       {/* Silme onayı */}
       {confirmDelete && (

@@ -72,6 +72,7 @@ export const SYNCED_SETTING_KEYS = new Set([
   // Haftalık Keşif listesi (JSON, ~6 KB): tüm cihazlarda AYNI hafta listesi
   // görünsün diye senkronlanır.
   "discover.week",
+  "discover.filterMix",
 ]);
 // ⛔ BİLEREK DIŞARIDA: playback.resumeState (cihazın kendi kuyruğu —
 // device_queue tablosu taşır), playback.savedVolume / rememberVolume,

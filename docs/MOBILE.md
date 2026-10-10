@@ -33,7 +33,7 @@ Masaüstünün mimarisi ve tuzakları için önce **`CLAUDE.md`**'yi oku; senkro
 **Kişisel kullanım, mağazaya çıkmayacak, repo private.**
 
 
-## ⭐ Masaüstünde VAR, mobilde YOK (v1.9.6 — taşınacaklar listesi)
+## ⭐ Masaüstünde VAR, mobilde YOK (v1.9.8 — taşınacaklar listesi)
 
 Bu bölüm masaüstü her sürümde güncellenir; mobil oturumu ÖNCE burayı okumalı.
 Sıra kabaca değer/emek oranına göre.
@@ -73,6 +73,20 @@ Sıra kabaca değer/emek oranına göre.
     (eskiden her "sonraki" rastgele indekse atlıyordu → tekrar).
 12. **Uzun listede pencereleme** (`useWindowedList`) — RN'de FlatList zaten
     yapıyor, yalnız web/masaüstü sorunu.
+
+13. **"Burada çal" / aktarma** (v1.9.8): `remote_commands` satırı
+    `action: "handoff"` + `payload` (JSON, `HandoffPayload` — `remote.ts`):
+    `{fromName, mode: "discovery"|"normal", queue, queueIndex, positionMs,
+    filters, seeds}`. Telefon GÖNDERİCİ (kendi kuyruğunu masaüstüne yolla)
+    ve ALICI (masaüstünden gelen kuyruğu kur, `positionMs`'ten çal) olabilir.
+14. **Keşfet karışım ayarı** (`discover.filterMix`, 0/0.5/1, senkronlanır):
+    `recommender.ts` paylaşılan → yalnız Keşfet filtre panelinde kaydırıcı.
+15. **Radyo ayarlayıcı** (`radioTuner.ts`): yalnız `invoke` → mobil yerel
+    modül karşılıkları gerekir (`music_radio`, `music_genre_pool`,
+    `search_youtube`). Opsiyonel.
+16. **Tekrar temizleyici** (`duplicates.ts`): saf TS, doğrudan taşınır.
+17. **Ekran ortası güncelleme penceresi** — mobilin kendi güncelleme yolu
+    varsa aynı davranış: "sonra" yalnız o oturum, her açılışta yeniden sor.
 
 ⛔ **Mobil planına GİRMEYENLER (yapılamaz/kapsam dışı):**
 - Lossless / 24-bit-192 kHz ve Dolby Atmos: kaynak YouTube (en iyi ~130 kbps

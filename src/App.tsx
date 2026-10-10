@@ -18,6 +18,7 @@ import { maybeWeeklyCloudBackup } from "./lib/cloudBackup";
 import { startRemoteControl } from "./lib/remote";
 import { ensureDiscoverWeek } from "./lib/discoverWeek";
 import WrappedStory from "./components/WrappedStory";
+import UpdateDialog, { type UpdateInfo } from "./components/UpdateDialog";
 import { loadSettings, setSetting } from "./lib/settings";
 import { auditRelinks } from "./lib/relinkAudit";
 import { getSupabase, wasSignOutIntentional } from "./lib/sync/client";
@@ -437,36 +438,20 @@ function MainApp() {
     return () => cancelAnimationFrame(id);
   }, [miniDeps, miniTheme, miniAccent, miniLang]);
 
-  // ⭐ OTOMATİK GÜNCELLEME (v1.9.2): açılıştan bir süre sonra GitHub'daki
-  // sürümü denetle. Sessiz başarısızlık BİLEREK: ağ yoksa ya da henüz
-  // yayımlanmış sürüm yoksa kullanıcıyı hata toast'ıyla rahatsız etmeyiz.
+  // ⭐ OTOMATİK GÜNCELLEME (v1.9.2) — v1.9.8'de köşedeki küçük toast yerine
+  // EKRANIN ORTASINDA pencere (`UpdateDialog`). Güncel olunmadıkça HER
+  // açılışta gösterilir; "devam et" yalnız bu oturum için kapatır. Ağ yoksa
+  // ya da sürüm henüz yayımlanmadıysa sessiz (açılışı bozmasın).
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
   useEffect(() => {
     if (!isTauri()) return;
     const id = setTimeout(() => {
-      invoke<string | null>("check_app_update")
-        .then((version) => {
-          if (!version) return;
-          useToastStore.getState().show(
-            t("update.available", { version }),
-            "info",
-            {
-              label: t("update.install"),
-              fn: async () => {
-                useToastStore.getState().show(t("update.installing"), "info", undefined, 30_000);
-                try {
-                  await invoke("install_app_update");
-                } catch (e) {
-                  useToastStore
-                    .getState()
-                    .show(t("update.failed", { error: String(e) }), "error");
-                }
-              },
-            },
-            20_000
-          );
+      invoke<UpdateInfo | null>("app_update_info")
+        .then((info) => {
+          if (info) setUpdate(info);
         })
         .catch(() => {});
-    }, 20_000);
+    }, 4_000);
     return () => clearTimeout(id);
   }, []);
 
@@ -734,6 +719,7 @@ function MainApp() {
           <NowPlayingBar />
         </>
       )}
+      {update && <UpdateDialog info={update} onLater={() => setUpdate(null)} />}
       {storyYear !== null && (
         <WrappedStory year={storyYear} onClose={() => setStoryYear(null)} />
       )}

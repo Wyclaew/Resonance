@@ -52,6 +52,24 @@ export async function setPlaylistFolder(id: string, folder: string): Promise<voi
   notifyLocalChange();
 }
 
+/** Parça başına toplam dinleme sayısı (tekrar temizleyicide kimin kalacağı için). */
+export async function playCounts(ids: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (ids.length === 0) return out;
+  const db = await getDb();
+  for (let i = 0; i < ids.length; i += 300) {
+    const part = ids.slice(i, i + 300);
+    const ph = part.map((_, j) => `$${j + 1}`).join(", ");
+    const rows = await db.select<{ track_id: string; n: number }[]>(
+      `SELECT track_id, COUNT(*) AS n FROM play_history
+        WHERE track_id IN (${ph}) GROUP BY track_id`,
+      part
+    );
+    for (const r of rows) out.set(r.track_id, Number(r.n));
+  }
+  return out;
+}
+
 export async function listPlaylists(): Promise<Playlist[]> {
   const db = await getDb();
   const rows = await db.select<

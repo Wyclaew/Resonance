@@ -14,6 +14,7 @@ import {
   Unlock,
   ListPlus,
   TrendingUp,
+  Radio,
 } from "lucide-react";
 import ViewHeader from "../components/ViewHeader";
 import DeviceQueuePicker from "../components/DeviceQueuePicker";
@@ -21,6 +22,7 @@ import { useT } from "../lib/i18n";
 import { usePlayerStore } from "../store/usePlayerStore";
 import { reasonText } from "../lib/recommender";
 import { useSettingsStore } from "../store/useSettingsStore";
+import RadioTuner from "../components/RadioTuner";
 import { DISCOVERY_FILTERS } from "../lib/filters";
 import { formatMs } from "../lib/format";
 import { topStyles } from "../lib/mood";
@@ -34,9 +36,15 @@ import { useToastStore } from "../store/useToastStore";
 // vardı). Sayfa olunca: filtreler, mod bilgisi ve tüm kuyruk aynı yerde durur,
 // gezinince kapanmaz.
 
+const MIX_LABELS = ["discover.mix0", "discover.mix1", "discover.mix2"] as const;
+
 export default function DiscoverView() {
   const t = useT();
   const lang = useSettingsStore((s) => s.language);
+  const filterMix = useSettingsStore((s) => s.discoverFilterMix);
+  const [tunerOpen, setTunerOpen] = useState(false);
+  const updateSetting = useSettingsStore((s) => s.update);
+  const mixStep = Math.round(Math.min(1, Math.max(0, filterMix)) * 2);
 
   const queue = usePlayerStore((s) => s.queue);
   const queueIndex = usePlayerStore((s) => s.queueIndex);
@@ -150,8 +158,16 @@ export default function DiscoverView() {
 
   return (
     <div className="flex h-full flex-col">
+      {tunerOpen && <RadioTuner onClose={() => setTunerOpen(false)} />}
       <ViewHeader title={t("discover.title")} subtitle={t("discover.subtitle")}>
         {/* Başka cihazdaki keşfeti getir (yalnız o cihaz varsa görünür). */}
+        <button
+          onClick={() => setTunerOpen(true)}
+          className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-surface-2 px-3 py-2 text-sm text-muted transition-colors hover:text-text"
+        >
+          <Radio size={14} />
+          {t("tuner.open")}
+        </button>
         <DeviceQueuePicker />
         <button
           onClick={() => void saveQueue()}
@@ -278,6 +294,31 @@ export default function DiscoverView() {
                   ))}
                 </div>
               </div>
+
+              {/* ⭐ KARIŞIM ORANI (v1.9.8): filtreli Keşfet varsayılan olarak zevk
+                  profilinden AYRI; isteyen "bu türde benim sevdiklerimi de kat"
+                  diyebilsin. Bir sonraki beslemede/yeni keşifte geçerli. */}
+              {draft.length > 0 && (
+                <div className="mt-4 rounded-lg border border-border px-3 py-2.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted">{t("discover.mixOnly")}</span>
+                    <span className="font-medium text-text">{t(MIX_LABELS[mixStep])}</span>
+                    <span className="text-muted">{t("discover.mixTaste")}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={2}
+                    step={1}
+                    value={mixStep}
+                    onChange={(e) =>
+                      void updateSetting("discoverFilterMix", Number(e.target.value) / 2)
+                    }
+                    className="resonance-range mt-2 w-full"
+                    style={{ ["--pct" as string]: `${mixStep * 50}%` }}
+                  />
+                </div>
+              )}
 
               <p className="mt-3 text-xs text-faint">
                 {draft.length === 0

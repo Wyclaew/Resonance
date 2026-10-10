@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.9.7** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.9.8** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,36 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.9.8 (RADYO AYARLAYICI + KARIŞIM AYARI + TEKRAR TEMİZLEYİCİ + "BURADA ÇAL" + GÜNCELLEME PENCERESİ):
+• **⭐ RADYO AYARLAYICI** (`lib/radioTuner.ts` + `RadioTuner.tsx`, Keşfet →
+  "Radyo oluştur"): ≤5 sanatçı + tanıdık/karışık/yeni + sakin/fark etmez/
+  hareketli → 50 şarkılık istasyon. Sanatçı başına tohum = kendi en çok
+  çaldığın parçası, yoksa YouTube araması. Enerji = YT Music'in sakin/enerjik
+  küratörlü listelerindeki sanatçılara ±puan (tempo verisi YOK, tahmin).
+  "Tanıdık" = listede OLAN ya da >30 sn dinlenmiş parça (yalnız `tracks`'te
+  olmak YETMEZ — her önerilen parça oraya yazılıyor). ÖLÇÜLDÜ: ilk hâli
+  "yeni + sakin" ile 12 şarkı veriyordu; aday <75 ise en iyi 3 adayın
+  radyosuyla İKİNCİ SIÇRAMA → 50.
+• **KEŞFET FİLTRESİ KARIŞIM AYARI** (`discover.filterMix`, SENKRONLANIR):
+  0 = yalnız filtre (v1.9.7 davranışı), 0.5/1 = havuzda bulunan KENDİ
+  sanatçılarından 1/2 tohum + yakınlık sıralaması. Varsayılan 0.
+• **TEKRAR TEMİZLEYİCİ** (`lib/duplicates.ts` + `DuplicatesDialog`): anahtar
+  `songCore` + sanatçı + SÜRÜM İMZASI (remix/slowed/live/acoustic… farklı
+  şarkı sayılır). Saklanan: indirilmiş > karma > çalınma > ilk eklenen.
+  Çıkarma geri alınabilir.
+• **⭐ "BURADA ÇAL" / AKTARMA** (`remote.ts` `handoff`, `HandoffButton`):
+  `remote_commands.payload` (JSON: kuyruk ≤200, pozisyon, Keşfet filtre/
+  tohumları). Alan cihaz kuyruğu kurar ve AYNI SANİYEDEN çalar, gönderen
+  duraklar. ⚠️ Şema: `remote_commands.payload` sütunu.
+• **⭐ GÜNCELLEME PENCERESİ** (`UpdateDialog.tsx`, `app_update_info` +
+  `update-progress` olayı): toast yerine ekran ortasında; "Güncellemeden
+  devam et" yalnız o oturum için kapatır → güncel olmadığı sürece HER
+  AÇILIŞTA yeniden çıkar. Notlar `docs/release-notes/<etiket>.md`'den
+  (release.yml sürüm metninin başına koyar, pencere "---" öncesini gösterir).
+  ⚠️ v1.9.7 kurulu olanlar 1.9.8'i hâlâ ESKİ küçük toast ile görür.
+• Medya tuşu yedeği kurulamayınca hata değil bilgi satırı yazılır.
+⚠️ ŞEMA: `docs/supabase-schema.sql` yeniden çalıştırılmalı (`payload`).
+
 v1.9.7 (MENÜLER KESİLMİYOR + WINDOWS GİRİŞİ + KEŞFET FİLTRESİ ZEVKTEN AYRI):
 • **⭐ AÇILIR MENÜLER PORTAL İLE** (`Popover.tsx`): kullanıcı yakaladı — alt barda
   "listeye ekle" açılıyor ama listeler GÖRÜNMÜYORDU. Kök neden v1.9.3: alt bara

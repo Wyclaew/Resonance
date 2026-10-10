@@ -58,6 +58,19 @@ jobs:
           curl -L https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-win32-x64 \
             -o src-tauri/binaries/ffmpeg-${{ matrix.triple }}.exe
 
+      - name: Sürüm notları
+        id: notes
+        shell: bash
+        # docs/release-notes/<etiket>.md varsa sürüm metninin BAŞINA konur.
+        # Uygulamadaki güncelleme penceresi yalnız "---" öncesini gösterir.
+        run: |
+          f="docs/release-notes/${GITHUB_REF_NAME}.md"
+          {
+            echo "body<<EOF_NOTES"
+            if [ -f "$f" ]; then cat "$f"; echo; echo "---"; echo; fi
+            echo "EOF_NOTES"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Derle & sürüm oluştur
         uses: tauri-apps/tauri-action@v0
         env:
@@ -78,6 +91,7 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "Resonance ${{ github.ref_name }}"
           releaseBody: |
+            ${{ steps.notes.outputs.body }}
             Otomatik sürüm. macOS `.dmg` ve Windows `.exe` ekte.
 
             > macOS: ilk açılışta **sağ tık → Aç → Aç** gerekebilir (bir kez).

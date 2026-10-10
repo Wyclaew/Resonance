@@ -439,6 +439,7 @@ pub fn run() {
             commands::set_tray_title,
             commands::check_app_update,
             commands::install_app_update,
+            commands::app_update_info,
             durable::durable_load,
             durable::durable_save,
             browser_login::start_browser_login,
