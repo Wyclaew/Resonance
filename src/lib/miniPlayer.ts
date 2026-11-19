@@ -27,6 +27,14 @@ export interface MiniState {
   theme: string;
   accent: string;
   lang: string;
+  /** Çalan parçanın (decay'li) karması; oy verilemiyorsa 0. */
+  karma: number;
+  /** Parçaya son oyun zamanı (cooldown hesabı için, epoch ms). */
+  lastVoteAt?: number;
+  /** Son oyun yönü (-1 / 0 / 1). */
+  myVote: -1 | 0 | 1;
+  /** Mini'nin son oy komutuna cevap: `seq` komuttakiyle eşleşir. */
+  voteAck?: { seq: number; ok: boolean };
   /** Son çalma hatası (varsa mini'de kırmızı satır). */
   error?: string;
 }
@@ -39,7 +47,7 @@ export type MiniCommand =
   | { action: "seek"; ms: number }
   | { action: "volume"; value: number }
   | { action: "mute" }
-  | { action: "vote"; dir: 1 | -1 }
+  | { action: "vote"; dir: 1 | -1; seq?: number }
   | { action: "showMain" }
   | { action: "geometry"; x: number; y: number; compact: boolean };
 

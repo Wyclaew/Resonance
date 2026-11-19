@@ -151,7 +151,7 @@ create table if not exists public.artist_prefs (
 
 -- ⭐ SEÇMELİ AYAR SENKRONU (v1.8.0). Tablonun TAMAMI değil, istemcideki
 -- beyaz listedeki anahtarlar taşınır (SYNCED_SETTING_KEYS, sync/engine.ts):
--- tema/dil/öneri ayarları gelir; ses seviyesi, avatar, çerez tarayıcısı,
+-- tema/dil/öneri ayarları ve avatar gelir; ses seviyesi, çerez tarayıcısı,
 -- Spotify anahtarları ve cihazın kendi kuyruğu BİLEREK dışarıda kalır.
 create table if not exists public.settings (
   user_id    uuid not null default auth.uid(),
@@ -267,6 +267,8 @@ alter table public.playlists add column if not exists folder text;
 -- v1.9.7: dinlemenin bağlamı ('filter' = Keşfet filtresiyle dinlendi).
 -- Filtreli dinlemeler genel zevk profiline tam ağırlıkla girmez.
 alter table public.play_history add column if not exists context text;
+alter table public.play_history add column if not exists playlist_id text;
+alter table public.playlists add column if not exists style_json text;
 
 -- ── Uzaktan kumanda (v1.9.6) ──────────────────────────────────────────────
 -- Telefon → bilgisayar komutları ("çal", "sonraki", "ses 0.4"). Ses hedef

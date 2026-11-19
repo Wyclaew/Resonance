@@ -3,6 +3,7 @@ import { getDb, isTauri } from "../db";
 import { getSupabase, getUserId } from "./client";
 import { isSyncConfigured } from "./config";
 import { loadSettings, setSetting } from "../settings";
+import { bumpTasteEpoch } from "../tasteParams";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Resonance senkron motoru — local-first, delta sync, last-write-wins.
@@ -49,8 +50,8 @@ type TableSpec = {
 
 // ⭐ SENKRONLANAN AYARLAR (v1.8.0) — beyaz liste, kara liste DEĞİL.
 // Yeni bir ayar eklendiğinde varsayılan davranış "senkronlanmaz" olmalı:
-// cihaza özel bir ayarı yanlışlıkla senkronlamak (ör. ses seviyesi, avatar,
-// cihaz kimliği) sessiz ve can sıkıcı hatalar üretir.
+// cihaza özel bir ayarı yanlışlıkla senkronlamak (ör. ses seviyesi, cihaz
+// kimliği) sessiz ve can sıkıcı hatalar üretir.
 export const SYNCED_SETTING_KEYS = new Set([
   "appearance.theme",
   "appearance.language",
@@ -73,10 +74,13 @@ export const SYNCED_SETTING_KEYS = new Set([
   // görünsün diye senkronlanır.
   "discover.week",
   "discover.filterMix",
+  // Profil fotoğrafı hesaba aittir: 256×256 JPEG data URL (~30-55 KB, en kötü
+  // ~80 KB). Bulutta `value` text olduğu için boyut sınırına takılmaz.
+  "profile.avatarDataUrl",
 ]);
 // ⛔ BİLEREK DIŞARIDA: playback.resumeState (cihazın kendi kuyruğu —
 // device_queue tablosu taşır), playback.savedVolume / rememberVolume,
-// profile.avatarDataUrl, yt.cookiesBrowser (tarayıcı cihaza göre değişir),
+// yt.cookiesBrowser (tarayıcı cihaza göre değişir),
 // spotify.clientId/Secret (gizli anahtar buluta düz metin gitmesin),
 // app.onboardingDone (yeni cihazda rehber görünsün), mini.geometry (mini
 // oynatıcının konumu — ekran düzeni cihaza göre değişir).
@@ -103,7 +107,7 @@ const TABLES: TableSpec[] = [
     cloudConflict: "user_id,id",
     cols: [
       "id", "name", "description", "source", "source_url",
-      "created_at", "folder", "updated_at", "deleted",
+      "created_at", "folder", "style_json", "updated_at", "deleted",
     ],
   },
   {
@@ -130,7 +134,7 @@ const TABLES: TableSpec[] = [
     cloudConflict: "user_id,uid",
     cols: [
       "uid", "track_id", "played_at", "ms_played", "hour", "dow",
-      "device_id", "context", "updated_at",
+      "device_id", "context", "playlist_id", "updated_at",
     ],
   },
   {
@@ -804,17 +808,24 @@ let changeTimer: ReturnType<typeof setTimeout> | null = null;
  * Senkron kapalı/oturum yoksa hiçbir şey yapmaz (her yazma yolundan
  * güvenle çağrılabilir).
  */
-export function notifyLocalChange(): void {
+export function notifyLocalChange(delayMs = LOCAL_PUSH_DELAY_MS): void {
+  // Yerel veri değişti → zevk sinyali önbelleği eskidi (senkron kapalı da olsa).
+  bumpTasteEpoch();
   if (!isSyncConfigured()) return;
+  // Bekleyen daha erken bir gönderim varsa onu ERTELEME (hızlı istek kaybolmasın).
+  if (changeTimer && changeAt <= Date.now() + delayMs) return;
   if (changeTimer) clearTimeout(changeTimer);
+  changeAt = Date.now() + delayMs;
   // 3sn → 8sn ve TAM tur yerine yalnız PUSH: bir şarkı dinlemek bile
   // play_history yazdığı için eski hâli dakikada birkaç kez tam tur
   // çalıştırıyordu (her turda tablo başına bir pull isteği).
   changeTimer = setTimeout(() => {
     changeTimer = null;
     void syncNow("push");
-  }, 8000);
+  }, delayMs);
 }
+const LOCAL_PUSH_DELAY_MS = 8000;
+let changeAt = 0;
 
 // Uzaktan veri geldiğinde UI'ın kendini tazelemesi için (playlist listesi vb.).
 const remoteListeners = new Set<() => void>();
@@ -823,6 +834,7 @@ export function onRemoteApplied(fn: () => void): () => void {
   return () => remoteListeners.delete(fn);
 }
 function notifyRemoteApplied() {
+  bumpTasteEpoch(); // başka cihazın oyu/dinlemesi geldi
   for (const fn of remoteListeners) fn();
 }
 

@@ -1,9 +1,16 @@
-import { useState, useEffect, useRef } from "react";
-import { X, Loader2, Music4 } from "lucide-react";
+import { memo, useState, useEffect, useRef } from "react";
+import { X, Loader2, Music4, Minus, Plus } from "lucide-react";
 import { usePlayerStore } from "../store/usePlayerStore";
 import { useT } from "../lib/i18n";
 import { useAppStore } from "../store/useAppStore";
-import { fetchLyrics, type LrcLine } from "../lib/lyrics";
+import {
+  fetchLyrics,
+  loadLyricsOffset,
+  OFFSET_STEP_MS,
+  saveLyricsOffset,
+  VERSION_GAP_MS,
+  type LrcLine,
+} from "../lib/lyrics";
 
 // Satır, söylenmeye başlamadan bu kadar önce "aktif" olur. Küçük bir öndelik
 // doğru hissettiriyor; büyük olursa satır erken atlar.
@@ -57,17 +64,71 @@ function useSmoothPosition(): number {
   return playing ? smooth : positionMs;
 }
 
+// ⭐ Tek söz satırı — MEMO'lu (v1.9.9). `useSmoothPosition` ~30 fps ile panel
+// bileşenini yeniden çiziyordu ve yüzlerce satır her karede yeniden
+// render ediliyordu. Satır yalnız kendi durumu (uzaklık sınıfı / aktiflik)
+// değişince çizilir; ilerleme (progress) YALNIZ aktif satıra verilir, diğerleri
+// sabit 0 alır → kare başına tek satır çizilir. Aktife geçen satır kendini
+// ortaya kaydırır (eskiden panelde activeRef + efekt vardı).
+const LyricRow = memo(function LyricRow({
+  text,
+  timeMs,
+  state,
+  active,
+  progress,
+  offsetMs,
+  onSeek,
+}: {
+  text: string;
+  timeMs: number;
+  state: string;
+  active: boolean;
+  progress: number;
+  offsetMs: number;
+  onSeek: (ms: number) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (active) ref.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [active]);
+  return (
+    <div
+      ref={ref}
+      onClick={() => onSeek(Math.max(0, timeMs + offsetMs))}
+      className={`origin-center cursor-pointer py-2.5 text-2xl font-semibold leading-snug transition-all duration-300 hover:text-text ${state}`}
+    >
+      {/* Aktif satırda ilerleme: sözün okunan kısmı vurgulanır. */}
+      {active && text ? (
+        <span className="relative inline-block">
+          <span className="text-faint">{text}</span>
+          <span
+            className="absolute left-0 top-0 overflow-hidden whitespace-nowrap text-accent transition-[width] duration-200 ease-linear"
+            style={{ width: `${Math.round(progress * 100)}%` }}
+          >
+            {text}
+          </span>
+        </span>
+      ) : (
+        text || "♪"
+      )}
+    </div>
+  );
+});
+
 export default function LyricsPanel() {
   const t = useT();
   const current = usePlayerStore((s) => s.current);
-  const positionMs = useSmoothPosition();
+  const rawPositionMs = useSmoothPosition();
   const seek = usePlayerStore((s) => s.seek);
   const toggleLyrics = useAppStore((s) => s.toggleLyrics);
 
   const [loading, setLoading] = useState(false);
   const [synced, setSynced] = useState<LrcLine[] | null>(null);
   const [plain, setPlain] = useState<string | null>(null);
-  const activeRef = useRef<HTMLDivElement>(null);
+  const [lyricsMs, setLyricsMs] = useState(0);
+  // + = sözler GEÇ gelsin. Parça başına hatırlanır (lib/lyrics.ts).
+  const [offsetMs, setOffsetMs] = useState(0);
+  const positionMs = rawPositionMs - offsetMs;
 
   useEffect(() => {
     if (!current) {
@@ -79,11 +140,14 @@ export default function LyricsPanel() {
     setLoading(true);
     setSynced(null);
     setPlain(null);
-    fetchLyrics(current.artist, current.title, current.durationMs)
+    setLyricsMs(0);
+    setOffsetMs(loadLyricsOffset(current.id));
+    fetchLyrics(current.id, current.artist, current.title, current.durationMs)
       .then((r) => {
         if (cancelled) return;
         setSynced(r.synced);
         setPlain(r.plain);
+        setLyricsMs(r.lyricsMs);
       })
       .catch(() => {})
       .finally(() => !cancelled && setLoading(false));
@@ -103,9 +167,15 @@ export default function LyricsPanel() {
     return Math.max(0, Math.min(1, (positionMs - start) / (end - start)));
   })();
 
-  useEffect(() => {
-    activeRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, [activeIdx]);
+  const shiftOffset = (delta: number) => {
+    if (!current) return;
+    setOffsetMs(saveLyricsOffset(current.id, offsetMs + delta));
+  };
+  // Söz kaydı başka bir sürüme ait olabilir (klip girişi, canlı kayıt).
+  const versionGap =
+    synced && lyricsMs > 0 && current && current.durationMs > 0
+      ? Math.abs(current.durationMs - lyricsMs) >= VERSION_GAP_MS
+      : false;
 
   return (
     <div className="absolute inset-0 z-20 flex flex-col bg-bg/95 backdrop-blur-sm animate-panel-in">
@@ -115,7 +185,40 @@ export default function LyricsPanel() {
             {current?.title ?? t("lyrics.title")}
           </h2>
           <p className="truncate text-sm text-muted">{current?.artist}</p>
+          {versionGap && (
+            <p className="mt-1 text-xs text-faint">{t("lyrics.versionGap")}</p>
+          )}
         </div>
+        {synced && (
+          <div
+            className="ml-auto mr-2 flex shrink-0 items-center gap-1 rounded-md bg-surface px-1 py-0.5 text-xs text-muted"
+            title={t("lyrics.offsetHint")}
+          >
+            <button
+              onClick={() => shiftOffset(-OFFSET_STEP_MS)}
+              title={t("lyrics.earlier")}
+              className="grid h-6 w-6 place-items-center rounded hover:bg-surface-2 hover:text-text"
+            >
+              <Minus size={13} />
+            </button>
+            <button
+              onClick={() => shiftOffset(-offsetMs)}
+              title={t("lyrics.resetOffset")}
+              className="min-w-[3.5rem] rounded px-1 font-mono tabular-nums hover:text-text"
+            >
+              {t("lyrics.offsetValue", {
+                v: `${offsetMs > 0 ? "+" : offsetMs < 0 ? "−" : "±"}${(Math.abs(offsetMs) / 1000).toFixed(1)}`,
+              })}
+            </button>
+            <button
+              onClick={() => shiftOffset(OFFSET_STEP_MS)}
+              title={t("lyrics.later")}
+              className="grid h-6 w-6 place-items-center rounded hover:bg-surface-2 hover:text-text"
+            >
+              <Plus size={13} />
+            </button>
+          </div>
+        )}
         <button
           onClick={toggleLyrics}
           title={t("common.close")}
@@ -149,27 +252,16 @@ export default function LyricsPanel() {
                   ? "text-faint"
                   : "text-faint/50";
               return (
-                <div
+                <LyricRow
                   key={i}
-                  ref={i === activeIdx ? activeRef : undefined}
-                  onClick={() => seek(l.timeMs)}
-                  className={`origin-center cursor-pointer py-2.5 text-2xl font-semibold leading-snug transition-all duration-300 hover:text-text ${state}`}
-                >
-                  {/* Aktif satırda ilerleme: sözün okunan kısmı vurgulanır. */}
-                  {i === activeIdx && l.text ? (
-                    <span className="relative inline-block">
-                      <span className="text-faint">{l.text}</span>
-                      <span
-                        className="absolute left-0 top-0 overflow-hidden whitespace-nowrap text-accent transition-[width] duration-200 ease-linear"
-                        style={{ width: `${Math.round(lineProgress * 100)}%` }}
-                      >
-                        {l.text}
-                      </span>
-                    </span>
-                  ) : (
-                    l.text || "♪"
-                  )}
-                </div>
+                  text={l.text}
+                  timeMs={l.timeMs}
+                  state={state}
+                  active={i === activeIdx}
+                  progress={i === activeIdx ? lineProgress : 0}
+                  offsetMs={offsetMs}
+                  onSeek={seek}
+                />
               );
             })}
           </div>

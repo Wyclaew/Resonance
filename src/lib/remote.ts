@@ -204,6 +204,9 @@ async function apply(row: CommandRow): Promise<void> {
   }
 }
 
+const APPLIED_TOAST_GAP_MS = 30_000;
+let lastAppliedToast = 0;
+
 async function consume(rows: CommandRow[], userId: string): Promise<void> {
   const sb = getSupabase();
   if (!sb || rows.length === 0) return;
@@ -223,7 +226,10 @@ async function consume(rows: CommandRow[], userId: string): Promise<void> {
     .in("id", rows.map((r) => r.id))
     .then(undefined, () => {});
   // Devretmenin kendi bildirimi var; yalnız kumanda komutları için genel bildirim.
-  if (fresh.some((r) => r.action !== "handoff")) {
+  // Art arda basılan tuşlar (ileri-ileri-ileri) her seferinde bildirim
+  // çıkarmasın: 30 sn'de en fazla bir kez.
+  if (fresh.some((r) => r.action !== "handoff") && Date.now() - lastAppliedToast > APPLIED_TOAST_GAP_MS) {
+    lastAppliedToast = Date.now();
     useToastStore.getState().show(t("remote.applied"), "info", undefined, 2500);
   }
 }

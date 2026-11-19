@@ -21,20 +21,11 @@ function DeviceIcon({ name }: { name: string }) {
  */
 export default function HandoffButton() {
   const t = useT();
-  const toast = useToastStore((s) => s.show);
   const ref = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [targets, setTargets] = useState<HandoffTarget[] | null>(null);
 
   if (!isSyncConfigured()) return null;
-
-  const ago = (ms: number) => {
-    const mins = Math.max(1, Math.round((Date.now() - ms) / 60000));
-    if (mins < 60) return t("device.minsAgo", { n: mins });
-    const hours = Math.round(mins / 60);
-    if (hours < 24) return t("device.hoursAgo", { n: hours });
-    return t("device.daysAgo", { n: Math.round(hours / 24) });
-  };
 
   return (
     <div ref={ref} className="relative">
@@ -51,6 +42,31 @@ export default function HandoffButton() {
         <MonitorSmartphone size={17} />
       </button>
       <Popover anchor={ref} open={open} onClose={() => setOpen(false)} placement="up" width={260}>
+        <HandoffOptions targets={targets} onDone={() => setOpen(false)} />
+      </Popover>
+    </div>
+  );
+}
+
+/** Cihaz listesi — tek başına düğme ve alt barın "⋯" menüsü ortak kullanır. */
+export function HandoffOptions({
+  targets,
+  onDone,
+}: {
+  targets: HandoffTarget[] | null;
+  onDone: () => void;
+}) {
+  const t = useT();
+  const toast = useToastStore((s) => s.show);
+  const ago = (ms: number) => {
+    const mins = Math.max(1, Math.round((Date.now() - ms) / 60000));
+    if (mins < 60) return t("device.minsAgo", { n: mins });
+    const hours = Math.round(mins / 60);
+    if (hours < 24) return t("device.hoursAgo", { n: hours });
+    return t("device.daysAgo", { n: Math.round(hours / 24) });
+  };
+  return (
+    <>
         <div className="px-2.5 pb-1 pt-1 text-sm font-medium">{t("remote.handoffTitle")}</div>
         <p className="px-2.5 pb-2 text-[11px] leading-relaxed text-faint">
           {t("remote.handoffHint")}
@@ -59,7 +75,7 @@ export default function HandoffButton() {
           <button
             key={d.deviceId}
             onClick={async () => {
-              setOpen(false);
+              onDone();
               const ok = await sendHandoff(d);
               toast(
                 ok ? t("remote.handoffSent", { device: d.name }) : t("remote.handoffFailed"),
@@ -82,7 +98,6 @@ export default function HandoffButton() {
         {targets !== null && targets.length === 0 && (
           <p className="px-2.5 py-2 text-sm text-muted">{t("remote.handoffNone")}</p>
         )}
-      </Popover>
-    </div>
+    </>
   );
 }

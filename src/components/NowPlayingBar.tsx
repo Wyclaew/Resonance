@@ -11,9 +11,6 @@ import {
   Volume1,
   Music2,
   Sparkles,
-  ScrollText,
-  ListMusic,
-  PictureInPicture2,
   Download,
   CircleCheck,
   Loader2,
@@ -30,11 +27,9 @@ import { useSettingsStore } from "../store/useSettingsStore";
 import { getTrackKarma } from "../lib/playlists";
 import { onRemoteApplied } from "../lib/sync/engine";
 import { voteCurrent, KARMA_EVENT, type KarmaEventDetail } from "../lib/vote";
-import { toggleMiniPlayer } from "../lib/miniPlayer";
 import AddToPlaylistButton from "./AddToPlaylistButton";
-import HandoffButton from "./HandoffButton";
 import KarmaControl from "./KarmaControl";
-import SleepTimerButton from "./SleepTimerButton";
+import PlayerMoreMenu from "./PlayerMoreMenu";
 
 function VolumeIcon({ volume, muted }: { volume: number; muted: boolean }) {
   if (muted || volume === 0) return <VolumeX size={17} />;
@@ -42,32 +37,55 @@ function VolumeIcon({ volume, muted }: { volume: number; muted: boolean }) {
   return <Volume2 size={17} />;
 }
 
+// Konum çubuğu + süre etiketleri: playback-tick'ten etkilenen TEK parça.
+function PositionBar({ disabled }: { disabled: boolean }) {
+  const positionMs = usePlayerStore((s) => s.positionMs);
+  const durationMs = usePlayerStore((s) => s.durationMs);
+  const seek = usePlayerStore((s) => s.seek);
+  const pct = durationMs > 0 ? (positionMs / durationMs) * 100 : 0;
+  return (
+    <div className="flex w-full items-center gap-2">
+      <span className="tnum w-10 text-right text-[11px] text-muted">
+        {formatMs(positionMs)}
+      </span>
+      <input
+        type="range"
+        min={0}
+        max={durationMs || 0}
+        value={positionMs}
+        onChange={(e) => seek(Number(e.target.value))}
+        disabled={disabled}
+        className="resonance-range flex-1"
+        style={{ ["--pct" as string]: `${pct}%` }}
+      />
+      <span className="tnum w-10 text-[11px] text-muted">
+        {formatMs(durationMs)}
+      </span>
+    </div>
+  );
+}
+
 export default function NowPlayingBar() {
   const t = useT();
   const lang = useSettingsStore((s) => s.language);
-  const {
-    status,
-    current,
-    positionMs,
-    durationMs,
-    volume,
-    muted,
-    shuffleMode,
-    repeat,
-    toggle,
-    next,
-    prev,
-    seek,
-    setVolume,
-    toggleMute,
-    cycleShuffle,
-    cycleRepeat,
-  } = usePlayerStore();
+  // ⭐ Seçicili abonelik (v1.9.9): eskiden `usePlayerStore()` TÜM store'a
+  // abone olup her playback-tick'te (4 Hz) bütün çubuğu yeniden çiziyordu.
+  // Konum/süre artık yalnız <PositionBar />'da; burada yalnız nadiren
+  // değişen alanlar var. Eylemler (fonksiyonlar) referans olarak sabit.
+  const status = usePlayerStore((s) => s.status);
+  const current = usePlayerStore((s) => s.current);
+  const volume = usePlayerStore((s) => s.volume);
+  const muted = usePlayerStore((s) => s.muted);
+  const shuffleMode = usePlayerStore((s) => s.shuffleMode);
+  const repeat = usePlayerStore((s) => s.repeat);
+  const toggle = usePlayerStore((s) => s.toggle);
+  const next = usePlayerStore((s) => s.next);
+  const prev = usePlayerStore((s) => s.prev);
+  const setVolume = usePlayerStore((s) => s.setVolume);
+  const toggleMute = usePlayerStore((s) => s.toggleMute);
+  const cycleShuffle = usePlayerStore((s) => s.cycleShuffle);
+  const cycleRepeat = usePlayerStore((s) => s.cycleRepeat);
 
-  const lyricsOpen = useAppStore((s) => s.lyricsOpen);
-  const toggleLyrics = useAppStore((s) => s.toggleLyrics);
-  const queueOpen = useAppStore((s) => s.queueOpen);
-  const toggleQueue = useAppStore((s) => s.toggleQueue);
   const radioPlaylistId = usePlayerStore((s) => s.radioPlaylistId);
   const inDiscovery = radioPlaylistId === DISCOVERY_ID;
   const showQueueButton = !inDiscovery && shuffleMode !== "off";
@@ -123,7 +141,6 @@ export default function NowPlayingBar() {
   }
 
   const isPlaying = status === "playing";
-  const pct = durationMs > 0 ? (positionMs / durationMs) * 100 : 0;
 
   return (
     <footer className="relative isolate flex h-20 shrink-0 items-center gap-4 border-t border-border bg-surface px-4">
@@ -271,27 +288,10 @@ export default function NowPlayingBar() {
           </button>
         </div>
 
-        <div className="flex w-full items-center gap-2">
-          <span className="tnum w-10 text-right text-[11px] text-muted">
-            {formatMs(positionMs)}
-          </span>
-          <input
-            type="range"
-            min={0}
-            max={durationMs || 0}
-            value={positionMs}
-            onChange={(e) => seek(Number(e.target.value))}
-            disabled={!current}
-            className="resonance-range flex-1"
-            style={{ ["--pct" as string]: `${pct}%` }}
-          />
-          <span className="tnum w-10 text-[11px] text-muted">
-            {formatMs(durationMs)}
-          </span>
-        </div>
+        <PositionBar disabled={!current} />
       </div>
 
-      {/* Sağ: indir, sıra, sözler, uyku, ses */}
+      {/* Sağ: indir, "⋯" menüsü, ses */}
       <div className="flex flex-1 items-center justify-end gap-3">
         {current && (
           <button
@@ -326,37 +326,10 @@ export default function NowPlayingBar() {
             )}
           </button>
         )}
-        {/* ⭐ SIRA DÜĞMESİ KOŞULLU (v1.8.0).
-            • Keşfet'te GİZLİ: sıra zaten Keşfet sayfasının kendisi; buradan
-              açılan panel ikinci bir (eski) keşfet arayüzü gibi davranıyordu.
-            • Sıralı çalmada GİZLİ: listeyi zaten görüyorsun.
-            • Yalnız karışık / akıllı karışıkta görünür — sıradakinin ne
-              olduğu orada gerçekten bilinmiyor. */}
-        {showQueueButton && (
-          <button
-            onClick={toggleQueue}
-            title={t("player.queue")}
-            className={queueOpen ? "text-accent" : "text-muted hover:text-text"}
-          >
-            <ListMusic size={16} />
-          </button>
-        )}
-        <button
-          onClick={() => void toggleMiniPlayer()}
-          title={t("player.miniPlayer")}
-          className="text-muted hover:text-text"
-        >
-          <PictureInPicture2 size={16} />
-        </button>
-        <button
-          onClick={toggleLyrics}
-          title={t("player.lyrics")}
-          className={lyricsOpen ? "text-accent" : "text-muted hover:text-text"}
-        >
-          <ScrollText size={16} />
-        </button>
-        <HandoffButton />
-        <SleepTimerButton />
+        {/* ⭐ "⋯" MENÜSÜ (v1.9.9): sıra, sözler, mini oynatıcı, uyku ve başka
+            cihazda çal tek menüde. Sıra yine KOŞULLU (v1.8.0): Keşfet'te ve
+            sıralı çalmada gizli, yalnız karışıkta anlamlı. */}
+        <PlayerMoreMenu showQueue={showQueueButton} />
         <button
           onClick={toggleMute}
           className="text-muted hover:text-text"

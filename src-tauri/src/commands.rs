@@ -197,6 +197,54 @@ pub async fn import_spotify(
 pub struct Lyrics {
     synced: Option<String>,
     plain: Option<String>,
+    /// Seçilen söz kaydının süresi (ms, bilinmiyorsa 0) — arayüz sürüm farkını
+    /// bununla gösterir.
+    lyrics_ms: u64,
+}
+
+/// lrclib sonuçlarından ÇALAN SÜRÜME en yakın olanı seçer.
+///
+/// ⚠️ Eskiden ilk senkron sonuç alınıyordu ve süre hiç kullanılmıyordu:
+/// "Official Video" ya da canlı kaydın sözü albüm sürümüne göre zamanlanmış
+/// olabiliyor → satırlar baştan sona aynı miktarda kayık gidiyordu.
+fn pick_lyrics(items: &[serde_json::Value], duration_ms: u64) -> Lyrics {
+    let dur_s = duration_ms as f64 / 1000.0;
+    let distance = |it: &serde_json::Value| -> f64 {
+        match it.get("duration").and_then(|d| d.as_f64()) {
+            Some(d) if dur_s > 0.0 => (d - dur_s).abs(),
+            // Süre bilinmiyorsa sıralamayı bozma.
+            _ => 1e6,
+        }
+    };
+    let text = |it: &serde_json::Value, key: &str| -> Option<String> {
+        it.get(key)
+            .and_then(|x| x.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .map(str::to_string)
+    };
+    let mut best: Option<(&serde_json::Value, f64)> = None;
+    for it in items {
+        if text(it, "syncedLyrics").is_none() {
+            continue;
+        }
+        let d = distance(it);
+        if best.map_or(true, |(_, bd)| d < bd) {
+            best = Some((it, d));
+        }
+    }
+    let plain = items.iter().find_map(|it| text(it, "plainLyrics"));
+    match best {
+        Some((it, _)) => Lyrics {
+            synced: text(it, "syncedLyrics"),
+            plain: text(it, "plainLyrics").or(plain),
+            lyrics_ms: it
+                .get("duration")
+                .and_then(|d| d.as_f64())
+                .map(|d| (d * 1000.0) as u64)
+                .unwrap_or(0),
+        },
+        None => Lyrics { synced: None, plain, lyrics_ms: 0 },
+    }
 }
 
 // YouTube başlık gürültüsünü temizle (Official Video, [..], feat. vb.) ki
@@ -240,47 +288,47 @@ fn clean_title(title: &str, artist: &str) -> String {
 pub async fn get_lyrics(
     artist: String,
     title: String,
-    _duration_ms: u64,
+    duration_ms: u64,
 ) -> Result<Lyrics, String> {
     tauri::async_runtime::spawn_blocking(move || -> anyhow::Result<Lyrics> {
         let track = clean_title(&title, &artist);
-        let client = reqwest::blocking::Client::builder()
-            .user_agent("Resonance (personal music player)")
-            .build()?;
+        // Tek paylaşılan istemci + 8 sn zaman aşımı (varsayılan 30 sn'de panel
+        // takılıyor, hızlı geçişte bloklu thread birikiyordu).
+        static LRC_CLIENT: std::sync::OnceLock<reqwest::blocking::Client> =
+            std::sync::OnceLock::new();
+        let client = match LRC_CLIENT.get() {
+            Some(c) => c,
+            None => {
+                let c = reqwest::blocking::Client::builder()
+                    .user_agent("Resonance (personal music player)")
+                    .timeout(std::time::Duration::from_secs(8))
+                    .build()?;
+                LRC_CLIENT.get_or_init(|| c)
+            }
+        };
         let resp = client
             .get("https://lrclib.net/api/search")
             .query(&[("track_name", track.as_str()), ("artist_name", artist.as_str())])
             .send()?;
-        let arr: serde_json::Value = resp.json().unwrap_or(serde_json::Value::Null);
-
-        let mut synced = None;
-        let mut plain = None;
-        if let Some(items) = arr.as_array() {
-            for it in items {
-                if synced.is_none() {
-                    if let Some(s) = it.get("syncedLyrics").and_then(|x| x.as_str()) {
-                        if !s.trim().is_empty() {
-                            synced = Some(s.to_string());
-                        }
-                    }
-                }
-                if plain.is_none() {
-                    if let Some(p) = it.get("plainLyrics").and_then(|x| x.as_str()) {
-                        if !p.trim().is_empty() {
-                            plain = Some(p.to_string());
-                        }
-                    }
-                }
-                if synced.is_some() {
-                    break;
-                }
-            }
+        // Sunucu hatası olumsuz sonuç olarak ÖNBELLEĞE yazılmasın (30 gün kalırdı).
+        if !resp.status().is_success() {
+            anyhow::bail!("lrclib HTTP {}", resp.status());
         }
-        Ok(Lyrics { synced, plain })
+        let arr: serde_json::Value = resp.json().unwrap_or(serde_json::Value::Null);
+        let items = arr.as_array().cloned().unwrap_or_default();
+        Ok(pick_lyrics(&items, duration_ms))
     })
     .await
     .map_err(|e| e.to_string())?
     .map_err(|e| e.to_string())
+}
+
+/// Çalınan önbellek dosyasının mtime'ını şimdiye çeker (bkz. prune_cache).
+/// Yerel (kullanıcının kendi) dosyalarına dokunma: yalnız önbellek içindekiler.
+fn touch_cached_file(path: &std::path::Path) {
+    if let Ok(f) = std::fs::OpenOptions::new().write(true).open(path) {
+        let _ = f.set_modified(std::time::SystemTime::now());
+    }
 }
 
 // Her play_track çağrısına artan bir nesil no'su verilir. İndirme bitene kadar
@@ -760,6 +808,10 @@ pub async fn play_track(
         return Ok(());
     }
 
+    // ⭐ LRU İÇİN "SON ÇALINAN" (v1.9.9): prune_cache mtime'a bakar; aylar önce
+    // inen ama her gün çalınan favori en eski görünüp ilk silinirdi. Çalarken
+    // mtime'ı şimdiye çek (tek sistem çağrısı). Hata önemsiz.
+    touch_cached_file(&path);
     audio.send(AudioCmd::Load {
         path,
         duration_ms: input.duration_ms,
@@ -919,7 +971,14 @@ pub fn prune_cache(app: AppHandle, keep: Vec<String>, max_bytes: u64) -> ClearRe
             total += len; // korunanlar da toplama dahil (gerçek disk kullanımı)
             let name = e.file_name().to_string_lossy().to_string();
             let sid = name.split('.').next().unwrap_or("").to_string();
-            if sid.is_empty() || keep.contains(&sid) {
+            // Süren indirmenin geçici dosyaları (.part, .stream.aac) ve çalma/
+            // hazırlık kuyruğundakiler (keep) silinmez: unlink Unix'te başarılı
+            // olup aktif indirmeyi koparırdı.
+            if sid.is_empty()
+                || keep.contains(&sid)
+                || name.contains(".part")
+                || name.contains(".stream.")
+            {
                 continue;
             }
             let t = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
@@ -1228,6 +1287,18 @@ pub fn audio_seek(audio: State<'_, AudioHandle>, ms: u64) {
 #[tauri::command]
 pub fn audio_set_volume(audio: State<'_, AudioHandle>, volume: f32) {
     audio.send(AudioCmd::SetVolume(volume));
+}
+
+/// Ekolayzer ayarını ses motoruna iter (cihaza özel; senkronlanmaz).
+/// Çalan parça dahil tüm kaynaklar bir sonraki tamponda yeni ayarı alır.
+#[tauri::command]
+pub fn audio_set_eq(
+    audio: State<'_, AudioHandle>,
+    enabled: bool,
+    preamp_db: f32,
+    gains_db: [f32; 5],
+) {
+    audio.eq.set(crate::eq::EqParams { enabled, preamp_db, gains_db });
 }
 
 // --- yt-dlp çalışma-anı güncellemesi (eski sidecar'ı geçersiz kılar) ---
@@ -1700,5 +1771,31 @@ pub fn log_from_js(level: String, message: String) {
     match level.as_str() {
         "error" => log::error!("[js] {msg}"),
         _ => log::warn!("[js] {msg}"),
+    }
+}
+
+#[cfg(test)]
+mod lyrics_tests {
+    use super::pick_lyrics;
+    use serde_json::json;
+
+    #[test]
+    fn picks_version_closest_to_playing_duration() {
+        let items = vec![
+            json!({"duration": 250.0, "syncedLyrics": "[00:20.00] live", "plainLyrics": "a"}),
+            json!({"duration": 214.0, "syncedLyrics": "[00:05.00] album", "plainLyrics": "b"}),
+            json!({"duration": 300.0, "plainLyrics": "only plain"}),
+        ];
+        let l = pick_lyrics(&items, 215_000);
+        assert_eq!(l.synced.as_deref(), Some("[00:05.00] album"));
+        assert_eq!(l.lyrics_ms, 214_000);
+    }
+
+    #[test]
+    fn falls_back_to_plain_when_no_synced() {
+        let items = vec![json!({"duration": 200.0, "plainLyrics": "words"})];
+        let l = pick_lyrics(&items, 200_000);
+        assert!(l.synced.is_none());
+        assert_eq!(l.plain.as_deref(), Some("words"));
     }
 }

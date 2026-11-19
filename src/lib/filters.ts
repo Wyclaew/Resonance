@@ -100,6 +100,9 @@ export const DISCOVERY_FILTERS: DiscoveryFilter[] = [
     queries: ["movie soundtrack hits", "film müzikleri", "epic soundtrack"] },
   { id: "ambient", term: "ambient", kind: "genre", labelKey: "filter.ambient",
     queries: ["ambient music", "atmospheric ambient"] },
+  // Mobilin isteği (2026-10): kullanıcının en çok istediği tür, listede yoktu.
+  { id: "phonk", term: "phonk", kind: "genre", labelKey: "filter.phonk",
+    queries: ["phonk hits", "drift phonk", "brazilian phonk"] },
 ];
 
 export function filterById(id: string): DiscoveryFilter | undefined {

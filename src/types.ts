@@ -60,6 +60,9 @@ export interface QueueItem extends Track {
   seedArtist?: string;
   /** "Modun değişti mi?" denemesi: bilerek farklı tarzdan seçilmiş parça. */
   isProbe?: boolean;
+  /** Kullanıcı "Sıradakine / Sıraya ekle" ile koydu — kuyruk yeniden
+   *  kurulurken (yeni liste, yeni keşif, karıştırma) KORUNUR. */
+  userQueued?: boolean;
 }
 
 export type RepeatMode = "off" | "all" | "one";

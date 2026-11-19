@@ -186,6 +186,17 @@ export async function ensureTrack(track: Track): Promise<void> {
 }
 
 // Parçayı listeye ekler. Zaten varsa false döner.
+/** Parçanın AKTİF üyesi olduğu listeler (ekleme menüsünde işaret için). */
+export async function playlistsContaining(trackId: string): Promise<Set<string>> {
+  if (!isTauri()) return new Set();
+  const db = await getDb();
+  const rows = await db.select<{ playlist_id: string }[]>(
+    `SELECT playlist_id FROM playlist_tracks WHERE track_id = $1 AND deleted = 0`,
+    [trackId]
+  );
+  return new Set(rows.map((r) => r.playlist_id));
+}
+
 export async function addTrackToPlaylist(
   playlistId: string,
   track: Track

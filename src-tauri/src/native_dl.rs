@@ -144,6 +144,135 @@ pub fn note_native_success() {
     NATIVE_FAILS.store(0, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// Arama için paylaşılan istemci: bağlantı (TCP+TLS ≈ 0.12 sn) sonraki aramalarda
+/// yeniden kullanılır. Kısa zaman aşımı — yavaşsa yt-dlp yoluna düşmek daha iyi.
+fn search_http() -> Result<&'static reqwest::blocking::Client> {
+    static C: std::sync::OnceLock<reqwest::blocking::Client> = std::sync::OnceLock::new();
+    if let Some(c) = C.get() {
+        return Ok(c);
+    }
+    let c = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(12))
+        .connect_timeout(std::time::Duration::from_secs(6))
+        .gzip(true)
+        .build()?;
+    Ok(C.get_or_init(|| c))
+}
+
+/// InnerTube WEB istemcisinin sabit yedek sürümü (dinamik okuma başarısızsa).
+const WEB_VERSION_FALLBACK: &str = "2.20250101.00.00";
+const WEB_VERSION_TTL_SECS: u64 = 24 * 3600;
+/// Başarısız okumadan sonra yeniden deneme aralığı (her aramada 3 sn bekletmesin).
+const WEB_VERSION_RETRY_SECS: u64 = 10 * 60;
+/// Aramayı bu süreden fazla bu iş için bekletme.
+const WEB_VERSION_TIMEOUT_SECS: u64 = 3;
+
+/// (sürüm, okunduğu an) — bellekte; dl_state.json'a da yazılır.
+static WEB_VERSION: std::sync::Mutex<Option<(String, u64)>> = std::sync::Mutex::new(None);
+static WEB_VERSION_LAST_TRY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// youtube.com ana sayfasından güncel WEB istemci sürümünü okur.
+fn fetch_web_client_version() -> Result<String> {
+    const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+        (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+    let html = search_http()?
+        .get("https://www.youtube.com/")
+        .header("User-Agent", UA)
+        .header("Accept-Language", "en-US,en;q=0.9")
+        .timeout(std::time::Duration::from_secs(WEB_VERSION_TIMEOUT_SECS))
+        .send()?
+        .text()?;
+    parse_web_client_version(&html).ok_or_else(|| anyhow!("clientVersion bulunamadı"))
+}
+
+fn parse_web_client_version(html: &str) -> Option<String> {
+    for key in ["\"INNERTUBE_CLIENT_VERSION\":\"", "\"clientVersion\":\""] {
+        if let Some(i) = html.find(key) {
+            let rest = &html[i + key.len()..];
+            let v: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || *c == '.')
+                .collect();
+            if v.starts_with("2.") && v.len() >= 8 {
+                return Some(v);
+            }
+        }
+    }
+    None
+}
+
+fn refresh_web_version() {
+    let now = now_secs();
+    WEB_VERSION_LAST_TRY.store(now, std::sync::atomic::Ordering::Relaxed);
+    match fetch_web_client_version() {
+        Ok(v) => {
+            log::info!("InnerTube WEB sürümü güncellendi: {v}");
+            if let Ok(mut g) = WEB_VERSION.lock() {
+                *g = Some((v, now));
+            }
+            mark_dirty();
+        }
+        Err(e) => log::warn!("InnerTube WEB sürümü okunamadı ({e}) — önceki/sabit sürüm"),
+    }
+}
+
+/// ⭐ Güncel InnerTube WEB sürümü (v1.9.9). Sabit "2.20250101…" 22 ay eskiydi;
+/// YouTube eskisini reddederse arama sessizce yt-dlp'ye (~2× yavaş) düşüyordu.
+/// 24 sa önbellekte; bayat bir değer varsa ONU kullanır ve arka planda tazeler
+/// (arama beklemez). Hiç değer yoksa en fazla 3 sn bekler, sonra sabite düşer.
+fn web_client_version() -> String {
+    let now = now_secs();
+    let cur = WEB_VERSION.lock().ok().and_then(|g| g.clone());
+    if let Some((v, at)) = &cur {
+        if now.saturating_sub(*at) < WEB_VERSION_TTL_SECS {
+            return v.clone();
+        }
+    }
+    let last = WEB_VERSION_LAST_TRY.load(std::sync::atomic::Ordering::Relaxed);
+    let may_try = now.saturating_sub(last) >= WEB_VERSION_RETRY_SECS;
+    match cur {
+        Some((v, _)) => {
+            if may_try {
+                WEB_VERSION_LAST_TRY.store(now, std::sync::atomic::Ordering::Relaxed);
+                std::thread::spawn(refresh_web_version);
+            }
+            v
+        }
+        None => {
+            if may_try {
+                refresh_web_version();
+            }
+            WEB_VERSION
+                .lock()
+                .ok()
+                .and_then(|g| g.as_ref().map(|(v, _)| v.clone()))
+                .unwrap_or_else(|| WEB_VERSION_FALLBACK.to_string())
+        }
+    }
+}
+
+/// ⭐ HIZLI ARAMA: InnerTube `search` (WEB istemcisi), yt-dlp süreci YOK.
+/// Çerezsiz (arama kuralı). Ham JSON döner; ayrıştırma `ytdlp::innertube_results`.
+pub fn search_innertube(query: &str) -> Result<serde_json::Value> {
+    const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+        (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+    let body = serde_json::json!({
+        "context": { "client": {
+            "clientName": "WEB", "clientVersion": web_client_version(), "hl": "en", "gl": "US",
+        }},
+        "query": query,
+    });
+    let resp = search_http()?
+        .post("https://www.youtube.com/youtubei/v1/search?prettyPrint=false")
+        .header("User-Agent", UA)
+        .json(&body)
+        .send()?;
+    if !resp.status().is_success() {
+        return Err(anyhow!("HTTP {}", resp.status()));
+    }
+    Ok(resp.json()?)
+}
+
 pub fn resolve_innertube(video_id: &str, prefer_low: bool) -> Result<AudioSource> {
     let c = http()?;
     let mut last = String::from("bilinmeyen hata");
@@ -267,6 +396,10 @@ struct DlState {
     native_skip_until: u64,
     #[serde(default)]
     last_good_strategy: Option<usize>,
+    #[serde(default)]
+    web_version: Option<String>,
+    #[serde(default)]
+    web_version_at: u64,
 }
 
 static STATE_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
@@ -327,6 +460,11 @@ fn load_state() {
     if let Some(i) = st.last_good_strategy {
         STORED_STRATEGY.store(i as i64, std::sync::atomic::Ordering::Relaxed);
     }
+    if let Some(v) = st.web_version {
+        if let Ok(mut g) = WEB_VERSION.lock() {
+            *g = Some((v, st.web_version_at));
+        }
+    }
     log::info!("indirme durumu yüklendi: {live} geçerli adres");
 }
 
@@ -350,10 +488,13 @@ fn save_state() {
         }
     }
     let strat = STORED_STRATEGY.load(std::sync::atomic::Ordering::Relaxed);
+    let wv = WEB_VERSION.lock().ok().and_then(|g| g.clone());
     let st = DlState {
         urls,
         native_skip_until: NATIVE_SKIP_UNTIL.load(std::sync::atomic::Ordering::Relaxed),
         last_good_strategy: if strat >= 0 { Some(strat as usize) } else { None },
+        web_version: wv.as_ref().map(|(v, _)| v.clone()),
+        web_version_at: wv.as_ref().map(|(_, t)| *t).unwrap_or(0),
     };
     if let Ok(json) = serde_json::to_vec(&st) {
         if let Some(dir) = p.parent() {
@@ -1234,5 +1375,31 @@ mod tests {
         let cached = dir.join(format!("{vid}.aac"));
         assert!(cached.exists(), "önbelleğe kopyalanmadı");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod web_version_tests {
+    use super::*;
+
+    #[test]
+    fn parses_client_version() {
+        let h = r#"x"INNERTUBE_CLIENT_VERSION":"2.20261117.01.00","y""#;
+        assert_eq!(parse_web_client_version(h).as_deref(), Some("2.20261117.01.00"));
+        assert_eq!(parse_web_client_version("nope"), None);
+    }
+
+    /// Gerçek istek: sürüm okunur ve o sürümle arama sonuç verir.
+    /// `cargo test --lib web_version_live -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn web_version_live() {
+        let t = std::time::Instant::now();
+        let v = fetch_web_client_version().expect("sürüm okunamadı");
+        println!("sürüm = {v} ({:?})", t.elapsed());
+        let r = search_innertube("daft punk get lucky").expect("arama");
+        let n = r.to_string().matches("videoRenderer").count();
+        println!("videoRenderer sayısı = {n}");
+        assert!(n > 0);
     }
 }

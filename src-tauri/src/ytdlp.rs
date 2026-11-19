@@ -440,6 +440,78 @@ fn is_permanent_error(stderr: &str) -> bool {
         || s.contains("who has blocked it")
 }
 
+/// InnerTube arama yolunun karşılayabildiği en büyük `limit` (tek sayfa ~20 video).
+const INNERTUBE_SEARCH_MAX: u32 = 20;
+
+/// "1:02:03" / "3:57" → ms. Canlı yayında `lengthText` yok → 0 (yt-dlp ile aynı).
+fn parse_length_ms(s: &str) -> u64 {
+    let secs = s
+        .split(':')
+        .try_fold(0u64, |acc, p| p.trim().parse::<u64>().ok().map(|n| acc * 60 + n));
+    secs.unwrap_or(0) * 1000
+}
+
+fn runs_text(v: &serde_json::Value) -> String {
+    if let Some(s) = v.get("simpleText").and_then(|x| x.as_str()) {
+        return s.to_string();
+    }
+    v.get("runs")
+        .and_then(|r| r.as_array())
+        .map(|a| a.iter().filter_map(|r| r.get("text")?.as_str()).collect())
+        .unwrap_or_default()
+}
+
+/// InnerTube `search` yanıtından `videoRenderer`'ları `SearchResult`'a çevirir.
+/// Alan anlamları yt-dlp yoluyla AYNI: `artist` = kanal adı, süre ms, >1 saat elenir,
+/// süresi bilinmeyen (0) tutulur. Playlist/mix/kanal satırları (lockupViewModel vb.)
+/// atlanır — yt-dlp `ytsearch` de yalnız video döndürüyordu.
+pub(crate) fn innertube_results(resp: &serde_json::Value, limit: usize) -> Vec<SearchResult> {
+    let mut out = Vec::new();
+    let sections = resp
+        .pointer("/contents/twoColumnSearchResultsRenderer/primaryContents/sectionListRenderer/contents")
+        .and_then(|c| c.as_array());
+    for sec in sections.into_iter().flatten() {
+        let items = sec.pointer("/itemSectionRenderer/contents").and_then(|c| c.as_array());
+        for it in items.into_iter().flatten() {
+            let Some(r) = it.get("videoRenderer") else { continue };
+            let id = r.get("videoId").and_then(|x| x.as_str()).unwrap_or_default();
+            if id.is_empty() {
+                continue;
+            }
+            let title = r.get("title").map(runs_text).filter(|t| !t.is_empty());
+            let artist = r
+                .get("ownerText")
+                .or_else(|| r.get("longBylineText"))
+                .map(runs_text)
+                .unwrap_or_default();
+            let duration_ms = r.get("lengthText").map(runs_text).map_or(0, |s| parse_length_ms(&s));
+            if duration_ms > 3_600_000 {
+                continue;
+            }
+            let thumb = r
+                .pointer("/thumbnail/thumbnails")
+                .and_then(|a| a.as_array())
+                .and_then(|a| a.last())
+                .and_then(|t| t.get("url")?.as_str())
+                .map(String::from)
+                .unwrap_or_else(|| format!("https://i.ytimg.com/vi/{id}/hqdefault.jpg"));
+            out.push(SearchResult {
+                id: format!("youtube:{id}"),
+                source: "youtube".into(),
+                source_id: id.to_string(),
+                title: title.unwrap_or_else(|| "Bilinmeyen".into()),
+                artist: clean_artist(&artist),
+                duration_ms,
+                thumbnail: Some(thumb),
+            });
+            if out.len() >= limit {
+                return out;
+            }
+        }
+    }
+    out
+}
+
 /// YouTube'da arama yapar ve düz (flat) sonuç listesi döndürür.
 pub fn search(
     query: &str,
@@ -450,6 +522,22 @@ pub fn search(
     // (yüzlerce çerez) okumak aramayı ciddi yavaşlatır; (2) giriş yapılmış çerez
     // YouTube'u "bot" moduna sokup yalnızca storyboard döndürebilir. Düz arama
     // (flat-playlist) zaten çerez gerektirmez.
+    // ⭐ HIZ (v1.9.9): önce InnerTube'a doğrudan tek HTTP isteği — yt-dlp süreci
+    // (açılış + çıkarıcı) yok. ÖLÇÜLDÜ (Mac, 20 sonuç): yt-dlp klasör sürümü
+    // 2.0-2.8 sn, InnerTube 0.85-1.1 sn. Tek sayfa ~20 video verir → limit>20
+    // yt-dlp'ye kalır. Hata ya da 0 sonuç → eski yola düş (davranış aynı kalır).
+    if limit <= INNERTUBE_SEARCH_MAX {
+        match native_dl::search_innertube(query) {
+            Ok(v) => {
+                let r = innertube_results(&v, limit as usize);
+                if !r.is_empty() {
+                    return Ok(r);
+                }
+                log::warn!("innertube arama 0 sonuç verdi, yt-dlp'ye düşülüyor");
+            }
+            Err(e) => log::warn!("innertube arama başarısız ({e}), yt-dlp'ye düşülüyor"),
+        }
+    }
     let spec = format!("ytsearch{}:{}", limit.max(1).min(50), query);
     let out = run_yt_dlp(
         &[
@@ -2127,6 +2215,62 @@ fn best_thumb(v: &serde_json::Value, id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ARAMA HIZI testi (ağ ister):
+    ///   cargo test --lib search_speed -- --ignored --nocapture
+    /// InnerTube yolu ile yt-dlp yolunu aynı sorgularda karşılaştırır.
+    #[test]
+    #[ignore]
+    fn search_speed() {
+        for q in ["tarkan simarik", "daft punk get lucky", "radiohead creep", "tarkan simarik"] {
+            let t = std::time::Instant::now();
+            let v = native_dl::search_innertube(q).expect("innertube");
+            let r = innertube_results(&v, 20);
+            let it = t.elapsed();
+            let t = std::time::Instant::now();
+            let y = run_yt_dlp(
+                &["--flat-playlist", "--dump-json", "--no-warnings", &format!("ytsearch20:{q}")],
+                None,
+            )
+            .expect("yt-dlp");
+            let yn = String::from_utf8_lossy(&y.stdout).lines().count();
+            println!(
+                "{q:24} innertube {:>5} ms ({} sonuç, süre0={}) | yt-dlp {:>5} ms ({yn} sonuç)",
+                it.as_millis(), r.len(), r.iter().filter(|x| x.duration_ms == 0).count(),
+                t.elapsed().as_millis()
+            );
+            assert!(!r.is_empty());
+        }
+    }
+
+    #[test]
+    fn parses_innertube_length() {
+        assert_eq!(parse_length_ms("3:57"), 237_000);
+        assert_eq!(parse_length_ms("1:02:03"), 3_723_000);
+        assert_eq!(parse_length_ms(""), 0);
+    }
+
+    #[test]
+    fn parses_innertube_search_response() {
+        let v = serde_json::json!({"contents":{"twoColumnSearchResultsRenderer":{"primaryContents":
+          {"sectionListRenderer":{"contents":[{"itemSectionRenderer":{"contents":[
+            {"videoRenderer":{"videoId":"abc","title":{"runs":[{"text":"A - "},{"text":"B"}]},
+              "ownerText":{"runs":[{"text":"Artist - Topic"}]},"lengthText":{"simpleText":"3:57"},
+              "thumbnail":{"thumbnails":[{"url":"u1"},{"url":"u2"}]}}},
+            {"lockupViewModel":{}},
+            {"videoRenderer":{"videoId":"long","title":{"runs":[{"text":"mix"}]},
+              "lengthText":{"simpleText":"2:00:00"}}},
+            {"videoRenderer":{"videoId":"live","title":{"runs":[{"text":"live"}]}}}
+          ]}}]}}}}});
+        let r = innertube_results(&v, 10);
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].id, "youtube:abc");
+        assert_eq!(r[0].title, "A - B");
+        assert_eq!(r[0].artist, "Artist");
+        assert_eq!(r[0].duration_ms, 237_000);
+        assert_eq!(r[0].thumbnail.as_deref(), Some("u2"));
+        assert_eq!(r[1].duration_ms, 0);
+    }
 
     /// ALTERNATİF KAYNAK testi (ağ ister):
     ///   cargo test --lib alternative -- --ignored --nocapture

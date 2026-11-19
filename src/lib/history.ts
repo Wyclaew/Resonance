@@ -64,11 +64,14 @@ export async function getRecentTracks(limit = 12): Promise<Track[]> {
 /**
  * @param context 'filter' → Keşfet'te tür/ruh hali filtresiyle dinlendi
  *   (yönlendirilmiş dinleme; genel zevk profiline tam ağırlıkla girmez).
+ * @param playlistId dinleme bir listede olduysa o liste (liste profili buradan
+ *   türetilir, bkz. playlistProfile.ts).
  */
 export async function recordPlay(
   track: Track,
   msPlayed: number,
-  context: string | null = null
+  context: string | null = null,
+  playlistId: string | null = null
 ): Promise<void> {
   if (!isTauri() || msPlayed < 1000) return;
   try {
@@ -77,8 +80,9 @@ export async function recordPlay(
     const d = new Date();
     await db.execute(
       `INSERT INTO play_history
-         (track_id, played_at, ms_played, hour, dow, uid, device_id, context, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $2)`,
+         (track_id, played_at, ms_played, hour, dow, uid, device_id, context,
+          playlist_id, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $2)`,
       [
         track.id,
         d.getTime(),
@@ -88,6 +92,7 @@ export async function recordPlay(
         newUid(),
         getDeviceId(),
         context,
+        playlistId,
       ]
     );
     notifyLocalChange();

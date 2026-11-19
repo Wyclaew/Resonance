@@ -35,3 +35,6 @@ src-tauri/.claude/
 
 # Oturum dosyaları (depoda görünmesin)
 .claude/
+
+# graphify bilgi grafiği (yerel analiz çıktısı)
+graphify-out/

@@ -34,6 +34,15 @@ import { usePlaylistStore } from "../store/usePlaylistStore";
 import { isTauri } from "../lib/db";
 import { buildBackupJson } from "../lib/backupExport";
 import { formatBytes } from "../lib/format";
+import {
+  EQ_BANDS,
+  EQ_MAX_DB,
+  EQ_PRESETS,
+  parseEq,
+  pushEq,
+  type EqPresetId,
+  type EqSettings,
+} from "../lib/eq";
 import { importBackup, type ImportResult } from "../lib/backup";
 import { loadBlockedArtists, unblockArtist } from "../lib/blocked";
 import { useToastStore } from "../store/useToastStore";
@@ -444,6 +453,115 @@ function IntegrationsSettings() {
   );
 }
 
+function EqualizerSettings() {
+  const t = useT();
+  const raw = useSettingsStore((s) => s.eqJson);
+  const update = useSettingsStore((s) => s.update);
+  const eq = parseEq(raw);
+  const presetLabel: Record<EqPresetId, TrKey> = {
+    flat: "settings.eqFlat",
+    bass: "settings.eqBass",
+    treble: "settings.eqTreble",
+    vocal: "settings.eqVocal",
+    loudness: "settings.eqLoudness",
+    custom: "settings.eqCustom",
+  };
+  // Değişiklik hem saklanır hem ses motoruna anında itilir.
+  function commit(next: EqSettings) {
+    void update("eqJson", JSON.stringify(next));
+    pushEq(next);
+  }
+  const hzLabel = (f: number) => (f >= 1000 ? `${f / 1000} kHz` : `${f} Hz`);
+  const dim = eq.enabled ? "" : "opacity-50";
+  return (
+    <>
+      <SettingRow label={t("settings.eq")} description={t("settings.eqDesc")}>
+        <Toggle
+          checked={eq.enabled}
+          onChange={(v) => commit({ ...eq, enabled: v })}
+        />
+      </SettingRow>
+      <SettingRow label={t("settings.eqPreset")}>
+        <div className="flex items-center gap-2">
+          <select
+            value={eq.preset}
+            onChange={(e) => {
+              const id = e.target.value as EqPresetId;
+              if (id === "custom") commit({ ...eq, preset: "custom" });
+              else commit({ ...eq, preset: id, gains: [...EQ_PRESETS[id]] });
+            }}
+            className="rounded-md border border-border bg-surface px-2 py-1.5 text-sm"
+          >
+            {(Object.keys(presetLabel) as EqPresetId[]).map((id) => (
+              <option key={id} value={id}>
+                {t(presetLabel[id])}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={() =>
+              commit({ ...eq, preset: "flat", preampDb: 0, gains: [...EQ_PRESETS.flat] })
+            }
+            className="rounded-md border border-border px-2 py-1.5 text-sm hover:bg-surface"
+          >
+            {t("settings.eqReset")}
+          </button>
+        </div>
+      </SettingRow>
+      <div className={`border-b border-border py-4 ${dim}`}>
+        <div className="flex items-end justify-between gap-2">
+          {EQ_BANDS.map((f, i) => (
+            <label key={f} className="flex flex-1 flex-col items-center gap-2 text-xs">
+              <span className="tabular-nums text-muted">
+                {eq.gains[i] > 0 ? "+" : ""}
+                {eq.gains[i].toFixed(0)} dB
+              </span>
+              <input
+                type="range"
+                min={-EQ_MAX_DB}
+                max={EQ_MAX_DB}
+                step={1}
+                value={eq.gains[i]}
+                disabled={!eq.enabled}
+                aria-label={hzLabel(f)}
+                onChange={(e) => {
+                  const gains = [...eq.gains];
+                  gains[i] = Number(e.target.value);
+                  commit({ ...eq, preset: "custom", gains });
+                }}
+                // Dikey kaydırıcı (yazma yönü ile) — tarayıcılar arası güvenli.
+                style={{ writingMode: "vertical-lr", direction: "rtl", height: 120 }}
+                className="accent-[var(--color-accent)]"
+              />
+              <span className="text-muted">{hzLabel(f)}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+      <SettingRow label={t("settings.eqPreamp")}>
+        <div className={`flex items-center gap-3 ${dim}`}>
+          <input
+            type="range"
+            min={-EQ_MAX_DB}
+            max={EQ_MAX_DB}
+            step={1}
+            value={eq.preampDb}
+            disabled={!eq.enabled}
+            onChange={(e) =>
+              commit({ ...eq, preset: eq.preset, preampDb: Number(e.target.value) })
+            }
+            className="w-40 accent-[var(--color-accent)]"
+          />
+          <span className="w-14 text-right text-xs tabular-nums text-muted">
+            {eq.preampDb > 0 ? "+" : ""}
+            {eq.preampDb.toFixed(0)} dB
+          </span>
+        </div>
+      </SettingRow>
+    </>
+  );
+}
+
 function PlaybackSettings() {
   const t = useT();
   const s = useSettingsStore();
@@ -545,6 +663,7 @@ function PlaybackSettings() {
           onChange={(v) => s.update("normalizeVolume", v)}
         />
       </SettingRow>
+      <EqualizerSettings />
       <SettingRow
         label={t("settings.autostart")}
         description={t("settings.autostartDesc")}

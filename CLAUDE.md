@@ -4,7 +4,7 @@ Hafif, **karma tabanlı kişisel müzik oynatıcı**. Mac & Windows masaüstü (
 `docs/MOBILE.md`). Ses YouTube'dan gelir; Spotify/YouTube Music listeleri içe aktarılır.
 Tamamen yerel/gizli (sunucu yok). Kullanıcı: Eren. **İletişim dili: Türkçe.**
 
-**Durum: v1.9.8** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
+**Durum: v1.9.9** — masaüstü olgun ve günlük kullanımda. Mac'te sorunsuz; Windows'ta bilinen
 tüm indirme/çalma sorunları çözüldü. Açık kritik bug yok.
 v1.2.0'da: öğrenme sinyalleri genişledi (playlist üyeliği), TR/EN dil, açık tema, ilk açılış rehberi.
 v1.2.1'de: **OS medya oturumu** (souvlaki) — macOS F7/F9 ve Windows'ta oyun açıkken
@@ -18,6 +18,96 @@ Supabase + RLS + Realtime. Ayrıntı: aşağıdaki "Senkron" bölümü ve `docs/
 Ayrıca **KEŞFET YENİDEN TASARLANDI**: kendi sayfası (panel değil), tür/ruh hali
 filtreleri, oturum modu (mod-uyarlamalı öneri) ve yanlış-tuş algılama —
 aşağıdaki "Keşfet" bölümü.
+v1.9.9 (LİSTE PROFİLİ + ZEVK PARAMETRELERİ + SÖZ SENKRONU + ALT BAR MENÜSÜ + ARAMA HIZI):
+• **⭐⭐ LİSTE PROFİLİ** (mobilden taşındı, `lib/playlistProfile.ts` +
+  `lib/playlistRadio.ts` + `PlaylistStyleDialog`): listeye tür/ruh hali filtresi
+  + serbest tarz ("drift phonk") atanır; önerili çalarken tohumlar listeden ve
+  tarz havuzundan gelir, TARZLI LİSTE GENEL ÖNERİYE HİÇ DÜŞMEZ.
+  İKİ AYRI SAKLAMA: tarz = `playlists.style_json` (SENKRONLANIR, unutulmaz);
+  öğrenilen = TABLO YOK, `play_history.playlist_id` + `votes.playlist_id`'den
+  türetilir (sayaç saklansaydı iki cihaz LWW ile ezerdi; yarı ömür 180 gün).
+  Liste kendi sanatçı puanını (−6..+6), sık geçilen parçaları, dil/yazı
+  dağılımını ve ortanca süresini öğrenir; aday puanı = öğrenilen × dil uyumu ×
+  süre uyumu. `isolate` (varsayılan AÇIK, mobille aynı): liste dinlemesi
+  `context='filter'` yazılır → genel zevke %20, oturum modu kaymaz. Tarzlı +
+  yalıtılmış listenin ÜYELİĞİ de genel yakınlığa %20 girer (tarzsız listeler
+  senin zevkindir, tam sayılır). Migration v11 (`style_json`, `playlist_id`).
+  "FİLTRE UNUTULMASIN": tekrar engeliyle havuz biterse engel GEVŞETİLİR (tarz
+  dışına çıkılmaz) — aynısı filtreli Keşfet'e de eklendi.
+• **ZEVK PARAMETRELERİ** (`lib/tasteParams.ts`, tohum ağırlığına iki çarpan):
+  TAMAMLAMA ORANI (Beta yumuşatma, 0.6..1.4) ve BIKKINLIK (son 3 günde >6
+  dinleme → 0.4'e kadar). İNDİRME artık yakınlık sinyali (+0.5, yalnız bu cihaz).
+  Keşfet filtrelerine **phonk** eklendi (mobilin isteği).
+• **⭐ SÖZLER KAYIYORDU**: `get_lyrics` süreyi ALIYOR ama KULLANMIYORDU
+  (`_duration_ms`) → lrclib'in ilk senkron sonucu alınıyordu, çoğu zaman başka
+  sürüm (klip girişi, canlı). Artık süresi EN YAKIN kayıt seçilir (`pick_lyrics`,
+  testli), ≥4 sn fark varsa uyarı çıkar, ±0.5 sn elle kaydırma parça başına
+  hatırlanır (localStorage, cihaza özel).
+• **ALT BAR SAĞI SADELEŞTİ** (`PlayerMoreMenu`): indir + "⋯" + ses. Sıra,
+  sözler, mini oynatıcı, uyku ve başka cihazda çal menüde; uyku ve cihaz
+  ALT SAYFA (iç içe iki açılır menü dışına-tıklama kuralıyla birbirini
+  kapatıyordu). İçerik `SleepTimerOptions`/`HandoffOptions` olarak ORTAK.
+• **ZATEN VAR UYARISI**: listeye ekleme menüsünde parçanın olduğu listeler ✓,
+  tekrar eklemede "zaten var" bildirimi (eskiden yine "eklendi" deniyordu);
+  toplu eklemede atlanan sayısı söylenir.
+• **MİNİ OYNATICI**: oy anında görünür (dolu/renkli başparmak, "+1" uçuşu,
+  karma rozeti, saatlik bekleme), ana pencere onaylar (`voteAck`), reddedilirse
+  geri alınır; kayan uzun başlık, akıcı ilerleme, tekerlekle ses, çift tık ana
+  pencere. ⚠️ GÖRSEL OLARAK DENENMEDİ (test sırasında tıklama ulaşmadı).
+• **ARAMA ~2× HIZLI**: InnerTube araması doğrudan Rust'tan (süreç başlatılmaz),
+  ÖLÇÜLDÜ 2.0–2.8 sn → 0.7–1.1 sn; hata/boş sonuçta yt-dlp'ye düşer; tekrar
+  eden sorgu önbellekten anında. ⚠️ `clientVersion` sabit — YouTube eskisini
+  reddederse yedek yol devreye girer. Windows'ta denenmedi.
+• Liste adı başlığa tıklayınca yerinde düzenlenir (kalem kalktı); profil
+  fotoğrafı artık senkronlanır (`profile.avatarDataUrl` SYNCED).
+⚠️ ŞEMA: `docs/supabase-schema.sql` yeniden çalıştırılmalı (`playlists.style_json`,
+`play_history.playlist_id`). ⚠️ Spotify istemcisi tersine mühendislik ile
+açılmadı: kullanım şartları decompile'ı yasaklıyor ve depo public.
+• **ARAŞTIRMA TURU** (Sonnet ajanı, 21 madde — rapor kod okuyarak doğrulandı):
+  - **SIRADAKİNE / SIRAYA EKLE** (`playNext`/`addToQueue`, satıra sağ tık →
+    `TrackContextMenu`, ⌘K'de Shift+Enter): `QueueItem.userQueued`. ⭐ Kuyruğu
+    BAŞTAN kuran HER yol (playNow, karışık, akıllı karışık, yeni keşif, başka
+    tarz, böyle devam et) bekleyen elle eklenenleri yeni kuyruğa taşır
+    (`withPending`); karıştırma onları karıştırmaz, çalanın ardında tutar.
+  - **KÜTÜPHANE ARAMASI** (`lib/librarySearch.ts`, ⌘K + Ara sayfası):
+    Türkçe katlama JS'te (SQLite LIKE İ/ı katlayamaz), yalnız canlı listelerdeki
+    parçalar.
+  - **SANATÇI ANAHTARI** (`artistKey` tasteParams.ts, `rep()` recommender.ts):
+    zevk haritaları sanatçının en sık yazımıyla anahtarlanır. ÖLÇÜLDÜ (gerçek
+    veri): 1618 ad → 1605 anahtar, birleşen 12 grubun HEPSİ doğru ("X - Topic",
+    büyük/küçük harf, sonda boşluk); yanlış birleşme yok. Türkçe ı→i katlanır.
+    Senkronlu satırlar YENİDEN YAZILMAZ, eşleme okurken yapılır.
+  - **BEĞENMEDİĞİN ŞARKI GERİ GELMEZ** (`dislikedCores`): net oyu negatif
+    parçanın tüm sürümleri genel öneride ve liste radyosunda kalıcı dışlanır.
+  - **ZEVK SİNYALİ ÖNBELLEĞİ**: `buildSignals` 60 sn önbellekli; her yerel yazma
+    (`notifyLocalChange`) ve uzaktan gelen veri `bumpTasteEpoch` ile boşaltır.
+    Dinleme taraması 8 yarı ömürle sınırlı + migration v12 `idx_hist_played`.
+  - **SÖZ ÖNBELLEĞİ** (migration v12 `lyrics_cache`, cihaza özel, senkron DIŞI):
+    bulunan kalıcı, bulunamayan 30 gün; lrclib 5xx önbelleğe YAZILMAZ; tek
+    istemci + 8 sn zaman aşımı.
+  - **ÖNBELLEK BUDAMA** çalınan dosyanın mtime'ını tazeler (sık dinlenen
+    silinmez), `.part`/`.stream.` geçici dosyalarına dokunmaz. ⚠️ Akış yolu ve
+    devam (resume) yolu mtime'ı tazelemiyor.
+  - **InnerTube `clientVersion` DİNAMİK** (youtube.com'dan, 24 sa önbellek,
+    `dl_state.json`; ÖLÇÜLDÜ: 2.20261116 alındı, arama 20 sonuç). Yoksa sabit.
+  - **EKOLAYZER** (`eq.rs` + `lib/eq.ts`, Ayarlar → Çalma): 5 bant RBJ biquad,
+    ön kazanç + otomatik pay + yumuşak sınırlayıcı, kapalıyken bit-düzeyinde
+    baypas; normal/akış/crossfade yollarının hepsi sarılı, seek'te filtre durumu
+    sıfırlanır. Cihaza özel (`playback.eq`). ⚠️ KULAKLA DENENMEDİ.
+  - **PERFORMANS**: alt bar artık tüm store'a abone değil (`PositionBar` ayrı),
+    söz satırları memo; görünümler `React.lazy` + react/supabase ayrı parça →
+    ana JS 873 kB → 430 kB (uyarı kalktı). Liste/İndirilenler kaydırma konumu
+    oturum boyu hatırlanır (`useScrollRestore`).
+  - **HATALAR**: kısayollar ⌘/Ctrl/Alt ile tetiklenmiyor (⌘M sesi kapatıyor,
+    ⌘Q sırayı açıyordu), basılı boşluk tekrarı yok sayılır; crossfade bayrağı
+    sıradaki yoksa sıfırlanır (sonraki elle çalma istenmeyen geçişle açılıyordu);
+    atlanan parçanın bildirimi sebebiyle 9 sn kalır.
+  - YAPILMADI (gerekçeli): CSP (eksik bir host kapakları/senkronu SESSİZCE
+    kırar, test ortamında görülemiyor), çevrimdışı kapaklar (CSP'ye bağlı),
+    atlama konumu sinyali (rapor da önermedi), `PRAGMA synchronous=NORMAL`
+    (eklenti bağlantı havuzu kullanıyor, pragma tek bağlantıya düşer).
+⚠️ Migration v12 (`lyrics_cache`, `idx_hist_played`) — bulut şeması değişmedi.
+
 v1.9.8 (RADYO AYARLAYICI + KARIŞIM AYARI + TEKRAR TEMİZLEYİCİ + "BURADA ÇAL" + GÜNCELLEME PENCERESİ):
 • **⭐ RADYO AYARLAYICI** (`lib/radioTuner.ts` + `RadioTuner.tsx`, Keşfet →
   "Radyo oluştur"): ≤5 sanatçı + tanıdık/karışık/yeni + sakin/fark etmez/

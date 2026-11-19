@@ -17,7 +17,13 @@ import {
   type Recommendation,
 } from "../lib/recommender";
 import { recordPlay } from "../lib/history";
-import { relinkTrack } from "../lib/playlists";
+import { recommendFor } from "../lib/playlistRadio";
+import {
+  getPlaylistStyle,
+  invalidatePlaylistTaste,
+  isRealPlaylist,
+} from "../lib/playlistProfile";
+import { ensureTrack, relinkTrack } from "../lib/playlists";
 import { noteListen } from "../lib/mood";
 import { publishNowPlaying } from "../lib/nowPlaying";
 import { publishDeviceQueue } from "../lib/deviceQueue";
@@ -95,6 +101,10 @@ interface PlayerState {
   prev: () => void;
   jumpTo: (index: number) => void;
   removeFromQueue: (uid: string) => void;
+  /** Çalanın hemen ardına koy. */
+  playNext: (track: Track) => void;
+  /** Elle eklenenlerin sonuna koy — listenin geri kalanından/önerilerden önce. */
+  addToQueue: (track: Track) => void;
   moveInQueue: (from: number, to: number) => void;
   seek: (ms: number) => void;
   setVolume: (v: number) => void;
@@ -184,7 +194,8 @@ async function fetchAndInterleave(
       ...st.skippedRecIds,
       ...recommendedThisSession,
     ]);
-    const recs = await getRecommendations({
+    // Listeye özel öneri (lib/playlistRadio.ts): tohumlar listeden/tarzından.
+    const recs = await recommendFor({
       playlistId,
       excludeIds: exclude,
       excludeCores: buildExcludeCores(),
@@ -413,6 +424,7 @@ function liteItem(i: QueueItem): QueueItem {
     // uid restore'da yeniden üretilir; yine de saklamak zararsız.
   };
 }
+let seekPersistTimer: ReturnType<typeof setTimeout> | undefined;
 function persistPlaybackState(force = false) {
   const st = usePlayerStore.getState();
   const c = st.current;
@@ -422,8 +434,10 @@ function persistPlaybackState(force = false) {
   lastStateSave = now;
 
   // Cihazlar arası devam: bu cihazın durumunu senkronlanan tabloya yaz
-  // (kendi içinde 15 sn throttle'lı).
-  void publishNowPlaying(c, st.positionMs, st.status === "playing");
+  // (kendi içinde 15 sn throttle'lı). Zorunlu kayıt (oynat/duraklat/atla/
+  // parça değişimi) throttle'ı DELER ve hızlı gönderilir: telefon kumandası
+  // konumu ve durumu bu satırdan okuyor, yoksa 20 sn'ye kadar geride kalıyordu.
+  void publishNowPlaying(c, st.positionMs, st.status === "playing", force);
 
   const isDiscovery =
     st.radioActive && st.radioPlaylistId === DISCOVERY_ID && st.queue.length > 0;
@@ -601,14 +615,28 @@ function recordOutgoing(s: PlayerState, reason: ExitReason) {
     s.radioActive &&
     s.radioPlaylistId === DISCOVERY_ID &&
     s.discoveryFilters.length > 0;
-  recordPlay(s.current, s.positionMs, filtered ? "filter" : null);
+  // ⭐ LİSTE PROFİLİ: dinleme hangi listede olduysa o listeye yazılır (liste
+  // kendi zevkini buradan türetir). `isolate` açıksa (varsayılan) genel zevke
+  // de filtreli dinleme gibi yalnız %20 işler — mobille aynı kural.
+  const listId = isRealPlaylist(s.current.playlistId)
+    ? s.current.playlistId
+    : null;
+  const isolated = !!listId && getPlaylistStyle(listId).isolate;
+  recordPlay(
+    s.current,
+    s.positionMs,
+    filtered || isolated ? "filter" : null,
+    listId
+  );
+  if (listId) invalidatePlaylistTaste(listId);
 
   // ⭐ OTURUM MODU: bu tarzı ne kadar dinledin? (lib/mood.ts)
   // Gezinme gürültüsü yukarıda elendiği için buraya yalnız gerçek dinlemeler
   // ve gerçek atlamalar düşer — mod profili yanlış tuştan bozulmaz.
   if (skipMoodOnce) {
     skipMoodOnce = false; // hata kaynaklı atlama — tarzı cezalandırma
-  } else if (s.current.isRecommendation && s.durationMs > 0) {
+  } else if (!isolated && s.current.isRecommendation && s.durationMs > 0) {
+    // Yalıtılmış liste dinlemesi Keşfet'in oturum modunu kaydırmasın.
     noteListen(s.current.seedArtist, s.positionMs / s.durationMs);
   }
 
@@ -726,7 +754,7 @@ async function refillRadio(playAfter = false) {
       ...st.skippedRecIds,
       ...recommendedThisSession,
     ]);
-    const recs = await getRecommendations({
+    const recs = await recommendFor({
       playlistId,
       // Keşfet'te besleme de AYNI filtreyle devam etmeli; yoksa kuyruk
       // ilerledikçe seçtiğin tür sessizce kaybolurdu.
@@ -799,14 +827,66 @@ async function refillRadio(playAfter = false) {
 /** Karışığa girmeden önceki kuyruk sırası (öğe uid'leri) — kapanınca dönülür. */
 let preShuffleOrder: string[] | null = null;
 
-function reshuffleQueue<T>(queue: T[], keepIndex: number): T[] {
+function reshuffleQueue<T extends { userQueued?: boolean }>(
+  queue: T[],
+  keepIndex: number
+): T[] {
   const head = keepIndex >= 0 ? queue.slice(0, keepIndex + 1) : [];
-  const tail = keepIndex >= 0 ? queue.slice(keepIndex + 1) : [...queue];
+  const rest = keepIndex >= 0 ? queue.slice(keepIndex + 1) : [...queue];
+  // Elle sıraya eklenenler karışmaz, çalanın hemen ardında kalır (Spotify).
+  const pinned = rest.filter((i) => i.userQueued);
+  const tail = rest.filter((i) => !i.userQueued);
   for (let i = tail.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [tail[i], tail[j]] = [tail[j], tail[i]];
   }
-  return [...head, ...tail];
+  return [...head, ...pinned, ...tail];
+}
+
+/**
+ * Henüz çalınmamış, kullanıcının ELLE sıraya eklediği parçalar.
+ * ⭐ Kuyruğu baştan kuran her yol (yeni liste çal, yeni keşif, başka tarz,
+ * böyle devam et) bunları yeni kuyruğa taşır — yoksa "sıraya ekledim"
+ * dediğin şarkı başka bir şeye tıklayınca sessizce kaybolurdu.
+ */
+function pendingUserQueued(): QueueItem[] {
+  const st = usePlayerStore.getState();
+  return st.queue.slice(st.queueIndex + 1).filter((i) => i.userQueued);
+}
+function withPending(items: QueueItem[], idx: number, pending: QueueItem[]): QueueItem[] {
+  if (pending.length === 0) return items;
+  const ids = new Set(pending.map((p) => p.uid));
+  const rest = items.filter((i) => !ids.has(i.uid));
+  return [...rest.slice(0, idx + 1), ...pending, ...rest.slice(idx + 1)];
+}
+
+/**
+ * "Sıradakine ekle" (next) / "Sıraya ekle" (end).
+ * next: çalanın HEMEN ardı. end: elle eklenenlerin sonu — listenin geri
+ * kalanından ve önerilerden ÖNCE (Spotify'ın "Sıradakiler" bölümü gibi).
+ */
+async function insertUserQueued(track: Track, where: "next" | "end"): Promise<void> {
+  // Keşfet/arama parçası tracks'te olmayabilir: oy/dinleme sinyali sayılsın
+  // diye ÖNCE ensureTrack (CLAUDE.md gotcha #13).
+  try {
+    await ensureTrack(track);
+  } catch (e) {
+    console.error("[resonance] sıraya eklenen parça kaydedilemedi:", e);
+  }
+  const st = usePlayerStore.getState();
+  const item: QueueItem = { ...track, uid: crypto.randomUUID(), userQueued: true };
+  if (!st.current || st.queue.length === 0) {
+    usePlayerStore.getState().playNow(track);
+    return;
+  }
+  const q = [...st.queue];
+  let at = st.queueIndex + 1;
+  if (where === "end") {
+    while (at < q.length && q[at].userQueued) at++;
+  }
+  q.splice(at, 0, item);
+  usePlayerStore.setState({ queue: q });
+  scheduleLoadPrefetchOnly();
 }
 
 export const usePlayerStore = create<PlayerState>((set, get) => ({
@@ -889,6 +969,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   error: null,
 
   playNow: (track, queue, playlistId, startMs = 0) => {
+    crossfadeArmed = false; // elle başlatma: geçiş efekti yok
     const items = (queue ?? [track]).map((t) => toQueueItem(t, playlistId));
     const idx = Math.max(0, items.findIndex((i) => i.id === track.id));
     const current = items[idx];
@@ -899,7 +980,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     // Artık mod korunur: "smart" seçiliyken listeden çalmak beslemeyi açar.
     const smart = get().shuffleMode === "smart" && !!playlistId;
     set({
-      queue: items,
+      queue: withPending(items, idx, pendingUserQueued()),
       queueIndex: idx,
       current,
       status: "loading",
@@ -923,7 +1004,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     preShuffleOrder = ordered.map((q) => q.uid);
     const items = reshuffleQueue(ordered, -1);
     set({
-      queue: items,
+      queue: withPending(items, 0, pendingUserQueued()),
       queueIndex: 0,
       current: items[0],
       status: "loading",
@@ -947,7 +1028,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     );
     const first = baseItems[0];
     set({
-      queue: baseItems,
+      queue: withPending(baseItems, 0, pendingUserQueued()),
       queueIndex: 0,
       current: first,
       status: "loading",
@@ -1029,7 +1110,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       );
       const first = items[0];
       set({
-        queue: items,
+        queue: withPending(items, 0, pendingUserQueued()),
         queueIndex: 0,
         current: first,
         status: "loading",
@@ -1125,7 +1206,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
         toRecItem(r, st.radioPlaylistId ?? DISCOVERY_ID)
       );
       set({
-        queue: [...keep, ...items],
+        queue: [...keep, ...pendingUserQueued(), ...items],
         // queueIndex DEĞİŞMEZ: çalan şarkı yerinde kalır.
         discoverySeedArtists: [artist],
       });
@@ -1175,7 +1256,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       );
       const first = items[0];
       set({
-        queue: items,
+        queue: withPending(items, 0, pendingUserQueued()),
         queueIndex: 0,
         current: first,
         status: "loading",
@@ -1439,6 +1520,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   // Kuyrukta belirli bir indekse atla ve çal (Sıra panelinden tıklama).
   jumpTo: (index) => {
+    crossfadeArmed = false;
     const { queue } = get();
     if (index < 0 || index >= queue.length) return;
     recordOutgoing(get(), "jump");
@@ -1454,6 +1536,9 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   },
 
   // Bir öğeyi kuyruktan çıkar (çalan öğe çıkarılamaz). current'ı takip eder.
+  playNext: (track) => void insertUserQueued(track, "next"),
+  addToQueue: (track) => void insertUserQueued(track, "end"),
+
   removeFromQueue: (uid) => {
     const { queue, queueIndex, current } = get();
     if (current?.uid === uid) return;
@@ -1487,6 +1572,10 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   seek: (ms) => {
     set({ positionMs: ms });
     if (isTauri()) invoke("audio_seek", { ms: Math.floor(ms) }).catch(() => {});
+    // Kumanda eden cihaz yeni konumu hemen görsün — ama kaydırıcı sürüklenirken
+    // her adımda DB'ye yazmasın: bırakıldıktan kısa süre sonra bir kez.
+    if (seekPersistTimer) clearTimeout(seekPersistTimer);
+    seekPersistTimer = setTimeout(() => persistPlaybackState(true), 400);
   },
 
   setVolume: (v) => {
@@ -1624,6 +1713,10 @@ export async function initPlayer() {
           crossfadeArmed = true;
           // "ended" olarak say: bu kullanıcının ATLAMASI değil, şarkı bitti.
           usePlayerStore.getState().next("ended");
+          // Sıradaki yoksa (kuyruk sonu, "dur") next hiçbir şey yüklemez —
+          // bayrak açık kalırsa kullanıcının SONRADAN elle başlattığı şarkı
+          // istenmeyen bir geçişle açılırdı.
+          if (usePlayerStore.getState().status !== "loading") crossfadeArmed = false;
         }
       }
     }
@@ -1679,13 +1772,24 @@ export async function initPlayer() {
     usePlayerStore.setState({ status: "loading" });
   });
 
+  const FAILED_TOAST_MS = 9000;
   await listen<string>("playback-error", (e) => {
     consecutiveErrors++;
     const s = usePlayerStore.getState();
     // Bozuk/çalınamayan şarkıyı atla (kuyruk takılmasın); art arda 3 hatadan
     // sonra dur ki sonsuz döngü olmasın.
     if (consecutiveErrors <= 3 && s.queue.length > 1) {
-      useToastStore.getState().show(t("player.trackFailed"), "error");
+      // Sebep de söylensin ve okunacak kadar kalsın (eskiden 4 sn'de giden
+      // genel "çalınamadı" yazıyordu; Windows'ta teşhisi zorlaştırıyordu).
+      const reason = (e.payload ?? "").split("\n")[0].slice(0, 140);
+      useToastStore
+        .getState()
+        .show(
+          t("player.trackFailed") + (reason ? ` — ${reason}` : ""),
+          "error",
+          undefined,
+          FAILED_TOAST_MS
+        );
       suppressMoodSignal();
       s.next();
     } else {
@@ -1728,6 +1832,9 @@ export async function initPlayer() {
     if (key === lastSynced) return;
     lastSynced = key;
     syncMediaSession(st.current, st.status);
+    // Telefon kumandası `now_playing`'den okur: oynat/duraklat ve parça
+    // değişimi beklemeden yazılsın (yüklenirken değil, oturunca).
+    if (st.status === "playing" || st.status === "paused") persistPlaybackState(true);
   });
 
   // Medya tuşları — YEDEK yol (global hotkey). OS medya oturumu kurulamazsa

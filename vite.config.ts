@@ -30,6 +30,16 @@ export default defineConfig(async () => ({
     target: ["es2021", "chrome105", "safari13"],
     minify: "esbuild",
     sourcemap: false,
+    // react ve supabase-js ayrı parçalar: uygulama kodu değişince önbellekteki
+    // büyük bağımlılık parçaları aynı kalır, ana paket küçülür.
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ["react", "react-dom"],
+          supabase: ["@supabase/supabase-js"],
+        },
+      },
+    },
   },
   envPrefix: ["VITE_", "TAURI_"],
 }));

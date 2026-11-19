@@ -15,6 +15,7 @@ import { useLibraryStore } from "../store/useLibraryStore";
 import { useState } from "react";
 import { useT } from "../lib/i18n";
 import TrackDetail from "./TrackDetail";
+import TrackContextMenu from "./TrackContextMenu";
 import AddToPlaylistButton from "./AddToPlaylistButton";
 
 interface TrackRowProps {
@@ -67,6 +68,7 @@ export default function TrackRow({
   const download = useLibraryStore((s) => s.download);
   const remove = useLibraryStore((s) => s.remove);
   const [detail, setDetail] = useState(false);
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
 
   function handleDownloadClick(e: React.MouseEvent) {
     e.stopPropagation();
@@ -80,14 +82,23 @@ export default function TrackRow({
     {detail && (
       <TrackDetail track={track} onClose={() => setDetail(false)} />
     )}
+    {menuAt && (
+      <TrackContextMenu
+        track={track}
+        x={menuAt.x}
+        y={menuAt.y}
+        onDetail={() => setDetail(true)}
+        onClose={() => setMenuAt(null)}
+      />
+    )}
     <div
       onClick={selectable ? onToggleSelect : undefined}
       onDoubleClick={selectable ? undefined : onPlay}
-      // ⭐ Sağ tık → şarkı detayı (kaç kez çaldın, hangi saatlerde, kaç kez
-      // atladın). Ayrı bir menü açmak yerine doğrudan detay: tek eylem var.
+      // Sağ tık → menü: sıradakine ekle / sıraya ekle / şarkı detayı
+      // (detay: kaç kez çaldın, hangi saatlerde, kaç kez atladın).
       onContextMenu={(e) => {
         e.preventDefault();
-        setDetail(true);
+        setMenuAt({ x: e.clientX, y: e.clientY });
       }}
       title={t("trackDetail.open")}
       draggable={draggable}

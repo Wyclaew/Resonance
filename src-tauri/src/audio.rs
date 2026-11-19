@@ -16,6 +16,8 @@ use rodio::cpal::{self, SupportedStreamConfig};
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
 use tauri::{AppHandle, Emitter};
 
+use crate::eq::{EqShared, EqSource};
+
 /// Müzik için kabul edilebilir en düşük örnekleme hızı.
 const MIN_MUSIC_RATE: u32 = 44100;
 
@@ -169,6 +171,8 @@ pub struct Shared {
 pub struct AudioHandle {
     tx: Mutex<Sender<AudioCmd>>,
     pub shared: Arc<Shared>,
+    /// Ekolayzer ayarları: komut yazar, her ses kaynağı (EqSource) okur.
+    pub eq: Arc<EqShared>,
 }
 
 impl AudioHandle {
@@ -191,17 +195,20 @@ pub fn start(app: AppHandle) -> AudioHandle {
     let (tx, rx) = mpsc::channel::<AudioCmd>();
     let shared = Arc::new(Shared::default());
     let shared_t = shared.clone();
+    let eq = Arc::new(EqShared::default());
+    let eq_t = eq.clone();
     std::thread::Builder::new()
         .name("resonance-audio".into())
-        .spawn(move || audio_loop(rx, shared_t, app))
+        .spawn(move || audio_loop(rx, shared_t, app, eq_t))
         .expect("ses thread'i başlatılamadı");
     AudioHandle {
         tx: Mutex::new(tx),
         shared,
+        eq,
     }
 }
 
-fn audio_loop(rx: Receiver<AudioCmd>, shared: Arc<Shared>, app: AppHandle) {
+fn audio_loop(rx: Receiver<AudioCmd>, shared: Arc<Shared>, app: AppHandle, eq: Arc<EqShared>) {
     // ⚠️ SES ÇIKIŞI AÇILIŞTA OLMAYABİLİR. Eskiden burada `return` vardı: cihaz
     // yoksa ses thread'i ölüyor ve uygulama o oturumda BİR DAHA hiçbir şey
     // çalmıyordu. Windows'ta otomatik başlatma ile açılan uygulama, Bluetooth
@@ -327,10 +334,13 @@ fn audio_loop(rx: Receiver<AudioCmd>, shared: Arc<Shared>, app: AppHandle) {
                         || -> anyhow::Result<()> {
                             match &growing {
                                 // Yazımı süren dosya → bekleyen okuyucu.
-                                Some(done) => {
-                                    sink.append(open_growing(&path, done.clone())?)
-                                }
-                                None => sink.append(open_source(&path)?),
+                                // ⭐ EQ her iki yolu da sarar (crossfade'in iki sink'i
+                                // de aynı paylaşılan ayarı okur).
+                                Some(done) => sink.append(EqSource::new(
+                                    open_growing(&path, done.clone())?,
+                                    eq.clone(),
+                                )),
+                                None => sink.append(EqSource::new(open_source(&path)?, eq.clone())),
                             }
                             Ok(())
                         },

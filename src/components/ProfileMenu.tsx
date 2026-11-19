@@ -30,7 +30,7 @@ import { stopSync, subscribeSync, type SyncState } from "../lib/sync/engine";
 // hem de görünüm başlıklarındaki aksiyon düğmeleriyle çakışmıyor.
 //
 // Menü YUKARI açılır (altta yer yok).
-// Avatar YERELDE saklanır — `settings` senkronlanmıyor.
+// Avatar `settings`'te saklanır ve senkronlanır (SYNCED_SETTING_KEYS).
 
 export default function ProfileMenu({ collapsed }: { collapsed: boolean }) {
   const t = useT();

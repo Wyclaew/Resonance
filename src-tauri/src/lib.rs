@@ -2,6 +2,7 @@ mod audio;
 mod browser_login;
 mod commands;
 mod durable;
+mod eq;
 #[cfg(desktop)]
 mod media_controls;
 mod spotify;
@@ -372,6 +373,38 @@ fn migrations() -> Vec<Migration> {
             // ağırlıkla girmemeli (bkz. recommender.ts / taste.ts).
             sql: r#"ALTER TABLE play_history ADD COLUMN context TEXT;"#,
         },
+        Migration {
+            version: 11,
+            description: "playlist_profiles",
+            kind: MigrationKind::Up,
+            // Liste profili. `style_json` = kullanıcının seçtiği tarz;
+            // `play_history.playlist_id` = dinleme hangi listede oldu. Listenin
+            // öğrendikleri ayrı tabloda SAKLANMAZ, buradan türetilir
+            // (bkz. src/lib/playlistProfile.ts).
+            sql: r#"
+            ALTER TABLE playlists ADD COLUMN style_json TEXT;
+            ALTER TABLE play_history ADD COLUMN playlist_id TEXT;
+            "#,
+        },
+        Migration {
+            version: 12,
+            description: "lyrics_cache_and_played_index",
+            kind: MigrationKind::Up,
+            // Söz önbelleği: CİHAZA ÖZEL (senkron TABLES'ında YOK, `cache` gibi).
+            // synced + plain ikisi de NULL = "lrclib'de yok" (olumsuz sonuç, TTL
+            // ile yeniden denenir). `idx_hist_played`: zaman penceresi sorguları
+            // play_history'yi baştan sona taramasın.
+            sql: r#"
+            CREATE TABLE IF NOT EXISTS lyrics_cache (
+                track_id   TEXT PRIMARY KEY,
+                synced     TEXT,
+                plain      TEXT,
+                lyrics_ms  INTEGER NOT NULL DEFAULT 0,
+                fetched_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_hist_played ON play_history(played_at);
+            "#,
+        },
     ]
 }
 
@@ -454,6 +487,7 @@ pub fn run() {
             commands::audio_stop,
             commands::audio_seek,
             commands::audio_set_volume,
+            commands::audio_set_eq,
             commands::update_ytdlp,
             commands::read_log,
             #[cfg(desktop)]

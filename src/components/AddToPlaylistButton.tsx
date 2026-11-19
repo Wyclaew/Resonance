@@ -1,6 +1,7 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import Popover from "./Popover";
-import { ListPlus, Plus, ListMusic } from "lucide-react";
+import { ListPlus, Plus, ListMusic, Check } from "lucide-react";
+import { playlistsContaining } from "../lib/playlists";
 import type { Track } from "../types";
 import { usePlaylistStore } from "../store/usePlaylistStore";
 import { useToastStore } from "../store/useToastStore";
@@ -23,12 +24,30 @@ export default function AddToPlaylistButton({
   const addTrack = usePlaylistStore((s) => s.addTrack);
   const create = usePlaylistStore((s) => s.create);
   const toast = useToastStore((s) => s.show);
+  // Menü açılınca: şarkı hangi listelerde ZATEN var (✓ ile gösterilir).
+  const [containing, setContaining] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    playlistsContaining(track.id)
+      .then((ids) => !cancelled && setContaining(ids))
+      .catch((e) => console.error("[resonance] liste üyeliği okunamadı:", e));
+    return () => {
+      cancelled = true;
+    };
+  }, [open, track.id]);
 
   async function addTo(playlistId: string) {
-    await addTrack(playlistId, track);
+    const added = await addTrack(playlistId, track);
     setOpen(false);
     const pl = playlists.find((p) => p.id === playlistId);
-    toast(t("toast.addedToPlaylist", { name: pl?.name ?? "" }), "info");
+    // ⚠️ Zaten üyeyse addTrackToPlaylist false döner — eskiden yine "eklendi"
+    // deniyordu ve kullanıcı şarkının iki kez eklendiğini sanıyordu.
+    if (added) {
+      toast(t("toast.addedToPlaylist", { name: pl?.name ?? "" }), "info");
+    } else {
+      toast(t("toast.alreadyInPlaylist", { name: pl?.name ?? "" }), "info");
+    }
   }
   async function createAndAdd() {
     const name = t("library.newList");
@@ -84,7 +103,10 @@ export default function AddToPlaylistButton({
                 className="flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-sm text-muted hover:bg-surface-3 hover:text-text"
               >
                 <ListMusic size={14} className="shrink-0 text-faint" />
-                <span className="truncate">{p.name}</span>
+                <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                {containing.has(p.id) && (
+                  <Check size={14} className="shrink-0 text-accent" aria-label={t("addTo.already")} />
+                )}
               </button>
             ))}
           </div>

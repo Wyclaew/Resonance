@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Search, Youtube, Loader2, AlertCircle, Clock, X } from "lucide-react";
+import { Search, Youtube, Loader2, AlertCircle, Clock, X, Music2 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import ViewHeader from "../components/ViewHeader";
 import TrackRow from "../components/TrackRow";
@@ -9,11 +9,41 @@ import { useSettingsStore } from "../store/useSettingsStore";
 import { isLikelySong } from "../lib/recommender";
 import { isTauri } from "../lib/db";
 import { useT } from "../lib/i18n";
+import { searchLibrary, playlistsHint, type LibraryHit } from "../lib/librarySearch";
 
 const DEBOUNCE_MS = 150;
 const MIN_CHARS = 2;
 const HISTORY_KEY = "resonance.searchHistory";
 const HISTORY_MAX = 8;
+
+// ⭐ Küçük bellek içi LRU: aynı sorgu tekrar yazılınca (geri silip yeniden yazma,
+// geçmişten seçme, sekmeler arası dönüş) ağa gitmeden ANINDA gelir. Süreli —
+// YouTube sonuçları dakikalar içinde pek değişmez ama saatlerce eski kalmasın.
+const CACHE_MAX = 40;
+const CACHE_TTL_MS = 10 * 60 * 1000;
+const searchCache = new Map<string, { at: number; res: Track[] }>();
+function cacheGet(key: string): Track[] | null {
+  const hit = searchCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > CACHE_TTL_MS) {
+    searchCache.delete(key);
+    return null;
+  }
+  // LRU: en sona taşı
+  searchCache.delete(key);
+  searchCache.set(key, hit);
+  return hit.res;
+}
+function cachePut(key: string, res: Track[]) {
+  if (res.length === 0) return; // boş sonucu önbellekleme (geçici hata olabilir)
+  searchCache.delete(key);
+  searchCache.set(key, { at: Date.now(), res });
+  while (searchCache.size > CACHE_MAX) {
+    const oldest = searchCache.keys().next().value;
+    if (oldest === undefined) break;
+    searchCache.delete(oldest);
+  }
+}
 
 function loadHistory(): string[] {
   try {
@@ -42,6 +72,9 @@ export default function SearchView() {
     { title: string; artist: string; snippet: string }[]
   >([]);
   const reqId = useRef(0);
+  // ⭐ Kütüphane eşleşmeleri (v1.9.9+): YouTube'u beklemeden, bellekten anında.
+  const [libHits, setLibHits] = useState<LibraryHit[]>([]);
+  const libReq = useRef(0);
 
   const current = usePlayerStore((s) => s.current);
   const status = usePlayerStore((s) => s.status);
@@ -99,11 +132,17 @@ export default function SearchView() {
           if (addToHistory) remember(q);
         }
       } else {
-        const res = await invoke<Track[]>("search_youtube", {
-          query: q,
-          limit: 20,
-          cookiesBrowser: useSettingsStore.getState().cookiesBrowser,
-        });
+        const key = q.toLowerCase();
+        const cached = cacheGet(key);
+        const res =
+          cached ??
+          (await invoke<Track[]>("search_youtube", {
+            query: q,
+            limit: 20,
+            cookiesBrowser: useSettingsStore.getState().cookiesBrowser,
+          }));
+        if (!cached) cachePut(key, res);
+        // Eski (yavaş) yanıt yeni sorgunun sonucunun üstüne yazmasın: id koruması.
         if (id === reqId.current) {
           setResults(res);
           setLyricHits([]);
@@ -131,6 +170,23 @@ export default function SearchView() {
     const handle = setTimeout(() => runSearch(q), DEBOUNCE_MS);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, mode]);
+
+  // Kütüphane araması: debounce YOK (bellek içi), yalnız şarkı kipinde.
+  useEffect(() => {
+    const id = ++libReq.current;
+    const q = query.trim();
+    if (mode !== "track" || q.length < MIN_CHARS) {
+      setLibHits([]);
+      return;
+    }
+    searchLibrary(q)
+      .then((h) => {
+        if (id === libReq.current) setLibHits(h);
+      })
+      .catch(() => {
+        if (id === libReq.current) setLibHits([]);
+      });
   }, [query, mode]);
 
   // Söz sonucundan çalma: lrclib yalnız "hangi şarkı" sorusunu cevaplar,
@@ -258,7 +314,7 @@ export default function SearchView() {
           </div>
         )}
 
-        {!error && !searched && results.length === 0 && !loading && (
+        {!error && !searched && results.length === 0 && libHits.length === 0 && !loading && (
           <div className="flex flex-col items-center justify-center gap-3 py-24 text-faint">
             <Youtube size={40} strokeWidth={1.5} />
             <p className="max-w-sm text-center text-sm leading-relaxed">
@@ -290,6 +346,7 @@ export default function SearchView() {
           searched &&
           results.length === 0 &&
           lyricHits.length === 0 &&
+          libHits.length === 0 &&
           !loading && (
             <p className="py-24 text-center text-sm text-faint">
               {t("search.noResults")}
@@ -317,6 +374,45 @@ export default function SearchView() {
             </span>
           </button>
         ))}
+
+        {/* ⭐ Kütüphanende: aynı şarkı hangi listede, YouTube'a gitmeden gör. */}
+        {libHits.length > 0 && (
+          <div className="mb-3">
+            <div className="px-2 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wider text-faint">
+              {t("search.inLibrary")} · {libHits.length}
+            </div>
+            {libHits.map((h) => (
+              <button
+                key={h.track.id}
+                onClick={() => {
+                  playNow(
+                    h.track,
+                    libHits.map((x) => x.track)
+                  );
+                  if (query.trim()) remember(query.trim());
+                }}
+                className={`flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-surface ${
+                  current?.id === h.track.id ? "text-accent" : ""
+                }`}
+              >
+                <span className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded bg-surface-3 text-faint">
+                  {h.track.thumbnail ? (
+                    <img src={h.track.thumbnail} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <Music2 size={16} />
+                  )}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm">{h.track.title}</span>
+                  <span className="block truncate text-xs text-muted">{h.track.artist}</span>
+                </span>
+                <span className="max-w-[40%] truncate text-[11px] text-faint">
+                  {playlistsHint(h, 3)}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
 
         {results.map((t, i) => (
           <TrackRow

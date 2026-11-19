@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { Fragment, useState, useEffect, useMemo, useRef } from "react";
 import {
   Search,
   Sparkles,
@@ -10,11 +10,14 @@ import {
   CornerDownLeft,
   Brain,
   BarChart3,
+  Music2,
 } from "lucide-react";
 import type { ViewId } from "../types";
 import { useAppStore } from "../store/useAppStore";
 import { usePlaylistStore } from "../store/usePlaylistStore";
+import { usePlayerStore } from "../store/usePlayerStore";
 import { useT, type TrKey } from "../lib/i18n";
+import { searchLibrary, playlistsHint, type LibraryHit } from "../lib/librarySearch";
 
 // Komut paleti (Cmd/Ctrl+K) — görünümler ve çalma listeleri arasında klavyeyle
 // hızlı gezinme. Yaz → filtrele, ok tuşları → seç, Enter → git, Esc → kapat.
@@ -24,6 +27,10 @@ interface Cmd {
   hint: string;
   icon: typeof Search;
   run: () => void;
+  /** Kütüphane şarkısı grubu (başlık gösterilir). */
+  library?: boolean;
+  /** Shift+Enter: sıradakine ekle (yalnız kütüphane şarkıları). */
+  runNext?: () => void;
 }
 
 // label çeviri ANAHTARI (metin değil) — dil değişince paletteki adlar da değişsin.
@@ -45,6 +52,8 @@ export default function CommandPalette() {
   const playlists = usePlaylistStore((s) => s.playlists);
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
+  const [libHits, setLibHits] = useState<LibraryHit[]>([]);
+  const libReq = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -83,22 +92,63 @@ export default function CommandPalette() {
     setSel(0);
   }, [q]);
 
+  // ⭐ Kütüphane şarkıları (≥2 karakter): bellekte aranır, anında. Eski yanıt
+  // yeni sorgunun üstüne yazmasın diye istek sayacı.
+  useEffect(() => {
+    const id = ++libReq.current;
+    if (q.trim().length < 2) {
+      setLibHits([]);
+      return;
+    }
+    searchLibrary(q)
+      .then((h) => {
+        if (id === libReq.current) setLibHits(h);
+      })
+      .catch(() => {
+        if (id === libReq.current) setLibHits([]);
+      });
+  }, [q]);
+
+  const items: Cmd[] = useMemo(() => {
+    const tracks: Cmd[] = libHits.map((h) => ({
+      id: `lib:${h.track.id}`,
+      label: `${h.track.title} — ${h.track.artist}`,
+      hint: playlistsHint(h),
+      icon: Music2,
+      library: true,
+      runNext: () => {
+        usePlayerStore.getState().playNext(h.track);
+        setCommand(false);
+      },
+      run: () => {
+        usePlayerStore.getState().playNow(
+          h.track,
+          libHits.map((x) => x.track)
+        );
+        setCommand(false);
+      },
+    }));
+    return [...filtered, ...tracks];
+  }, [filtered, libHits, setCommand]);
+
   // Seçili öğeyi görünür tut.
   useEffect(() => {
-    const el = listRef.current?.children[sel] as HTMLElement | undefined;
+    const el = listRef.current?.querySelector(`[data-idx="${sel}"]`);
     el?.scrollIntoView({ block: "nearest" });
   }, [sel]);
 
   function onKey(e: React.KeyboardEvent) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setSel((s) => Math.min(filtered.length - 1, s + 1));
+      setSel((s) => Math.min(items.length - 1, s + 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setSel((s) => Math.max(0, s - 1));
     } else if (e.key === "Enter") {
       e.preventDefault();
-      filtered[sel]?.run();
+      const it = items[sel];
+      if (e.shiftKey && it?.runNext) it.runNext();
+      else it?.run();
     } else if (e.key === "Escape") {
       e.preventDefault();
       setCommand(false);
@@ -130,16 +180,23 @@ export default function CommandPalette() {
         </div>
 
         <div ref={listRef} className="max-h-80 overflow-y-auto p-1.5">
-          {filtered.length === 0 ? (
+          {items.length === 0 ? (
             <p className="px-3 py-6 text-center text-sm text-faint">
               {t("palette.noResults")}
             </p>
           ) : (
-            filtered.map((c, i) => {
+            items.map((c, i) => {
               const Icon = c.icon;
+              const firstLib = c.library && !items[i - 1]?.library;
               return (
+                <Fragment key={c.id}>
+                {firstLib && (
+                  <div className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-faint">
+                    {t("palette.libraryGroup")}
+                  </div>
+                )}
                 <button
-                  key={c.id}
+                  data-idx={i}
                   onMouseMove={() => setSel(i)}
                   onClick={() => c.run()}
                   className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm ${
@@ -152,7 +209,7 @@ export default function CommandPalette() {
                   />
                   <span className="flex-1 truncate">{c.label}</span>
                   <span
-                    className={`text-[11px] ${
+                    className={`max-w-[40%] truncate text-[11px] ${
                       i === sel ? "text-bg/70" : "text-faint"
                     }`}
                   >
@@ -160,6 +217,7 @@ export default function CommandPalette() {
                   </span>
                   {i === sel && <CornerDownLeft size={13} className="text-bg/70" />}
                 </button>
+                </Fragment>
               );
             })
           )}

@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Play,
   ListMusic,
-  Pencil,
   Trash2,
+  Palette,
   Check,
   ListOrdered,
   Share2,
@@ -25,6 +25,9 @@ import ViewHeader from "../components/ViewHeader";
 import Mosaic from "../components/Mosaic";
 import Popover from "../components/Popover";
 import DuplicatesDialog from "../components/DuplicatesDialog";
+import PlaylistStyleDialog from "../components/PlaylistStyleDialog";
+import { getPlaylistStyle, hasStyle } from "../lib/playlistProfile";
+import { filterById } from "../lib/filters";
 import { findDuplicates } from "../lib/duplicates";
 import TrackRow from "../components/TrackRow";
 import KarmaControl from "../components/KarmaControl";
@@ -39,6 +42,7 @@ import { useAppStore } from "../store/useAppStore";
 import * as pl from "../lib/playlists";
 import { isTauri } from "../lib/db";
 import { useWindowedList } from "../lib/useWindowedList";
+import { useScrollRestore } from "../lib/useScrollRestore";
 import { onRemoteApplied } from "../lib/sync/engine";
 import { KARMA_EVENT } from "../lib/vote";
 import { LIBRARY_CHANGED_EVENT } from "../lib/placeholderRepair";
@@ -120,6 +124,10 @@ function MultiAddToPlaylist({
       if (ok) n++;
     }
     toast(t("playlist.selectedAdded", { n, name }), "success");
+    // Zaten listede olanlar atlandı — sessiz kalırsa kullanıcı sayıyı yanlış okur.
+    if (n < tracks.length) {
+      toast(t("playlist.selectedSkipped", { n: tracks.length - n, name }), "info");
+    }
     onDone();
   };
 
@@ -236,6 +244,12 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
+  // Düzenleme bir kez biter: girdi DOM'dan kalkarken WebKit blur yayabilir ve
+  // bu olmasa Esc ile iptal edilen ad blur'dan KAYDEDİLİRDİ.
+  const nameEditDone = useRef(false);
+  const [styleOpen, setStyleOpen] = useState(false);
+  // Diyalog kapanınca başlıktaki tarz özeti tazelensin diye sayaç.
+  const [styleRev, setStyleRev] = useState(0);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -336,11 +350,27 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playlistId]);
 
-  async function saveName() {
-    if (!playlistId) return;
-    await rename(playlistId, nameDraft);
-    setMeta((m) => (m ? { ...m, name: nameDraft.trim() || m.name } : m));
+  function startRename() {
+    if (!meta) return;
+    nameEditDone.current = false;
+    setNameDraft(meta.name);
+    setEditing(true);
+  }
+
+  async function finishRename(save: boolean) {
+    if (nameEditDone.current) return;
+    nameEditDone.current = true;
     setEditing(false);
+    const next = nameDraft.trim();
+    if (!save || !playlistId || !meta || !next || next === meta.name) return;
+    const previous = meta.name;
+    setMeta((m) => (m ? { ...m, name: next } : m));
+    try {
+      await rename(playlistId, next);
+    } catch (e) {
+      console.error("[resonance] liste adı kaydedilemedi:", e);
+      setMeta((m) => (m ? { ...m, name: previous } : m));
+    }
   }
 
   async function doDelete() {
@@ -420,6 +450,7 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
     : sorted;
     // Uzun listelerde yalnız görünen satırlar çizilir (bkz. useWindowedList).
   const win = useWindowedList(scrollRef, displayTracks.length);
+  useScrollRestore(scrollRef, `playlist:${playlistId}`, displayTracks.length > 0);
 
   // ── Çoklu seçim yardımcıları ───────────────────────────────────────────
   const toggleSelect = (idx: number, id: string, e: React.MouseEvent) => {
@@ -523,22 +554,36 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
         {/* Kapak mozaiği + başlık: liste sayfası artık kimliği olan bir sayfa. */}
         <div className="flex min-w-[16rem] flex-1 items-end gap-4">
           <Mosaic covers={covers} size={88} rounded="rounded-xl" />
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
+          {/* Başlığa tıkla, yerinde düzenle. Girdi ve düğme aynı yazı + aynı
+              -mx/px değerlerini taşır: geçişte metin yerinden oynamaz. Tek tuş
+              kısayolları (boşluk vb.) App.tsx'te INPUT içinde zaten çalışmaz. */}
           {editing ? (
             <input
               autoFocus
               value={nameDraft}
               onChange={(e) => setNameDraft(e.target.value)}
+              onFocus={(e) => e.currentTarget.select()}
               onKeyDown={(e) => {
-                if (e.key === "Enter") saveName();
-                if (e.key === "Escape") setEditing(false);
+                if (e.key === "Enter") void finishRename(true);
+                if (e.key === "Escape") void finishRename(false);
               }}
-              onBlur={saveName}
-              className="w-full max-w-md rounded-md border border-border-strong bg-surface px-2 py-1 text-2xl font-semibold tracking-tight outline-none"
+              onBlur={() => void finishRename(true)}
+              className="font-display -mx-1.5 block w-full rounded-md bg-surface px-1.5 text-[28px] font-semibold leading-tight outline-none ring-1 ring-border-strong"
             />
           ) : (
-            <h1 className="font-display truncate text-[28px] font-semibold leading-tight">
-              {meta?.name ?? t("playlist.title")}
+            <h1 className="font-display text-[28px] font-semibold leading-tight">
+              {meta ? (
+                <button
+                  onClick={startRename}
+                  title={t("playlist.rename")}
+                  className="-mx-1.5 block max-w-full cursor-text truncate rounded-md px-1.5 text-left transition-colors hover:bg-surface"
+                >
+                  {meta.name}
+                </button>
+              ) : (
+                t("playlist.title")
+              )}
             </h1>
           )}
           <p className="mt-1 truncate text-sm text-muted">
@@ -558,6 +603,27 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
                   className="text-accent underline-offset-2 hover:underline"
                 >
                   {t("dups.badge", { n: dupGroups.length })}
+                </button>
+              </>
+            )}
+            {playlistId && hasStyle(getPlaylistStyle(playlistId)) && (
+              <>
+                {" · "}
+                <button
+                  key={styleRev}
+                  onClick={() => setStyleOpen(true)}
+                  className="text-accent underline-offset-2 hover:underline"
+                >
+                  {(() => {
+                    const st = getPlaylistStyle(playlistId);
+                    return [
+                      ...st.filters.map((id) => {
+                        const f = filterById(id);
+                        return f ? t(f.labelKey) : id;
+                      }),
+                      ...st.styles,
+                    ].join(", ");
+                  })()}
                 </button>
               </>
             )}
@@ -664,14 +730,11 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
             }}
           />
           <button
-            onClick={() => {
-              setNameDraft(meta?.name ?? "");
-              setEditing(true);
-            }}
-            title={t("playlist.rename")}
+            onClick={() => setStyleOpen(true)}
+            title={t("plStyle.button")}
             className="grid h-9 w-9 place-items-center rounded-md text-muted hover:bg-surface hover:text-text"
           >
-            <Pencil size={16} />
+            <Palette size={16} />
           </button>
           <button
             onClick={() => {
@@ -817,6 +880,17 @@ export default function PlaylistView({ playlistId }: { playlistId: string | null
           </>
         )}
       </div>
+
+      {styleOpen && playlistId && meta && (
+        <PlaylistStyleDialog
+          playlistId={playlistId}
+          playlistName={meta.name}
+          onClose={() => {
+            setStyleOpen(false);
+            setStyleRev((n) => n + 1);
+          }}
+        />
+      )}
 
       {dupsOpen && (
         <DuplicatesDialog

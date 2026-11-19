@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, emit } from "@tauri-apps/api/event";
 import Sidebar from "./components/Sidebar";
@@ -13,11 +13,12 @@ import Toasts from "./components/Toasts";
 import MiniPlayer from "./components/MiniPlayer";
 import { getDb, isTauri } from "./lib/db";
 import { onPlaceholders, onRemoteApplied, startSync } from "./lib/sync/engine";
+import { loadPlaylistStyles } from "./lib/playlistProfile";
 import { LIBRARY_CHANGED_EVENT, repairPlaceholderTracks } from "./lib/placeholderRepair";
 import { maybeWeeklyCloudBackup } from "./lib/cloudBackup";
 import { startRemoteControl } from "./lib/remote";
 import { ensureDiscoverWeek } from "./lib/discoverWeek";
-import WrappedStory from "./components/WrappedStory";
+// ⭐ Seyrek kullanılan görünümler tembel yüklenir (aşağıda, view importlarının yanında).
 import UpdateDialog, { type UpdateInfo } from "./components/UpdateDialog";
 import { loadSettings, setSetting } from "./lib/settings";
 import { auditRelinks } from "./lib/relinkAudit";
@@ -38,24 +39,30 @@ import SearchView from "./views/SearchView";
 import LibraryView from "./views/LibraryView";
 import DownloadsView from "./views/DownloadsView";
 import PlaylistView from "./views/PlaylistView";
-import ImportView from "./views/ImportView";
-import SettingsView from "./views/SettingsView";
-import StatsView from "./views/StatsView";
-import TasteView from "./views/TasteView";
-import WrappedView from "./views/WrappedView";
-import ArtistView from "./views/ArtistView";
-import AccountView from "./views/AccountView";
+// ⭐ TEMBEL GÖRÜNÜMLER (v1.9.9): ana paket küçülsün; ilk açılışta yalnız
+// Şu An/Keşfet/Ara/Kütüphane/İndirilenler/Liste gerekir. Suspense yedeği
+// `null` — yerelden yükleme onlarca ms, iskelet göstermek titreme olurdu.
+const ImportView = lazy(() => import("./views/ImportView"));
+const SettingsView = lazy(() => import("./views/SettingsView"));
+const StatsView = lazy(() => import("./views/StatsView"));
+const TasteView = lazy(() => import("./views/TasteView"));
+const WrappedView = lazy(() => import("./views/WrappedView"));
+const ArtistView = lazy(() => import("./views/ArtistView"));
+const AccountView = lazy(() => import("./views/AccountView"));
+const WrappedStory = lazy(() => import("./components/WrappedStory"));
 import { useAppStore } from "./store/useAppStore";
 import { useLibraryStore } from "./store/useLibraryStore";
 import { usePlaylistStore } from "./store/usePlaylistStore";
 import { useSettingsStore } from "./store/useSettingsStore";
+import { parseEq, pushEq } from "./lib/eq";
 import {
   saveMiniGeometry,
   toggleMiniPlayer,
   type MiniCommand,
   type MiniState,
 } from "./lib/miniPlayer";
-import { voteCurrent } from "./lib/vote";
+import { voteCurrent, KARMA_EVENT } from "./lib/vote";
+import { getTrackKarma } from "./lib/playlists";
 
 // ⭐ MİNİ PENCERE: aynı frontend `?mini=1` ile yüklenir ve TAMAMEN farklı
 // (küçük) bir arayüz render eder. Ayrı bir HTML girişi tutmaya gerek yok.
@@ -170,6 +177,17 @@ async function offerRemoteQueue(): Promise<void> {
 let miniEmitAt = 0;
 let miniEmitTimer: ReturnType<typeof setTimeout> | undefined;
 
+// Mini'ye gönderilen karma önbelleği: parça değişince ya da oy/geri al
+// (KARMA_EVENT) olunca tazelenir; ses sürüklerken her yayında DB'ye gitmesin.
+let miniKarmaCache: {
+  id: string;
+  karma: number;
+  lastVoteAt?: number;
+  myVote: -1 | 0 | 1;
+} | null = null;
+// Mini'nin en son oy komutuna verdiğimiz cevap (iyimser arayüz bununla kapanır).
+let miniVoteAck: { seq: number; ok: boolean } | undefined;
+
 async function emitMiniState(): Promise<void> {
   // Kısıtla: ses kaydıracı sürüklenirken saniyede onlarca kez tetikleniyor;
   // her olay TÜM webview'lere serileşip gidiyor. Son durum yine de gider
@@ -181,6 +199,25 @@ async function emitMiniState(): Promise<void> {
     return;
   }
   miniEmitAt = now;
+  // Karma: yalnız oy verilebilir parçada okunur; önbellek parçaya bağlı.
+  const cur = usePlayerStore.getState().current;
+  if (cur?.playlistId && cur.id) {
+    if (miniKarmaCache?.id !== cur.id) {
+      try {
+        const k = await getTrackKarma(cur.playlistId, cur.id);
+        miniKarmaCache = {
+          id: cur.id,
+          karma: k.karma,
+          lastVoteAt: k.lastVoteAt,
+          myVote: k.myVote as -1 | 0 | 1,
+        };
+      } catch {
+        miniKarmaCache = null; // okunamazsa karma göstergesiz devam
+      }
+    }
+  } else {
+    miniKarmaCache = null;
+  }
   const p = usePlayerStore.getState();
   const s = useSettingsStore.getState();
   const c = p.current;
@@ -202,6 +239,14 @@ async function emitMiniState(): Promise<void> {
       s.accentColor,
     lang: s.language,
     error: p.error ?? undefined,
+    karma: miniKarmaCache && miniKarmaCache.id === c?.id ? miniKarmaCache.karma : 0,
+    lastVoteAt:
+      miniKarmaCache && miniKarmaCache.id === c?.id
+        ? miniKarmaCache.lastVoteAt
+        : undefined,
+    myVote:
+      miniKarmaCache && miniKarmaCache.id === c?.id ? miniKarmaCache.myVote : 0,
+    voteAck: miniVoteAck,
   };
   await emit("mini-state", state);
 }
@@ -231,6 +276,13 @@ export default function App() {
 
 function MainApp() {
   const accentColor = useSettingsStore((s) => s.accentColor);
+  // Ekolayzer: ayarlar yüklenince / değişince ses motoruna it (bayat değer
+  // ya da erken çağrı olmasın diye `ready` beklenir; bypass'ta Rust'ta maliyet yok).
+  const eqJson = useSettingsStore((s) => s.eqJson);
+  const settingsReady = useSettingsStore((s) => s.ready);
+  useEffect(() => {
+    if (settingsReady) pushEq(parseEq(eqJson));
+  }, [eqJson, settingsReady]);
   const theme = useSettingsStore((s) => s.theme);
   const lyricsOpen = useAppStore((s) => s.lyricsOpen);
   const queueOpen = useAppStore((s) => s.queueOpen);
@@ -348,6 +400,8 @@ function MainApp() {
         // Bulut senkronu: yalnız yapılandırılmış VE oturum açıksa başlar
         // (aksi halde sessizce hiçbir şey yapmaz — uygulama %100 yerel).
         void startSync();
+        // Liste tarzları belleğe: dinleme kaydı (recordOutgoing) eşzamanlı okur.
+        void loadPlaylistStyles();
         // Telefon uzaktan kumanda olabilsin (tablo yoksa sessizce kapalı).
         void startRemoteControl();
         // ⚠️ SENKRON OTURUMU SESSİZCE DÜŞEBİLİYOR (jeton süresi dolar ya da
@@ -393,8 +447,15 @@ function MainApp() {
           break;
         case "vote":
           // Oy alt bardakiyle AYNI yoldan geçer (ensureTrack + cooldown).
-          void voteCurrent(cmd.dir);
-          break;
+          // Bitince önbellek atılır ve mini'ye güncel karma + onay gider
+          // (reddedilen oy da `ok:false` ile bildirilir → iyimser arayüz geri alınır).
+          void voteCurrent(cmd.dir).then((r) => {
+            miniKarmaCache = null;
+            miniVoteAck = { seq: cmd.seq ?? 0, ok: r.ok };
+            miniEmitAt = 0;
+            void emitMiniState();
+          });
+          return; // yayın yukarıdaki then içinde, oy bittikten sonra
         case "showMain":
           invoke("focus_main_window").catch(() => {});
           break;
@@ -409,6 +470,17 @@ function MainApp() {
     return () => {
       void un.then((f) => f());
     };
+  }, []);
+
+  // Karma değişti (alt bar / mini / geri al): mini'ye taze karmayı ilet.
+  useEffect(() => {
+    const onKarma = () => {
+      miniKarmaCache = null;
+      miniEmitAt = 0;
+      void emitMiniState();
+    };
+    window.addEventListener(KARMA_EVENT, onKarma);
+    return () => window.removeEventListener(KARMA_EVENT, onKarma);
   }, []);
 
   // Mini'ye durum iten efekt: bağımlılıklar mini'nin GÖSTERDİĞİ her alan.
@@ -566,7 +638,8 @@ function MainApp() {
       onRemoteApplied(() => {
         void useLibraryStore.getState().refresh();
         void usePlaylistStore.getState().refresh();
-        void useSettingsStore.getState().load(); // senkronlanan ayarlar (tema/dil…)
+        void loadPlaylistStyles(); // başka cihazda atanan liste tarzı
+        void useSettingsStore.getState().load(); // senkronlanan ayarlar (tema/dil/avatar…)
         void offerRemoteQueue();
       }),
     []
@@ -634,6 +707,12 @@ function MainApp() {
           t.isContentEditable)
       )
         return;
+      // ⚠️ Değiştirici tuşlu kombinasyonlar BİZİM değil: Cmd+M (küçült) aynı
+      // zamanda sesi kapatıyor, Cmd+Q (çık) sırayı açıyor, Ctrl+Space (giriş
+      // kaynağı) çalmayı değiştiriyordu. Shift serbest (Shift+P, Shift+ok).
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      // Boşluk basılı tutulunca tekrar olayı oynat/duraklatı titretmesin.
+      if (e.repeat && e.code === "Space") return;
       const p = usePlayerStore.getState();
       switch (e.code) {
         case "Space":
@@ -710,7 +789,9 @@ function MainApp() {
                 key={`${view}:${activePlaylistId ?? ""}`}
                 className="relative h-full animate-fade-in"
               >
-                <CurrentView />
+                <Suspense fallback={null}>
+                  <CurrentView />
+                </Suspense>
               </div>
               {lyricsOpen && <LyricsPanel />}
               {queueOpen && <QueuePanel />}
@@ -721,7 +802,9 @@ function MainApp() {
       )}
       {update && <UpdateDialog info={update} onLater={() => setUpdate(null)} />}
       {storyYear !== null && (
-        <WrappedStory year={storyYear} onClose={() => setStoryYear(null)} />
+        <Suspense fallback={null}>
+          <WrappedStory year={storyYear} onClose={() => setStoryYear(null)} />
+        </Suspense>
       )}
       {commandOpen && <CommandPalette />}
       {idle && <Screensaver />}

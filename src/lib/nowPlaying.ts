@@ -50,6 +50,9 @@ const WRITE_EVERY_MS = 15_000;
 let lastWrite = 0;
 
 /** Bu cihazın "şu an çalıyor" durumunu yazar (throttle'lı). */
+/** Kullanıcı eyleminden sonra buluta gönderim gecikmesi (normalde 8 sn). */
+const FAST_PUSH_MS = 1000;
+
 export async function publishNowPlaying(
   track: Track | null,
   positionMs: number,
@@ -95,7 +98,8 @@ export async function publishNowPlaying(
         ]
       );
     }
-    notifyLocalChange();
+    // Zorunlu yazım = kullanıcı eylemi → kumanda eden cihaz hemen görsün.
+    notifyLocalChange(force ? FAST_PUSH_MS : undefined);
   } catch (e) {
     console.error("[resonance] now_playing yazılamadı:", e);
   }

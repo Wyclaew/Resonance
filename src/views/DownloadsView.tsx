@@ -3,6 +3,7 @@ import { HardDriveDownload } from "lucide-react";
 import ViewHeader from "../components/ViewHeader";
 import { useAppStore } from "../store/useAppStore";
 import { useWindowedList } from "../lib/useWindowedList";
+import { useScrollRestore } from "../lib/useScrollRestore";
 import TrackRow from "../components/TrackRow";
 import { useLibraryStore } from "../store/useLibraryStore";
 import { useT } from "../lib/i18n";
@@ -19,6 +20,7 @@ export default function DownloadsView() {
   const navigate = useAppStore((s) => s.navigate);
   const scrollRef = useRef<HTMLDivElement>(null);
   const win = useWindowedList(scrollRef, downloads.length);
+  useScrollRestore(scrollRef, "downloads", downloads.length > 0);
 
   useEffect(() => {
     refresh();

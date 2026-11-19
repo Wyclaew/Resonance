@@ -88,6 +88,11 @@ Sıra kabaca değer/emek oranına göre.
 17. **Ekran ortası güncelleme penceresi** — mobilin kendi güncelleme yolu
     varsa aynı davranış: "sonra" yalnız o oturum, her açılışta yeniden sor.
 
+18. **Liste profili SENKRONU** (v1.9.9): mobilde zaten var ama yerel —
+    `playlists.style_json` + `play_history.playlist_id` sözleşmesine geçmeli
+    (`Resonance Mobil/docs/MASAUSTU-NOTLARI.md`).
+19. **Söz sürüm eşleşmesi + elle kaydırma** (v1.9.9, `pick_lyrics`).
+
 ⛔ **Mobil planına GİRMEYENLER (yapılamaz/kapsam dışı):**
 - Lossless / 24-bit-192 kHz ve Dolby Atmos: kaynak YouTube (en iyi ~130 kbps
   AAC / ~160 kbps Opus); "hi-res" diye sunulacak bir veri YOK. Atmos + kafa
@@ -273,7 +278,7 @@ Masaüstünde çalışan ve mobilde **yeniden yazılmaması gereken** parçalar:
 | Dinleme özeti / istatistik | `src/views/StatsView.tsx` sorguları | Saf SQL; RN'de aynı sorgular, farklı görsel. |
 | **Çapraz cihaz devam** | `src/lib/nowPlaying.ts` + `now_playing` tablosu | ⭐ Mobilin en görünür kazancı: PC'de bırak, telefonda devam et. Şema HAZIR. |
 | **Cihazlar arası KUYRUK** | `src/lib/deviceQueue.ts` + `device_queue` tablosu | ⭐ v1.8.0. now_playing yalnız TEK parçayı taşıyordu; bu tablo Keşfet partisinin tamamını taşır (parçalar + index + filtreler + tohumlar). Mobil açılışta `latestRemoteQueue()` çağırıp PC'deki sırayı DURAKLATILMIŞ kurmalı. |
-| **Seçmeli ayar senkronu** | `settings` tablosu + `SYNCED_SETTING_KEYS` | ⭐ v1.8.0. Tablonun tamamı DEĞİL, beyaz liste senkronlanır (tema/dil/öneri ayarları). Mobil aynı beyaz listeyi kullanmalı; `playback.savedVolume`, `profile.avatarDataUrl`, `yt.cookiesBrowser`, `spotify.*` ASLA senkronlanmaz. |
+| **Seçmeli ayar senkronu** | `settings` tablosu + `SYNCED_SETTING_KEYS` | ⭐ v1.8.0. Tablonun tamamı DEĞİL, beyaz liste senkronlanır (tema/dil/öneri ayarları). Mobil aynı beyaz listeyi kullanmalı; `playback.savedVolume`, `yt.cookiesBrowser`, `spotify.*` ASLA senkronlanmaz; `profile.avatarDataUrl` listededir. |
 | **Elle ağırlık kararı** | `src/lib/prefs.ts` + `artist_prefs` tablosu | ⭐ v1.8.0. "Daha çok / daha az öner". Senkronlanır (karar, türetilmiş veri değil). Mobil UI'da sanatçı satırında ± düğmesi olmalı. |
 | **Sanatçı komşuluk grafiği** | `src/lib/graph.ts` + `artist_edges` | ⭐ v1.8.0 ama ⛔ SENKRONLANMAZ (sayaç → LWW ezer). Mobil kendi grafiğini kendi radyo sonuçlarından kurar; veri bedava. |
 | **Sanatçı tür etiketleri** | `src/lib/tags.ts` + `artist_tags` | ⭐ v1.8.0, yerel. Tür alanı olmadığı için "şu anki modun: sakin · rock" bilgisinin TEK kaynağı. Filtre havuzu çekildikçe birikir. |

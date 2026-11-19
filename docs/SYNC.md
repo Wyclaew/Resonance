@@ -158,7 +158,7 @@ cihaza özel şeyler içeriyor; seçmeli senkron ileride eklenebilir.
 | Tablo | Senkron | Neden |
 | --- | --- | --- |
 | `artist_prefs` | ✅ | "Daha çok / daha az öner" — kullanıcı KARARI (türetilmiş veri değil). Anahtar sanatçı adı → cihazdan bağımsız birleşir. |
-| `settings` | ✅ **seçmeli** | Yalnız `SYNCED_SETTING_KEYS` beyaz listesi (tema, dil, vurgu, öneri ayarları, kalite, ön yükleme, ses eşitleme). ⛔ Dışarıda: `playback.resumeState`, `playback.savedVolume`, `profile.avatarDataUrl`, `yt.cookiesBrowser`, `spotify.*`, `app.onboardingDone`. |
+| `settings` | ✅ **seçmeli** | Yalnız `SYNCED_SETTING_KEYS` beyaz listesi (tema, dil, vurgu, öneri ayarları, kalite, ön yükleme, ses eşitleme, profil fotoğrafı). ⛔ Dışarıda: `playback.resumeState`, `playback.savedVolume`, `yt.cookiesBrowser`, `spotify.*`, `app.onboardingDone`. |
 | `device_queue` | ✅ | Cihaz başına TÜM kuyruk (Keşfet partisi dahil). `now_playing` yalnız tek parça taşıyordu → "Windows'taki Keşfet Mac'e gelmedi" sorunu buydu. |
 | `artist_edges` | ⛔ | SAYAÇ. LWW iki cihazın saydığını ezer, toplam kaybolur. Veri bedava yeniden üretilir (her radyo çağrısı). |
 | `artist_tags` | ⛔ | Aynı gerekçe (sayaç). |

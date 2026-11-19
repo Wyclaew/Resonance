@@ -14,6 +14,16 @@ import { isBlocked, loadBlockedArtists } from "./blocked";
 import { loadArtistPrefs, prefWeight } from "./prefs";
 import { loadGraph, neighborSeeds, noteRadioResults } from "./graph";
 import { noteGenrePool } from "./tags";
+import {
+  artistKey,
+  completionBoost,
+  currentTasteEpoch,
+  fatigueFactor,
+  isComplete,
+  type ArtistHabit,
+} from "./tasteParams";
+
+const DAY_MS = 24 * 3600 * 1000;
 
 // Resonance öneri motoru (M4).
 // "Hangi gün/saat hangi şarkıya oy verdin" sinyalinden sanatçı yakınlığı
@@ -332,6 +342,8 @@ export interface Signals {
   trackKarma: Map<string, number>;
   /** Parçanın ŞU ANKİ gün/saate en iyi uyumu (0..1). */
   trackContext: Map<string, number>;
+  /** Sanatçı başına dinleme alışkanlığı (tamamlama oranı + bıkkınlık). */
+  artistHabit: Map<string, ArtistHabit>;
 }
 
 /**
@@ -342,19 +354,71 @@ export interface Signals {
  * hesabı kopyalasaydı iki kod yolu kaçınılmaz olarak birbirinden sapardı ve
  * ekranda gösterilen model, öneriyi üreten model olmazdı.
  */
+/**
+ * ⭐ ÖNBELLEKLİ (v1.9.9): her öneri partisi (besleme, Keşfet, prewarm, Zevk
+ * sayfası) eskiden TÜM geçmişi baştan tarıyordu. Aynı saat/gün/yarı ömür için
+ * 60 sn içinde ve sinyaller değişmediyse (oy, dinleme, senkron →
+ * `bumpTasteEpoch`) aynı sonuç döner.
+ */
+const SIGNALS_TTL_MS = 60_000;
+let signalsCache: { key: string; at: number; value: Signals } | null = null;
+
 export async function buildSignals(
   halfLifeDays: number,
   curHour: number = new Date().getHours(),
   curDow: number = new Date().getDay()
+): Promise<Signals> {
+  const key = `${halfLifeDays}|${curHour}|${curDow}|${currentTasteEpoch()}`;
+  const now = Date.now();
+  if (signalsCache && signalsCache.key === key && now - signalsCache.at < SIGNALS_TTL_MS) {
+    return signalsCache.value;
+  }
+  const value = await buildSignalsUncached(halfLifeDays, curHour, curDow);
+  signalsCache = { key, at: now, value };
+  return value;
+}
+
+/**
+ * Sanatçının TEMSİLİ adı: aynı `artistKey`'e düşen yazımlardan kütüphanede en
+ * sık geçeni. Zevk haritaları bununla anahtarlanır → ikizler birleşir, Zevk
+ * sayfasında da okunur bir ad görünür. buildSignals her turda tazeler.
+ */
+let repByKey = new Map<string, string>();
+export function rep(raw: string): string {
+  return repByKey.get(artistKey(raw)) ?? (raw ?? "").trim();
+}
+async function refreshArtistReps(db: Awaited<ReturnType<typeof getDb>>): Promise<void> {
+  try {
+    const rows = await db.select<{ artist: string; n: number }[]>(
+      `SELECT artist, COUNT(*) AS n FROM tracks WHERE artist <> '' GROUP BY artist`
+    );
+    const best = new Map<string, { name: string; n: number }>();
+    for (const r of rows) {
+      const k = artistKey(r.artist);
+      const cur = best.get(k);
+      if (!cur || r.n > cur.n) best.set(k, { name: r.artist.trim(), n: r.n });
+    }
+    repByKey = new Map([...best].map(([k, v]) => [k, v.name]));
+  } catch (e) {
+    console.error("[resonance] sanatçı adları birleştirilemedi:", e);
+  }
+}
+
+async function buildSignalsUncached(
+  halfLifeDays: number,
+  curHour: number,
+  curDow: number
 ): Promise<Signals> {
   if (!isTauri()) {
     return {
       artistAffinity: new Map(),
       trackKarma: new Map(),
       trackContext: new Map(),
+      artistHabit: new Map(),
     };
   }
   const db = await getDb();
+  await refreshArtistReps(db);
   const now = Date.now();
   const opts = { halfLifeDays };
 
@@ -385,7 +449,7 @@ export async function buildSignals(
       v.value *
       decayWeight(now - v.created_at, opts.halfLifeDays) *
       contextWeight(v.hour, v.dow, curHour, curDow);
-    artistAffinity.set(v.artist, (artistAffinity.get(v.artist) ?? 0) + w);
+    artistAffinity.set(rep(v.artist), (artistAffinity.get(rep(v.artist)) ?? 0) + w);
     trackKarma.set(v.track_id, (trackKarma.get(v.track_id) ?? 0) + w);
     if (v.value > 0) bumpContext(v.track_id, contextMatch(v.hour, v.dow, curHour, curDow));
   }
@@ -403,17 +467,26 @@ export async function buildSignals(
   const PLAYLIST_SIGNAL = 0.6;
   try {
     const plRows = await db.select<
-      { artist: string; added_at: number }[]
+      { artist: string; added_at: number; style_json: string | null }[]
     >(
-      `SELECT t.artist, pt.added_at
-       FROM playlist_tracks pt JOIN tracks t ON t.id = pt.track_id
-       WHERE t.artist <> '' AND pt.deleted = 0`
+      `SELECT t.artist, pt.added_at, p.style_json
+       FROM playlist_tracks pt
+       JOIN tracks t ON t.id = pt.track_id
+       JOIN playlists p ON p.id = pt.playlist_id
+       WHERE t.artist <> '' AND pt.deleted = 0 AND p.deleted = 0`
     );
     for (const p of plRows) {
+      // ⭐ TARZ ATANMIŞ + YALITILMIŞ liste ("spor listem: phonk") genel zevki
+      // tam ağırlıkla beslemesin — kullanıcı: "spor listemde metal var diye
+      // genel zevkim bozulmasın". Tarzsız listeler senin zevkindir, tam sayılır.
+      const style = p.style_json ? parseStyleLoose(p.style_json) : null;
+      const isolatedStyled =
+        !!style && style.isolate && (style.filters.length > 0 || style.styles.length > 0);
       const w =
         PLAYLIST_SIGNAL *
+        (isolatedStyled ? FILTERED_PLAY_WEIGHT : 1) *
         decayWeight(now - p.added_at, opts.halfLifeDays * 4);
-      artistAffinity.set(p.artist, (artistAffinity.get(p.artist) ?? 0) + w);
+      artistAffinity.set(rep(p.artist), (artistAffinity.get(rep(p.artist)) ?? 0) + w);
     }
   } catch {
     /* yoksay */
@@ -437,7 +510,11 @@ export async function buildSignals(
     >(
       `SELECT h.track_id, h.ms_played, h.played_at, h.hour, h.dow,
               t.artist, t.duration_ms, h.context
-       FROM play_history h JOIN tracks t ON t.id = h.track_id`
+       FROM play_history h JOIN tracks t ON t.id = h.track_id
+       WHERE h.played_at > $1`,
+      // 8 yarı ömürden eski dinleme ağırlığın %0.4'ünden azını taşır: taramaya
+      // gerek yok (idx_hist_played kullanır; yıllar içinde tablo büyüdükçe önemli).
+      [now - 8 * opts.halfLifeDays * DAY_MS]
     );
     // ⭐ TEKRAR DİNLEME (v1.8.0) — model bunu HİÇ GÖRMÜYORDU.
     // Her dinleme ayrı satır olarak aynı +0.4'ü veriyordu; yani "bu şarkıyı
@@ -449,7 +526,6 @@ export async function buildSignals(
       string,
       Map<number, { count: number; lastAt: number; artist: string }>
     >();
-    const DAY_MS = 24 * 3600 * 1000;
 
     for (const p of plays) {
       const ratio =
@@ -470,7 +546,7 @@ export async function buildSignals(
             s *
             decayWeight(now - p.played_at, opts.halfLifeDays) *
             contextWeight(p.hour, p.dow, curHour, curDow);
-          artistAffinity.set(p.artist, (artistAffinity.get(p.artist) ?? 0) + w);
+          artistAffinity.set(rep(p.artist), (artistAffinity.get(rep(p.artist)) ?? 0) + w);
         }
         continue;
       }
@@ -508,7 +584,7 @@ export async function buildSignals(
         signal *
         decayWeight(now - p.played_at, opts.halfLifeDays) *
         contextWeight(p.hour, p.dow, curHour, curDow);
-      artistAffinity.set(p.artist, (artistAffinity.get(p.artist) ?? 0) + w);
+      artistAffinity.set(rep(p.artist), (artistAffinity.get(rep(p.artist)) ?? 0) + w);
       trackKarma.set(p.track_id, (trackKarma.get(p.track_id) ?? 0) + w);
       // Yalnız GERÇEKTEN dinlenmişler favori dönüşüne aday olabilir (atlananlar değil).
       if (ratio > 0.7) {
@@ -528,8 +604,8 @@ export async function buildSignals(
           REPEAT_BONUS * extra * decayWeight(now - info.lastAt, opts.halfLifeDays);
         trackKarma.set(trackId, (trackKarma.get(trackId) ?? 0) + w);
         artistAffinity.set(
-          info.artist,
-          (artistAffinity.get(info.artist) ?? 0) + w
+          rep(info.artist),
+          (artistAffinity.get(rep(info.artist)) ?? 0) + w
         );
       }
     }
@@ -537,7 +613,86 @@ export async function buildSignals(
     /* play_history yoksa yoksay */
   }
 
-  return { artistAffinity, trackKarma, trackContext };
+  // ⭐ İNDİRME = BEYAN (v1.9.9): çevrimdışı için indirmek "bunu kalıcı
+  // istiyorum" demektir. Bağlamsız ve zayıf (+0.5, oydan az), uzun yarı ömür.
+  // `cache` cihaza özel (senkronlanmaz) → sinyal de yalnız bu cihazda.
+  const DOWNLOAD_SIGNAL = 0.5;
+  try {
+    const dl = await db.select<{ artist: string; added_at: number }[]>(
+      `SELECT t.artist, t.added_at
+       FROM cache c JOIN tracks t ON t.id = c.track_id
+       WHERE c.downloaded = 1 AND t.artist <> ''`
+    );
+    for (const d of dl) {
+      const w = DOWNLOAD_SIGNAL * decayWeight(now - d.added_at, opts.halfLifeDays * 4);
+      artistAffinity.set(rep(d.artist), (artistAffinity.get(rep(d.artist)) ?? 0) + w);
+    }
+  } catch {
+    /* cache tablosu/sütunu yoksa (mobil) yoksay */
+  }
+
+  return {
+    artistAffinity,
+    trackKarma,
+    trackContext,
+    artistHabit: await buildArtistHabits(db, now),
+  };
+}
+
+/** Liste tarz JSON'unu bağımlılıksız okur (playlistProfile ile aynı biçim). */
+function parseStyleLoose(raw: string): {
+  filters: string[];
+  styles: string[];
+  isolate: boolean;
+} | null {
+  try {
+    const p = JSON.parse(raw) as {
+      filters?: unknown;
+      styles?: unknown;
+      isolate?: unknown;
+    };
+    return {
+      filters: Array.isArray(p.filters) ? (p.filters as string[]) : [],
+      styles: Array.isArray(p.styles) ? (p.styles as string[]) : [],
+      isolate: p.isolate !== false,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ⭐ ALIŞKANLIK (v1.9.9): yakınlık "ne kadar seviyorum"u söyler, bu ise
+ * "çıkınca gerçekten dinliyor muyum" ve "son günlerde ondan bıktım mı"yı.
+ * Son 90 gün; filtreli/yalıtılmış dinlemeler hariç (onları sen seçmedin).
+ */
+async function buildArtistHabits(
+  db: Awaited<ReturnType<typeof getDb>>,
+  now: number
+): Promise<Map<string, ArtistHabit>> {
+  const habits = new Map<string, ArtistHabit>();
+  const HABIT_WINDOW_MS = 90 * DAY_MS;
+  const FATIGUE_WINDOW_MS = 3 * DAY_MS;
+  try {
+    const rows = await db.select<
+      { artist: string; ms_played: number; duration_ms: number; played_at: number }[]
+    >(
+      `SELECT t.artist, h.ms_played, t.duration_ms, h.played_at
+       FROM play_history h JOIN tracks t ON t.id = h.track_id
+       WHERE h.played_at > $1 AND COALESCE(h.context, '') <> 'filter'`,
+      [now - HABIT_WINDOW_MS]
+    );
+    for (const r of rows) {
+      const h = habits.get(rep(r.artist)) ?? { plays: 0, completes: 0, recent: 0 };
+      h.plays += 1;
+      if (isComplete(r.ms_played, r.duration_ms)) h.completes += 1;
+      if (now - r.played_at < FATIGUE_WINDOW_MS) h.recent += 1;
+      habits.set(rep(r.artist), h);
+    }
+  } catch {
+    /* yoksay */
+  }
+  return habits;
 }
 
 async function computeRecommendations(
@@ -558,7 +713,7 @@ async function computeRecommendations(
     loadArtistPrefs(),
     loadGraph(),
   ]);
-  const { artistAffinity, trackKarma, trackContext } = await buildSignals(
+  const { artistAffinity, trackKarma, trackContext, artistHabit } = await buildSignals(
     opts.halfLifeDays,
     curHour,
     curDow
@@ -607,6 +762,9 @@ async function computeRecommendations(
   // Aynı şarkının farklı versiyon/kaydını (cover, sped up, official/audio…) da
   // ele: mevcut liste + öneriler arası "versiyon çekirdeği" tekrar etmesin.
   const takenCores = new Set<string>(opts.excludeCores ?? []);
+  // Açıkça beğenilmemiş şarkılar ve sürümleri bir daha HİÇ önerilmez (45 günlük
+  // tekrar engeli bittikten sonra da) — bkz. dislikedCores.
+  for (const c of await dislikedCores()) takenCores.add(c);
   const plTrackRows = await db.select<{ title: string; artist: string }[]>(
     `SELECT t.title, t.artist
      FROM playlist_tracks pt JOIN tracks t ON t.id = pt.track_id
@@ -724,7 +882,7 @@ async function computeRecommendations(
     >();
     for (const t of libTracks) {
       const score =
-        (trackKarma.get(t.id) ?? 0) + (artistAffinity.get(t.artist) ?? 0);
+        (trackKarma.get(t.id) ?? 0) + (artistAffinity.get(rep(t.artist)) ?? 0);
       if (score <= 0) continue;
       const key = t.artist.toLowerCase();
       const prev = bestPerArtist.get(key);
@@ -775,8 +933,14 @@ async function computeRecommendations(
     //                     davranıştan çıkarım yapar; bu, doğrudan söylenmiş
     //                     olandır → en son çarpan, hepsini ezebilir.
     const seedWeight = (a: string) => {
+      const habit = artistHabit.get(rep(a));
       const base =
-        moodMultiplier(a) * tasteBoost(a) * acceptanceBoost(a) * prefWeight(a);
+        moodMultiplier(a) *
+        tasteBoost(a) *
+        acceptanceBoost(a) *
+        prefWeight(a) *
+        completionBoost(habit) *
+        fatigueFactor(habit);
       // Tarz kilidi: kilitli sanatçı neredeyse kesin seçilsin (×8), ama diğer
       // katmanlar tamamen susturulmasın — çeşitlilik bir miktar kalsın.
       return opts.lockedSeedArtist &&
@@ -789,7 +953,7 @@ async function computeRecommendations(
 
     // Zaten sevilen sanatçılar — yeni sanatçı keşiflerini işaretlemek için.
     const knownArtists = new Set(
-      [...artistAffinity.keys()].map((a) => a.toLowerCase())
+      [...artistAffinity.keys()].map((a) => artistKey(a))
     );
 
     const needed = opts.limit - recs.length;
@@ -802,7 +966,7 @@ async function computeRecommendations(
     const seeds: RadioSeed[] = [];
     const seenSeedArtist = new Set<string>();
     const pushSeed = (s: RadioSeed) => {
-      const k = s.artist.toLowerCase();
+      const k = artistKey(s.artist);
       if (!s.sourceId || seenSeedArtist.has(k)) return;
       seenSeedArtist.add(k);
       seeds.push(s);
@@ -859,7 +1023,8 @@ async function computeRecommendations(
       // OLAN ve puanı > 0 sanatçılardan kuruluyor → model ancak zaten tanıdığı
       // sanatçıların radyosunu açabiliyordu. Havuzu kütüphanenin dışına taşıyan
       // tek yol bu. Tohum videosu grafikteki `sample_id`'den gelir.
-      const nbExclude = new Set(seenSeedArtist);
+      // Grafik komşuları ham küçük harf adla tutulur (graph.ts).
+      const nbExclude = new Set(seeds.map((x) => x.artist.trim().toLowerCase()));
       for (const a of opts.excludeSeedArtists ?? []) nbExclude.add(a);
       const nbPicked = neighborSeeds(artistAffinity, nbExclude)
         .slice(0, 30)
@@ -881,7 +1046,7 @@ async function computeRecommendations(
         pool.filter(
           (x) =>
             isProbeCandidate(x.t.artist) &&
-            !seenSeedArtist.has(x.t.artist.toLowerCase())
+            !seenSeedArtist.has(artistKey(x.t.artist))
         ),
         1,
         (x) => x.score
@@ -922,7 +1087,7 @@ async function computeRecommendations(
                     r,
                     key:
                       -Math.log(Math.random() || 1e-9) /
-                      (1 + affinityScale * Math.max(0, artistAffinity.get(r.artist) ?? 0)),
+                      (1 + affinityScale * Math.max(0, artistAffinity.get(rep(r.artist)) ?? 0)),
                   }))
                   .sort((a, b) => a.key - b.key)
                   .map((x) => x.r);
@@ -969,6 +1134,11 @@ async function computeRecommendations(
     // Sanatçı sınırı (2): radyonun BAŞI seed sanatçının kendi şarkılarıyla dolu
     // (Tarkan radyosunda ilk 3 parça Tarkan) → sınır olmadan kuyruk ona döner.
     const radioArtistCount = new Map<string, number>();
+    // ⭐ FİLTRE UNUTULMASIN (v1.9.9): dar bir türde 14 günlük tekrar engeli de
+    // havuzu bitirebiliyor; o zaman kuyruk kısalıyor ve besleme boş dönüyordu.
+    // İkinci tur engeli GEVŞETİR — tür dışına çıkmak yerine türün içinde
+    // daha önce önerilmiş (ama bu oturumda çalınmamış) parçalar gelir.
+    for (const allowRecent of filtered ? [false, true] : [false]) {
     const cursors = radios.map(() => 0);
     let exhausted = false;
     while (recs.length < opts.limit && !exhausted) {
@@ -981,7 +1151,7 @@ async function computeRecommendations(
           const r = results[cursors[ri]++];
           if (taken.has(r.id)) continue;
           // Yeni keşifler 45-gün tekrar engeline TABİ (favoriler değil, bkz. yukarı).
-          if (recentlyRecommended.has(r.id)) continue;
+          if (!allowRecent && recentlyRecommended.has(r.id)) continue;
           if (r.sourceId === seed.sourceId) continue; // seed'in kendisi
           if (playlistKeys.has(normKey(r.title, r.artist))) continue;
           if (takenCores.has(songCore(r.title, r.artist))) continue; // versiyon kopyası
@@ -991,7 +1161,7 @@ async function computeRecommendations(
           // Parti başına SANATÇI BAŞINA 1 PARÇA (eskiden 2'ydi; kullanıcı
           // "2 sanatçıdan 4 şarkı geldi" dedi). effectiveArtist: YT Music liste
           // girdilerinde artist alanı KANAL adıdır, gerçek sanatçı başlıkta.
-          const a = effectiveArtist(r).toLowerCase();
+          const a = artistKey(effectiveArtist(r));
           if ((radioArtistCount.get(a) ?? 0) >= 1) continue;
           radioArtistCount.set(a, (radioArtistCount.get(a) ?? 0) + 1);
           const newArtist = !knownArtists.has(a);
@@ -1010,6 +1180,7 @@ async function computeRecommendations(
           break; // sıra diğer radyoya
         }
       }
+    }
     }
 
     // Soğuk başlangıç YEDEĞİ: hiç sinyal yok (yeni kullanıcı) ya da radyolar
@@ -1166,5 +1337,30 @@ async function addSearchFallback(
       takenCores.add(songCore(r.title, r.artist));
       added++;
     }
+  }
+}
+
+/**
+ * ⭐ BEĞENMEDİĞİN ŞARKI GERİ GELMESİN (v1.9.9): net oyu negatif olan
+ * parçaların şarkı çekirdekleri (`songCore`). Eskiden eksi oy yalnız karma ve
+ * sanatçı yakınlığını düşürüyordu; 45 günlük tekrar engeli bitince aynı şarkı
+ * başka bir radyodan yeniden geliyordu. Yalnız AÇIK oy sayılır (dinleme değil):
+ * atlamak "şimdi istemiyorum" olabilir, eksi oy ise karardır.
+ */
+export async function dislikedCores(): Promise<Set<string>> {
+  if (!isTauri()) return new Set();
+  try {
+    const db = await getDb();
+    const rows = await db.select<{ title: string; artist: string }[]>(
+      `SELECT t.title, t.artist
+       FROM votes v JOIN tracks t ON t.id = v.track_id
+       WHERE v.deleted = 0
+       GROUP BY v.track_id
+       HAVING SUM(v.value) < 0`
+    );
+    return new Set(rows.map((r) => songCore(r.title, r.artist)));
+  } catch (e) {
+    console.error("[resonance] beğenilmeyen şarkılar okunamadı:", e);
+    return new Set();
   }
 }
